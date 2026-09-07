@@ -1,9 +1,15 @@
+import { Suspense, lazy, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { localeOf, shortDate } from '../../lib/day.js';
 import { workTypeByKey, workTypeLabel } from './data.js';
 import { formatDistance, mapsUrl } from './track/track.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
+
+/* Leaflet is most of a megabyte. A list of records that nobody opens a track
+   from never downloads a byte of it — same lazy import GpsTrack and the
+   Verify Hub use. */
+const TrackMap = lazy(() => import('./track/TrackMap.jsx'));
 
 /* "Today", "Yesterday", then the date. Most of a list is the last day or two,
    and a Field Conductor reads those faster as words than as 2026-08-22.
@@ -49,6 +55,8 @@ export default function RecordCard({
 }) {
   const { t, lang } = useLang();
   const wt = workTypeByKey(r.work_type);
+  const [mapOpen, setMapOpen] = useState(false);
+  const hasTrack = !!(r.gps_track && r.gps_track.length);
 
   return (
     <div
@@ -57,23 +65,42 @@ export default function RecordCard({
       <div className="flex items-start gap-3">
         {/* The job's own colour and icon, so the list is scanned
             the same way the week above it is. */}
-        <span className={`w-[38px] h-[38px] rounded-xl grid place-items-center shrink-0 ${tintOf(r.work_type).bg}`}>
-          <WorkIcon workKey={r.work_type} className={`w-[22px] h-[22px] ${tintOf(r.work_type).fg}`} />
+        <span className={`w-11 h-11 rounded-2xl grid place-items-center shrink-0 ${tintOf(r.work_type).bg}`}>
+          <WorkIcon workKey={r.work_type} className={`w-7 h-7 ${tintOf(r.work_type).fg}`} />
         </span>
 
         <div className="flex-1 min-w-0">
-          <div className="font-black text-slate-800 text-[14px] leading-tight">
-            {workTypeLabel(wt, lang) || r.jenis || '—'} · {r.plot_name}
+          {/* THE PLOT FIRST, and big.
+              Same shape as the to-do row a worker taps (worker/TaskRow.jsx) —
+              one job, one look, whether it is being handed out or read back
+              afterwards. It used to lead with the work type, which is what the
+              coloured tile beside it already says, and buried the plot after a
+              dot. The plot is what somebody scanning a list of forty records
+              is actually looking for. */}
+          <div className="flex items-baseline gap-2">
+            <span className="text-[17px] font-black text-slate-800 leading-none">{r.plot_name}</span>
+            {r.nursery_name && (
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate">
+                {r.nursery_name}
+              </span>
+            )}
           </div>
-          {/* When and what was used. Who did it used to be the
-              last item on this grey line; now that workers record
-              their own mornings it is the thing a conductor is
-              reading the list FOR, so it has a line of its own
-              below. */}
-          <div className="text-[11.5px] font-bold text-slate-400 mt-0.5">
+          <div className={`text-[12px] font-black mt-1 leading-tight ${tintOf(r.work_type).fg}`}>
+            {workTypeLabel(wt, lang) || r.jenis || '—'}
+          </div>
+          {r.chemical && (
+            <div className="text-[12px] font-bold text-slate-500 mt-0.5 leading-snug break-words">
+              {r.chemical}
+            </div>
+          )}
+          {/* When, and how many. Who did it used to be the last item on this
+              grey line; now that workers record their own mornings it is the
+              thing a conductor is reading the list FOR, so it has a line of
+              its own below. The chemical has moved up to sit with the work it
+              belongs to. */}
+          <div className="text-[11.5px] font-bold text-slate-400 mt-1">
             {[
               relativeDay(r.work_date, today, t),
-              r.chemical || null,
               r.qty != null ? Number(r.qty).toLocaleString() : null,
             ].filter(Boolean).join(' · ')}
           </div>
@@ -120,10 +147,36 @@ export default function RecordCard({
               record one — a conductor checking a morning's work is
               exactly the person it is for.
 
-              The distance is the thing being read; the link opens
-              where the track started. The line itself is not drawn
-              on a list of five hundred rows. */}
-          {r.gps_lat != null && r.gps_lng != null && (
+              WITH A TRACK it opens the line on the satellite map. The
+              distance alone is a number anybody could have; the shape of the
+              round on the plot is what answers whether it was walked. The map
+              is still not DRAWN on a list of five hundred rows — it is a tap
+              away, and Leaflet only arrives when somebody taps.
+
+              With only a starting fix, the device's own map, as before: there
+              is no line to draw. The Worker Portal's records come back without
+              the track on purpose — a thousand points per row down a nursery's
+              signal — so a worker sees this second form and not a button that
+              opens an empty map. */}
+          {hasTrack ? (
+            <button
+              type="button"
+              onClick={() => setMapOpen(true)}
+              className="inline-flex items-center gap-1.5 mt-1.5 text-[11px] font-bold text-slate-500 tabular-nums cursor-pointer hover:text-emerald-700"
+            >
+              <span aria-hidden="true">🛰️</span>
+              {r.gps_distance_m != null && formatDistance(r.gps_distance_m)}
+              {r.gps_points != null && (
+                <span className="text-slate-400">· {t('mt.trkPointsN', { n: r.gps_points })}</span>
+              )}
+              {/* Says it is a button. The distance beside it looked like the
+                  same dead text it used to be, and a link nobody knows is a
+                  link is a map nobody opens. */}
+              <span className="text-emerald-700 uppercase tracking-widest text-[10px] font-black">
+                {t('wk.seeTrack')}
+              </span>
+            </button>
+          ) : r.gps_lat != null && r.gps_lng != null ? (
             <a
               href={mapsUrl(r.gps_lat, r.gps_lng)}
               target="_blank"
@@ -144,7 +197,7 @@ export default function RecordCard({
                 <>{Number(r.gps_lat).toFixed(6)}, {Number(r.gps_lng).toFixed(6)}</>
               )}
             </a>
-          )}
+          ) : null}
           {r.photo_urls && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {String(r.photo_urls).split(',').map((u) => u.trim()).filter(Boolean).map((u) => (
@@ -224,6 +277,32 @@ export default function RecordCard({
               {t('mt.delete')}
             </button>
           )}
+        </div>
+      )}
+
+      {/* The walk, on the satellite map. viewOnly — this is a track that
+          happened, not one being walked.
+
+          z-[80] because this card is drawn inside the History dialog, which is
+          z-50, and TrackMap's own z-60 would put the map UNDER the dialog it
+          was opened from — a full-screen map nobody can see or close. */}
+      {mapOpen && (
+        <div className="fixed inset-0 z-[80]">
+          <Suspense fallback={
+            <div className="fixed inset-0 bg-slate-900 grid place-items-center">
+              <div className="text-emerald-400 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">
+                {t('common.loading')}
+              </div>
+            </div>
+          }>
+            <TrackMap
+              viewOnly
+              initial={{ track: r.gps_track, distance_m: r.gps_distance_m,
+                         started_at: r.gps_started_at, ended_at: r.gps_ended_at }}
+              onClose={() => setMapOpen(false)}
+              onDone={() => setMapOpen(false)}
+            />
+          </Suspense>
         </div>
       )}
     </div>
