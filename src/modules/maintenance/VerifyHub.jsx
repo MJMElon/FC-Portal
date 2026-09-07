@@ -1,13 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import {
   VERIFY_SETUP_NEEDED,
   workTypeByKey,
   workTypeLabel,
 } from './data.js';
-import { relativeDay } from './RecordCard.jsx';
+import { absoluteDay } from './RecordCard.jsx';
+import { batchesIn } from './plotBatches.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
+
+/* Leaflet is most of a megabyte, and a conductor who never opens a track
+   never downloads a byte of it. Same lazy import GpsTrack uses. */
+const TrackMap = lazy(() => import('./track/TrackMap.jsx'));
+
+/** The batches on a record, as a list — the column stores "225, 226". */
+export const batchList = (s) =>
+  String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
 
 /* Why a record gets sent back. One tap for the two answers that come up over
    and over, and a box for everything else — a fixed list of six was a list
@@ -40,6 +49,10 @@ const THRESHOLD = 110;
  */
 export default function VerifyHub({
   records, columnsReady = true, canReject = true,
+  /* plotKey → [{ batch, qty }]. Which batches are standing in the plot the
+     record names, so the conductor picks from what is actually there rather
+     than typing a number from memory. */
+  batchMap = null,
   /* The writes go back through the module's source rather than straight to
      Supabase: the same board serves the Worker Portal through the worker_*
      functions, and a component that reaches for the table directly would work
@@ -47,7 +60,6 @@ export default function VerifyHub({
   onApprove, onReject, onUndo, onChanged,
 }) {
   const { t, lang } = useLang();
-  const today = new Date().toISOString().slice(0, 10);
 
   /* The deck as it stood when the page last read the records. Held locally so
      a card leaving is an animation rather than the list underneath re-sorting
@@ -69,6 +81,38 @@ export default function VerifyHub({
   const [undo, setUndo] = useState(null);      // { record, verb }
   const [error, setError] = useState(null);
   const [done, setDone] = useState({ ok: 0, back: 0 });
+  /* recordId → [batch] while the conductor is deciding. Kept per record and
+     not on the top card alone, so flicking back through the deck with Undo
+     does not lose an answer already given. Seeded from whatever the record
+     already carries — a worker who ticked his own batches has answered, and
+     the conductor is confirming rather than starting again. */
+  const [picked, setPicked] = useState({});
+  const [map, setMap] = useState(null);        // the record whose track is open
+
+  const batchesFor = (r) => (r && batchMap ? batchesIn(batchMap, r.plot_name) : []);
+  const pickedOn = (r) => (r && picked[r.id] !== undefined ? picked[r.id] : batchList(r && r.batch_name));
+
+  function toggleBatch(r, name) {
+    const now = pickedOn(r);
+    setPicked((p) => ({
+      ...p,
+      [r.id]: now.includes(name) ? now.filter((x) => x !== name) : [...now, name],
+    }));
+  }
+
+  /* May this card be signed for yet?
+   *
+   * A batch has to be ticked first — that is the whole point of asking. But
+   * "no batch ticked" and "there is no batch to tick" are different answers,
+   * and only the first is the conductor's to fix: a plot whose batches have
+   * all been culled, sold or moved on offers nothing, and blocking there
+   * would leave a record nobody could ever sign. So the gate is on plots that
+   * HAVE batches, which is the case the rule was asked for.
+   *
+   * The same reasoning covers the moment before the batch list has loaded:
+   * nothing to tick, nothing withheld. A conductor is never left holding a
+   * button that will not go and no way to find out why. */
+  const needsBatch = (r) => batchesFor(r).length > 0 && pickedOn(r).length === 0;
 
   /* Whether the columns are there is the page's answer, not this component's
      — and it arrives AFTER the first paint, because the records have to be
@@ -125,7 +169,14 @@ export default function VerifyHub({
       });
   }
 
-  const approve = (record) => settle(record, 'verified', () => onApprove(record));
+  /* Sign it — with the batches the conductor ticked. They go with the
+     signature because they are part of the same answer: he was there, he
+     knows which beds were walked, and the record is only complete once he has
+     said so. */
+  const approve = (record) => {
+    if (needsBatch(record)) { setError(t('mt.vfBatchNeeded')); return; }
+    settle(record, 'verified', () => onApprove(record, pickedOn(record).join(', ')));
+  };
 
   /* ✕ always opens the sheet. Signing works on any database that has run the
      verify file; sending back needs the later one, and where it is missing
@@ -162,6 +213,10 @@ export default function VerifyHub({
   // ── the drag itself ──
   function onDown(e) {
     if (!top || flying || asking) return;
+    /* A tick box, a track button, a photo — anything the card offers to be
+       pressed keeps its press. Starting a drag from one captures the pointer
+       and the tap never lands, which is a checkbox that will not tick. */
+    if (e.target.closest('input, button, a, label')) return;
     start.current = { x: e.clientX, y: e.clientY };
     setDrag({ dx: 0, dy: 0 });
     if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
@@ -175,6 +230,14 @@ export default function VerifyHub({
     const moved = (drag && drag.dx) || 0;
     start.current = null;
     if (!top) { setDrag(null); return; }
+    /* Swiping right is the same answer as pressing ✓, so it meets the same
+       condition. It springs back and says why rather than refusing silently —
+       a card that will not go and gives no reason reads as a broken card. */
+    if (moved > THRESHOLD && needsBatch(top)) {
+      setDrag(null);
+      setError(t('mt.vfBatchNeeded'));
+      return;
+    }
     if (moved > THRESHOLD) { approve(top); return; }
     // Left asks why before it commits, so the card springs back and waits
     // rather than leaving on an answer nobody has given yet.
@@ -244,7 +307,14 @@ export default function VerifyHub({
                   className={`absolute inset-0 bg-white rounded-2xl border border-slate-200 overflow-hidden
                               ${isTop ? 'shadow-xl cursor-grab active:cursor-grabbing z-10' : 'shadow z-0'}`}
                 >
-                  <VerifyCard record={r} today={today} t={t} lang={lang} yes={isTop && yes} no={isTop && no} />
+                  <VerifyCard
+                    record={r} t={t} lang={lang}
+                    yes={isTop && yes} no={isTop && no}
+                    batches={batchesFor(r)}
+                    picked={pickedOn(r)}
+                    onToggleBatch={(name) => toggleBatch(r, name)}
+                    onOpenTrack={() => setMap(r)}
+                  />
                 </div>
               );
             })}
@@ -259,13 +329,49 @@ export default function VerifyHub({
               ✕
             </button>
             <button onClick={() => top && approve(top)} aria-label={t('mt.approve')}
+              disabled={!top || needsBatch(top)}
+              title={top && needsBatch(top) ? t('mt.vfBatchNeeded') : undefined}
               className="w-[56px] h-[56px] rounded-full bg-white border border-slate-200 shadow-lg
                          text-emerald-600 text-[24px] font-black grid place-items-center
+                         disabled:opacity-40 disabled:cursor-not-allowed
                          hover:bg-emerald-50 active:scale-95 transition cursor-pointer">
               ✓
             </button>
           </div>
+
+          {/* Why the tick is greyed out. Said under the buttons, where the
+              hand already is — a disabled control that explains itself only
+              in a tooltip explains itself to nobody on a phone. */}
+          {top && needsBatch(top) && (
+            <div className="px-4 pb-4 -mt-2 text-center text-[11.5px] font-black text-amber-700">
+              {t('mt.vfBatchNeeded')}
+            </div>
+          )}
         </>
+      )}
+
+      {/* The walk, on the satellite map. viewOnly — this is a track that
+          happened, not one being walked. Outside the deck and above it: the
+          cards carry their own stacking and a map painted underneath them is
+          a map nobody can use. */}
+      {map && (
+        <div className="fixed inset-0 z-[70]">
+          <Suspense fallback={
+            <div className="fixed inset-0 bg-slate-900 grid place-items-center">
+              <div className="text-emerald-400 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">
+                {t('common.loading')}
+              </div>
+            </div>
+          }>
+            <TrackMap
+              viewOnly
+              initial={{ track: map.gps_track, distance_m: map.gps_distance_m,
+                         started_at: map.gps_started_at, ended_at: map.gps_ended_at }}
+              onClose={() => setMap(null)}
+              onDone={() => setMap(null)}
+            />
+          </Suspense>
+        </div>
       )}
 
       {/* Why it is going back. */}
@@ -369,11 +475,16 @@ function sig(rows) {
 }
 
 /** The record itself, filling the card. */
-function VerifyCard({ record: r, today, t, lang, yes, no }) {
+function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatch, onOpenTrack }) {
   const wt = workTypeByKey(r.work_type);
   const tint = tintOf(r.work_type);
   const hasMap = r.gps_lat != null && r.gps_lng != null;
   const mapUrl = hasMap ? `https://www.google.com/maps?q=${r.gps_lat},${r.gps_lng}` : null;
+  /* The walk itself, not just where it started. A conductor checking that a
+     round was actually walked needs the LINE — "2946 m" is a number anybody
+     could have, and the shape of it on the plot is the thing that answers the
+     question. Drawn on the same satellite map the worker recorded it on. */
+  const hasTrack = !!(r.gps_track && r.gps_track.length);
   const photos = String(r.photo_urls || '').split(',').map((u) => u.trim()).filter(Boolean);
 
   return (
@@ -409,31 +520,38 @@ function VerifyCard({ record: r, today, t, lang, yes, no }) {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2.5">
-        <Row label={t('mt.date')} value={relativeDay(r.work_date, today, t)} />
-        <Row label={t('mt.nursery')} value={r.nursery_name || '—'} />
+        {/* The date, spelt out. Not "Today" — see absoluteDay. */}
+        <Row label={t('mt.date')} value={absoluteDay(r.work_date, lang)} />
+        {/* The plot, not the nursery. A conductor signing off a morning is
+            standing in the nursery; which of its plots was worked is the thing
+            he is actually being asked about, and the nursery was the same
+            answer on every card in the deck. */}
+        <Row label={t('mt.plot')} value={r.plot_name || '—'} />
         <Row label={t('mt.chemical')} value={r.chemical || t('mt.noChemical')} />
-        {/* No seedling count. It is the sum of the batches ticked on the work
-            sheet, so a spray recorded against a plot rather than a batch —
-            which is most of them — carries nothing, and the card gave over a
-            whole row to an em dash. Where the batches ARE known they are the
-            better answer, and they are on the next line. */}
-        {r.batch_name && <Row label={t('mt.batches')} value={r.batch_name} />}
 
-        {/* Where the work happened. Opens the phone or tablet's own map rather
-            than drawing one here — the answer wanted is "is that the plot", and
-            the map already on the device answers it better than a thumbnail. */}
+        {/* Where the work happened.
+            With a track: open it on the satellite map and walk the line.
+            With only a starting fix: the device's own map, as before — there
+            is no line to draw, and pretending otherwise would be worse than
+            saying so. */}
         <div>
           <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
             {t('mt.mapLabel')}
           </div>
-          {hasMap ? (
-            <a href={mapUrl} target="_blank" rel="noreferrer"
-               className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50
-                          hover:bg-slate-100 px-3.5 py-2.5 transition-colors">
-              <span className="w-9 h-9 rounded-xl bg-white grid place-items-center shrink-0 text-[18px]">📍</span>
+          {hasTrack || hasMap ? (
+            <button
+              type="button"
+              onClick={hasTrack ? onOpenTrack
+                                : () => window.open(mapUrl, '_blank', 'noopener')}
+              className="w-full flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50
+                         hover:bg-slate-100 px-3.5 py-2.5 transition-colors text-left cursor-pointer">
+              <span className="w-9 h-9 rounded-xl bg-white grid place-items-center shrink-0 text-[18px]">
+                {hasTrack ? '🛰️' : '📍'}
+              </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[12.5px] font-black text-slate-700 truncate">
-                  {Number(r.gps_lat).toFixed(5)}, {Number(r.gps_lng).toFixed(5)}
+                  {hasTrack ? t('wk.seeTrack')
+                            : `${Number(r.gps_lat).toFixed(5)}, ${Number(r.gps_lng).toFixed(5)}`}
                 </span>
                 <span className="block text-[11px] font-bold text-slate-400">
                   {[
@@ -443,11 +561,51 @@ function VerifyCard({ record: r, today, t, lang, yes, no }) {
                 </span>
               </span>
               <span className="text-slate-300 text-[18px] shrink-0">›</span>
-            </a>
+            </button>
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-200 px-3.5 py-2.5
                             text-[12px] font-bold text-slate-400">
               {t('mt.noTrack')}
+            </div>
+          )}
+        </div>
+
+        {/* Which batch was worked — the conductor's answer, not the worker's.
+            He was there and knows which beds were walked, and until he says so
+            the record names a plot and nothing finer. Nothing is pre-ticked:
+            an answer nobody gave must not look like one somebody did. */}
+        <div>
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            {t('mt.batches')}
+          </div>
+          {batches.length ? (
+            <div className="space-y-1.5">
+              {batches.map((b) => {
+                const on = picked.includes(b.batch);
+                return (
+                  <label key={b.batch}
+                    className={`flex items-center gap-3 rounded-xl border-2 px-3 py-2 cursor-pointer
+                                ${on ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200'}`}>
+                    <input type="checkbox" className="w-5 h-5 accent-emerald-600 shrink-0"
+                           checked={on} onChange={() => onToggleBatch(b.batch)} />
+                    <span className="font-black text-slate-800 text-[13.5px] flex-1 min-w-0 truncate">
+                      {b.batch}
+                    </span>
+                    <span className={`text-[11.5px] font-bold shrink-0 tabular-nums
+                                      ${b.qty < 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                      {b.qty.toLocaleString()}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            /* Nothing standing in the plot — culled, sold or moved on. Said
+               plainly, because this is also why the tick is NOT withheld here:
+               there is no answer to give. */
+            <div className="rounded-xl border border-dashed border-slate-200 px-3.5 py-2.5
+                            text-[12px] font-bold text-slate-400">
+              {r.batch_name || t('mt.vfNoBatches')}
             </div>
           )}
         </div>

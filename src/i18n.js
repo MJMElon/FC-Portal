@@ -230,6 +230,11 @@ const en = {
   'mt.now': 'Now',
   'mt.nursery': 'Nursery',
   'mt.batches': 'Batches',
+  /* The Verify Hub asks the conductor which batch was worked, and will not
+     take a signature until he says — he was there and the worker's record
+     names only a plot. Blank where the plot has none standing in it. */
+  'mt.vfBatchNeeded': 'Tick which batch was worked before approving.',
+  'mt.vfNoBatches': 'No batches are standing in this plot.',
   'mt.history': 'History',
   'mt.allMonths': 'All months',
   'mt.allWork': 'All work',
@@ -956,6 +961,8 @@ const ms = {
   'mt.now': 'Kini',
   'mt.nursery': 'Nurseri',
   'mt.batches': 'Batch',
+  'mt.vfBatchNeeded': 'Tandakan batch yang dikerjakan sebelum meluluskan.',
+  'mt.vfNoBatches': 'Tiada batch dalam plot ini.',
   'mt.history': 'Sejarah',
   'mt.allMonths': 'Semua bulan',
   'mt.allWork': 'Semua kerja',

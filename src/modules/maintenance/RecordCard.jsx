@@ -8,6 +8,23 @@ import WorkIcon from './WorkIcons.jsx';
    and a Field Conductor reads those faster as words than as 2026-08-22.
    Anything older gets the date, because "5 days ago" is a sum nobody wants to
    do. */
+/**
+ * The date itself, always — never "Today", never "Yesterday".
+ *
+ * Signing off somebody's morning is a record of WHICH morning, and a card
+ * that says "Today" is only readable on the day it was drawn: the same
+ * screenshot, the same printout, the same conductor scrolling back a week
+ * later cannot tell you what day it means. The Verify Hub uses this; the
+ * lists that are plainly about the here and now still use relativeDay.
+ */
+export function absoluteDay(iso, lang) {
+  if (!iso) return '—';
+  const d = new Date(Date.parse(iso));
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(lang === 'ms' ? 'ms-MY' : 'en-MY',
+    { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export function relativeDay(iso, today, t) {
   if (!iso) return '—';
   if (iso === today) return t('mt.today');

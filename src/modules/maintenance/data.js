@@ -589,6 +589,25 @@ async function writeVerification(id, full, verifyOnly) {
   }
 }
 
+/**
+ * Which batches the work was actually done on, decided at verification.
+ *
+ * A worker records a plot; which of the batches standing in it he walked is
+ * the conductor's answer, given while checking the record and not before —
+ * he is the one who was there and knows. Stored the way the record form
+ * stores it, comma-separated, so one column reads the same whoever filled it.
+ *
+ * Its own write rather than a field on setVerified: the batches are a fact
+ * about the work and the signature is a fact about the checking, and a
+ * conductor correcting the batches on a record he has already signed must not
+ * have to un-sign it first.
+ */
+export async function setBatches(id, batchName) {
+  const { error } = await supabase.from('nops_maint_field_records')
+    .update({ batch_name: batchName || null }).eq('id', id);
+  if (error) throw error;
+}
+
 /** Checked and signed for — or, with no name, back to waiting. */
 export function setVerified(id, who) {
   const signed = who

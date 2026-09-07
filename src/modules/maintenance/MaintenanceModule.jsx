@@ -23,6 +23,9 @@ import {
   loadSchedules,
   nurseryKey,
   pendingRecords,
+  /* Aliased: EntrySheet has its own `setBatches` state setter, and two things
+     of that name in one file is a reader's trap even where the scopes differ. */
+  setBatches as setRecordBatches,
   setRejected,
   setVerified,
   submitRecord,
@@ -80,6 +83,7 @@ const FC_SOURCE = {
   deleteRecord,
   setVerified,
   setRejected,
+  setBatches:     setRecordBatches,
   flushQueue:     flushMaintenance,
   pending:        pendingRecords,
 };
@@ -671,7 +675,17 @@ export default function MaintenanceModule({
             columnsReady={verifyReady}
             canReject={rejectReady}
             staffName={staffName}
-            onApprove={(rec) => source.setVerified(rec.id, staffName)}
+            batchMap={batchMap}
+            /* The batches first, then the signature. If writing the batches
+               fails the card comes back and nothing is signed — a record
+               signed off against batches that were never stored is exactly
+               the thing this change exists to prevent. */
+            onApprove={async (rec, batchName) => {
+              if (source.setBatches && batchName !== (rec.batch_name || '')) {
+                await source.setBatches(rec.id, batchName);
+              }
+              return source.setVerified(rec.id, staffName);
+            }}
             onReject={handleReject}
             onUndo={(rec) => source.setVerified(rec.id, null)}
             onChanged={reload}
