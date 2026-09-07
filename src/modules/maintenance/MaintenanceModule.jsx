@@ -131,7 +131,12 @@ export default function MaintenanceModule({
 
   // This page's own nursery list — Maintenance and PALMS are set separately.
   const allowed = allowedNurseries(permissions, 'maintenance');
-  const mayRecord = canMaintain(permissions, 'record');
+  /* The three-layer rule, not canScan's all-or-nothing one. Recording work is
+     a company switch now (System Setting → Portal View & Function), and the
+     per-person tick that used to seed the key is gone — so under canScan every
+     row saved since read as "no Record Work" with nothing left to tick. See
+     MAINT_FUNCTION_DEFAULT.record. */
+  const mayRecord = canMaintFn(permissions, 'record');
   /* Changing a record already made, and removing one, are two ticks now —
      Setting → a person → Maintenance → Edit work done / Delete work done —
      because they are two different acts. Correcting a quantity somebody

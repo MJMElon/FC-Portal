@@ -20,11 +20,10 @@ import WorkerNav from './WorkerNav.jsx';
  * row. That is the default, it is shown as such, and it is why most workers
  * never need touching here at all.
  */
-/* What each switch means when nobody has said. `record` is not in the shared
-   table — it is an older tick with its own rule in the module — so it is
-   spelt out here, and everything else comes from the one list rather than a
-   second opinion of it. */
-const DEFAULT_FN = { record: true, ...MAINT_FUNCTION_DEFAULT };
+/* What each switch means when nobody has said — the one list, not a second
+   opinion of it. `record` used to be spelt out here because the shared table
+   did not name it; it does now, for the same reason this screen needed it. */
+const DEFAULT_FN = MAINT_FUNCTION_DEFAULT;
 
 export default function WorkerSettings() {
   const { t } = useLang();

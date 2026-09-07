@@ -33,9 +33,24 @@ import { isCompanyOn, isVetoed } from '../../lib/portalSettings.js';
  * asks the phone for a location — a permission prompt, and a position stored
  * against a person's name — and that is not something to switch on for the
  * whole estate because a new version shipped.
+ *
+ * `record` is here for a reason worth writing down. It used to be a tick on
+ * the per-person screen and was read with the older canScan rule, which is
+ * all-or-nothing per page: once a person's maintenance entry exists, anything
+ * not named in it is OFF. When the tick moved to System Setting the office
+ * screen stopped seeding the key — and every row saved after that lost Record
+ * Work, permanently, with no tick left anywhere to give it back. Switching
+ * "Record work" ON for the company did not help either: canScan never reads
+ * the company's ON, only its veto, so the switch could turn recording off and
+ * never on again.
+ *
+ * Naming it here is what makes it answerable: canMaintFn asks the company,
+ * then the person, then this. An absent answer is "nobody has been asked",
+ * which for recording work is the whole job.
  */
 export const MAINT_FUNCTION_DEFAULT = {
   schedule: true,
+  record:   true,
   batches:  true,
   workers:  true,
   gps:      false,
@@ -73,9 +88,12 @@ export const MAINT_FUNCTIONS = [
 /**
  * Is this function switched on for this person?
  *
- * `record`, `verify` and `export` are older ticks and keep their own rule —
- * canScan / canMaintain — because changing what an absent one means would
- * change access that is already saved. This answers for the switches above:
+ * `verify` and `export` are older ticks and keep their own rule — canScan /
+ * canMaintain — because changing what an absent one means would change access
+ * that is already saved, and both are still ticks on the per-person screen so
+ * they are still seeded there. `record` is NOT: its tick moved to System
+ * Setting, nothing seeds it any more, and under the older rule an unseeded key
+ * reads as no. It is answered here now. This answers for the switches above:
  * absent means the documented default, present means what it says.
  *
  * A closed page closes every function inside it, the same way canScan does.
