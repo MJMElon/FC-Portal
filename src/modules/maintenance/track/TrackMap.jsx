@@ -271,6 +271,49 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
     lineRef.current.setLatLngs((state.points || []).map((p) => [p[1], p[0]]));
   }, [state.points]);
 
+  /* Go to the track.
+   *
+   * The map opens on the middle of the estate's half of Malaysia at zoom 5,
+   * which is the right thing to show while there is nothing to show — but a
+   * track handed in as `initial` is already there, drawn, four hundred miles
+   * below the visible square. Somebody opening a finished walk had to find it
+   * by pinching in, which is not a thing anybody should have to do to see the
+   * answer they just asked for.
+   *
+   * ONCE. The first points that arrive decide the view and nothing moves it
+   * again: a live walk that re-fitted on every fix would crawl out from under
+   * the finger of whoever was trying to look at the other end of it, and
+   * following a walk is the compass button's job, not this one's.
+   *
+   * Capped at MAX_ZOOM — the tightest the imagery itself goes — and not at
+   * WORK_ZOOM, which is the zoom to RECORD at: close enough to see a seedling
+   * bed, far enough to see the plot round it, because somebody walking wants
+   * the ground ahead of them. Reading a finished walk is the other job, and a
+   * round of one plot capped at the walking zoom came up a third of the size
+   * it could be. The cap is still needed: a track of one point has no extent
+   * at all, and without one fitBounds answers that with the tightest zoom
+   * there is. */
+  const fitted = useRef(false);
+  useEffect(() => {
+    const map = mapRef.current, line = lineRef.current;
+    if (!map || !line || fitted.current) return undefined;
+    if (!(state.points || []).length) return undefined;
+    fitted.current = true;
+    /* After the container has its size. The overlay is painted in the same
+       commit that mounts the map, so fitting before that measures a box of
+       zero and lands somewhere else entirely. */
+    const id = setTimeout(() => {
+      map.invalidateSize();
+      /* The padding is measured against the map ELEMENT, which is bigger
+         than the window it is seen through — that overflow is what lets it
+         turn under the compass without showing its corners. The track ends
+         up centred in the element and so comfortably inside the window,
+         which is the point; no arithmetic needed for that. */
+      map.fitBounds(line.getBounds(), { padding: [32, 32], maxZoom: MAX_ZOOM, animate: false });
+    }, 80);
+    return () => clearTimeout(id);
+  }, [state.points]);
+
   /* Following somebody else's walk. Depends on the LENGTH and the distance
      rather than on `live` itself: the caller builds a fresh object every
      render, so depending on the object would set state on every render and
