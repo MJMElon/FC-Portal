@@ -4,16 +4,18 @@ import { workTypeByKey, workTypeLabel } from '../modules/maintenance/helpers.js'
 import { tintOf } from '../modules/maintenance/tints.js';
 import WorkIcon from '../modules/maintenance/WorkIcons.jsx';
 import { formatDistance, formatDuration } from '../modules/maintenance/track/track.js';
+import { localeOf, shortDate } from '../lib/day.js';
 
 const TrackMap = lazy(() => import('../modules/maintenance/track/TrackMap.jsx'));
+
+// One date format for the whole system — see lib/day.js for why Sept is cut.
 
 /** "3 Aug 2026" — a date a worker reads, not 2026-08-03. */
 function dayOf(iso, lang) {
   if (!iso) return '—';
   const d = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(lang === 'ms' ? 'ms-MY' : 'en-MY',
-    { day: 'numeric', month: 'short', year: 'numeric' });
+  return shortDate(d, localeOf(lang), false);
 }
 
 /**

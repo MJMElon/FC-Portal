@@ -1,4 +1,5 @@
 import { useLang } from '../../context/LanguageContext.jsx';
+import { localeOf, shortDate } from '../../lib/day.js';
 import { workTypeByKey, workTypeLabel } from './data.js';
 import { formatDistance, mapsUrl } from './track/track.js';
 import { tintOf } from './tints.js';
@@ -21,8 +22,7 @@ export function absoluteDay(iso, lang) {
   if (!iso) return '—';
   const d = new Date(Date.parse(iso));
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(lang === 'ms' ? 'ms-MY' : 'en-MY',
-    { day: '2-digit', month: 'short', year: 'numeric' });
+  return shortDate(d, localeOf(lang));
 }
 
 export function relativeDay(iso, today, t) {
@@ -32,9 +32,7 @@ export function relativeDay(iso, today, t) {
   if (Number.isFinite(ms) && Number.isFinite(now)) {
     if (Math.round((now - ms) / 86400000) === 1) return t('mt.yesterday');
     const d = new Date(ms);
-    if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString('en-MY', { day: '2-digit', month: 'short', year: 'numeric' });
-    }
+    if (!isNaN(d.getTime())) return shortDate(d, 'en-MY');
   }
   return iso;
 }
