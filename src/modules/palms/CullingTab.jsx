@@ -8,8 +8,9 @@ import {
 } from './cullingSource.js';
 import { todayStr } from './data.js';
 import { agoText } from '../../lib/ago.js';
+import { listJobs } from '../../lib/outbox.js';
 import { openCasePlots } from '../../lib/nelos.js';
-import { submitCase } from './cullingOffline.js';
+import { clearRefused, refusedCases, retryRefused, submitCase } from './cullingOffline.js';
 
 /**
  * The Culling Calculator.
@@ -72,6 +73,14 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys })
      office; at === 0 means this phone has never had a good read. */
   const [stale, setStale] = useState(null);
 
+  /* Requests the server turned down. Normally none — this is empty on every
+     phone on a good day — but a case refused after it was queued used to
+     disappear without a word, and the Field Conductor was left believing an
+     auditor had been sent. See cullingOffline.js. */
+  const [notSent, setNotSent] = useState(() => refusedCases());
+  const [retrying, setRetrying] = useState(false);
+  const reloadNotSent = () => setNotSent(refusedCases());
+
   // Best effort: a read that fails leaves the screen empty rather than broken.
   useEffect(() => {
     let live = true;
@@ -117,6 +126,51 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys })
       }
       return lines;
     };
+
+    /* The other half of the same question. cullDebug answers "why is this
+       plot not on the list"; this answers "I pressed the button — where did
+       the case go". Three places it can be, and the console names which:
+       still queued on the phone, refused by the server with the reason it
+       gave, or on the server and therefore a Nelos routing matter rather
+       than a portal one. */
+    window.cullCase = async () => {
+      const queued = (await listJobs()).filter((j) => j.kind === 'culling_case');
+      const refused = refusedCases();
+      console.log(`%cwaiting on this phone: ${queued.length}`, 'font-weight:bold');
+      if (queued.length) {
+        console.table(queued.map((j) => ({
+          plot: j.payload?.plot, category: j.payload?.category,
+          queued: new Date(j.createdAt).toLocaleString(),
+          tries: j.tries, lastError: j.lastError,
+        })));
+      }
+      console.log(`%crefused by the server: ${refused.length}`, 'font-weight:bold');
+      if (refused.length) {
+        console.table(refused.map((r) => ({
+          plot: r.payload?.plot, category: r.payload?.category,
+          at: new Date(r.at).toLocaleString(), reason: r.message,
+        })));
+        console.log('cullCase.retry() to send them again once the database is fixed.');
+      }
+      /* What Nelos has for this portal, read the same way the case list reads
+         it. Empty here with a case in the database means the case was routed
+         somewhere this account cannot see — which is a routing rule, not a
+         lost case. */
+      const open = await openCasePlots({ source: 'scan' });
+      console.log(`%copen cases Nelos shows this account: ${open.size}`, 'font-weight:bold',
+                  open.size ? [...open].join(', ') : '(none)');
+      return { queued: queued.length, refused: refused.length, openPlots: [...open] };
+    };
+    window.cullCase.retry = async () => {
+      const r = await retryRefused();
+      reloadNotSent();
+      reloadRaised();
+      console.log(`sent ${r.sent}, still refused ${r.left}`);
+      return r;
+    };
+    /* A way out for a refusal nobody intends to send — a plot since dealt
+       with by hand — so the strip is not permanent furniture. */
+    window.cullCase.forget = () => { clearRefused(); reloadNotSent(); };
     return () => { live = false; };
   }, []);
 
@@ -131,7 +185,13 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys })
      back, re-read which plots already have a case so the picker's tick is
      right. */
   useEffect(() => {
-    const onUp = () => reloadRaised();
+    const onUp = () => {
+      reloadRaised();
+      /* The flush is under way as this fires, so what it refuses is not
+         written yet. A moment later it is, and the strip appears rather than
+         waiting for the screen to be opened again. */
+      setTimeout(reloadNotSent, 4000);
+    };
     window.addEventListener('online', onUp);
     return () => window.removeEventListener('online', onUp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -331,7 +391,14 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys })
       dedupe: true,
     });
     setBusy(false);
-    if (error) { flash(t('cull.raiseFailed')); return; }
+    if (error) {
+      /* Refused. The count stays on screen so it can be sent again, and the
+         strip above appears — the toast goes, and by the time somebody in the
+         office is asked about it there would otherwise be nothing to see. */
+      reloadNotSent();
+      flash(t('cull.raiseFailed'));
+      return;
+    }
     /* No signal: it is in the outbox and will go up on its own. The count is
        cleared either way, because it HAS been recorded — leaving it on screen
        would invite it being sent a second time when the signal returns. */
@@ -438,6 +505,34 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys })
             </span>
           </div>
         </div>
+
+        {/* A request that did not go.
+            Only ever drawn when there is one, so it costs nothing on the
+            screen it is normally absent from — and when it is there it is the
+            most important line on the calculator, because everything below it
+            is about a case somebody believes has been raised and has not.
+            Pressing it tries again: the usual cause is the database not yet
+            knowing about culling cases, which somebody in the office fixes,
+            and then the request is still wanted. */}
+        {notSent.length > 0 && (
+          <button
+            data-notsent
+            onClick={async () => {
+              if (retrying) return;
+              setRetrying(true);
+              const r = await retryRefused();
+              setRetrying(false);
+              reloadNotSent();
+              reloadRaised();
+              flash(r.sent ? t('cull.notSentGone', { n: r.sent }) : t('cull.raiseFailed'));
+            }}
+            className="w-full rounded-2xl bg-rose-950/70 border border-rose-800 px-3 py-1.5
+                       text-left text-rose-200 text-[11px] font-bold leading-snug cursor-pointer
+                       hover:bg-rose-900/70"
+          >
+            {retrying ? t('common.saving') : t('cull.notSent', { n: notSent.length })}
+          </button>
+        )}
 
         {/* Two blocks, because there are two numbers and they are not the
             same kind of thing: what the plot is holding, and what has been
