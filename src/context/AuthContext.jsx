@@ -255,7 +255,14 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     Object.keys(localStorage).forEach((k) => {
-      if (k.startsWith('sb-')) localStorage.removeItem(k);
+      /* The remembered permissions go with the token. They are what an
+         offline start draws the portal from and they outlive a closed
+         browser on purpose, so a pressed Sign Out is the one thing that has
+         to take them — otherwise the next person to pick this phone up
+         inherits the last one's pages. cachedPermissions already refuses to
+         hand them to a DIFFERENT account, so this is the second lock rather
+         than the only one; sign out should still mean sign out. */
+      if (k.startsWith('sb-') || k === PERMS_KEY) localStorage.removeItem(k);
     });
     sessionStorage.clear();
     try {
