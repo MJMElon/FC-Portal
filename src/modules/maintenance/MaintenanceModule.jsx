@@ -17,6 +17,7 @@ import {
   hasRejectColumns,
   hasVerifyColumns,
   isModuleAdmin,
+  loadCapacity,
   loadMaintenanceData,
   loadPlotBatches,
   loadWorkers,
@@ -47,6 +48,7 @@ import WorkIcon from './WorkIcons.jsx';
 import WhoDidIt from './WhoDidIt.jsx';
 import WorkSheet from './WorkSheet.jsx';
 import { batchesIn } from './plotBatches.js';
+import { makeCapacity, makeCoverage, weekUsage } from './usage.js';
 import RecordCard from './RecordCard.jsx';
 import { tintOf } from './tints.js';
 import {
@@ -76,6 +78,11 @@ const MAX_PHOTOS = 3;
  */
 const FC_SOURCE = {
   loadData:       loadMaintenanceData,
+  /* Only the FC portal. The store figures come from four tables a worker,
+     who is `anon`, cannot read — and does not need: a worker is told which
+     plots to do, not how much to sign out of the store. The board simply
+     draws no figures when its source has no answer for this. */
+  loadCapacity,
   loadPlotBatches,
   loadWorkers,
   loadSchedules,
@@ -125,6 +132,10 @@ export default function MaintenanceModule({
   const [toast, setToast] = useState(null);
   const [schedule, setSchedule] = useState([]);     // one row per nursery that has a plan
   const [batchMap, setBatchMap] = useState(new Map());
+  /* Plot capacity and pump coverage — what the week's store figures are
+     worked out from. Null until read, and null forever on a source that
+     cannot read it, which the board takes as "say nothing". */
+  const [cap, setCap] = useState(null);
   const [sheet, setSheet] = useState(null);         // { week, workType }
   const [history, setHistory] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -384,6 +395,18 @@ export default function MaintenanceModule({
     return () => { live = false; };
   }, [source]);
 
+  /* Once, with the plot balances. Capacity changes when the nursery is
+     rebuilt, not when a plot is sprayed, so there is nothing to re-read
+     after a record. */
+  useEffect(() => {
+    let live = true;
+    if (!source.loadCapacity) { setCap(null); return undefined; }
+    source.loadCapacity()
+      .then((c) => { if (live) setCap(c || null); })
+      .catch((e) => { console.warn('[maintenance] capacity unavailable:', e); if (live) setCap(null); });
+    return () => { live = false; };
+  }, [source]);
+
   // Once, when the module opens. Deliberately NOT re-read after a save:
   // recording that a plot was sprayed moves no seedlings, so the balances
   // cannot have changed — and this read pages the entire inventory ledger.
@@ -406,6 +429,19 @@ export default function MaintenanceModule({
     acc[w] = WORK_TYPES.reduce((c, wt) => { c[wt.key] = tasksByWeek[w][wt.key].length; return c; }, {});
     return acc;
   }, {}), [tasksByWeek]);
+  /* How much to draw from the store, per job, for each week. Same
+     arithmetic as the office's Schedule tab — see usage.js. Empty when this
+     phone has no capacity table, which reads as no line rather than zero. */
+  const usageByWeek = useMemo(() => {
+    if (!cap) return {};
+    const capacityOf = makeCapacity(cap);
+    const coverageOf = makeCoverage(cap.chemicals, cap.preset);
+    return WEEKS.reduce((acc, w) => {
+      acc[w] = weekUsage(schedule, w, { capacityOf, coverageOf });
+      return acc;
+    }, {});
+  }, [schedule, cap]);
+
   const doneCounts = useMemo(() => WEEKS.reduce((acc, w) => {
     acc[w] = WORK_TYPES.reduce((c, wt) => {
       c[wt.key] = tasksByWeek[w][wt.key].filter((x) =>
@@ -626,6 +662,7 @@ export default function MaintenanceModule({
                   isNow={viewingNow}
                   counts={counts[currentWeek]}
                   doneCounts={doneCounts[currentWeek]}
+                  usage={usageByWeek[currentWeek]}
                   onPrev={() => stepWeek(-1)}
                   onNext={() => stepWeek(1)}
                   onNow={() => setView({ month: nowMonth, week: nowWeek })}

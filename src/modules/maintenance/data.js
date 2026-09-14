@@ -4,8 +4,8 @@
 import { dataUrlToBlob } from '../../lib/image.js';
 import { PERMANENT, flushOutbox, isOnline, listJobs, looksOffline, queueJob } from '../../lib/outbox.js';
 import {
-  cacheBatches, cacheData, cacheSchedules, cacheWorkers,
-  cachedBatches, cachedData, cachedSchedules, cachedWorkers,
+  cacheBatches, cacheCapacity, cacheData, cacheSchedules, cacheWorkers,
+  cachedBatches, cachedCapacity, cachedData, cachedSchedules, cachedWorkers,
 } from './offline.js';
 import { fetchAllRows, supabase } from '../../lib/supabase.js';
 import { sortRecords, workTypeByKey } from './helpers.js';
@@ -416,6 +416,62 @@ export async function loadSchedules(nurseryKeys, monthLabel) {
   const rows = applicableSchedules(data || [], monthLabel);
   cacheSchedules(monthLabel, rows);
   return rows;
+}
+
+/**
+ * What the week's store figures are worked out from.
+ *
+ * Four small tables the office's Setting tab owns: how many seedlings each
+ * plot holds, how many a tray holds where a nursery counts in trays, each
+ * chemical's own pump coverage, and the coverage preset for the ones with
+ * none. The board needs them to say how much Becker to draw for week 2.
+ *
+ * Every one is optional. A nursery that has not filled its capacity table
+ * in, a database where these tables do not exist yet, a refusal — all of
+ * them mean the board shows the week's jobs with no figures under them,
+ * which is what it did before. A wrong figure is the only unacceptable
+ * answer, so a missing one is never guessed at.
+ */
+export async function loadCapacity() {
+  if (!isOnline()) return cachedCapacity();
+
+  const soft = (p) => p.then((r) => r, () => ({ data: [] }));
+  const [qtyRes, traySizeRes, chemRes, cfgRes] = await Promise.all([
+    /* `trays` arrives with migration_nops_maint_settings.sql. Without it the
+       select 400s, so ask for it and fall back — the same two-step the
+       office page does. */
+    soft(supabase.from('nops_maint_plot_qty').select('nursery, plot, qty, trays')
+      .then((r) => (r.error
+        ? supabase.from('nops_maint_plot_qty').select('nursery, plot, qty')
+        : r))),
+    soft(supabase.from('nops_maint_tray_size').select('nursery, per_tray')),
+    soft(supabase.from('nops_maint_chemicals').select('name, coverage')),
+    soft(supabase.from('nops_maint_config').select('key, num_value')),
+  ]);
+
+  const qty = {}, trays = {}, traySize = {};
+  (qtyRes.data || []).forEach((r) => {
+    if (!qty[r.nursery]) qty[r.nursery] = {};
+    if (r.qty != null) qty[r.nursery][r.plot] = Number(r.qty) || 0;
+    if (r.trays != null) {
+      if (!trays[r.nursery]) trays[r.nursery] = {};
+      trays[r.nursery][r.plot] = Number(r.trays) || 0;
+    }
+  });
+  (traySizeRes.data || []).forEach((r) => {
+    const per = Number(r.per_tray) || 0;
+    if (per > 0) traySize[r.nursery] = per;
+  });
+  const preset = ((cfgRes.data || []).find((r) => r.key === 'pump_coverage') || {}).num_value;
+
+  const out = {
+    qty, trays, traySize,
+    chemicals: chemRes.data || [],
+    preset: Number(preset) > 0 ? Number(preset) : null,
+  };
+  // Nothing read at all is not worth overwriting yesterday's copy with.
+  if ((qtyRes.data || []).length) cacheCapacity(out);
+  return (qtyRes.data || []).length ? out : (cachedCapacity() || out);
 }
 
 /**

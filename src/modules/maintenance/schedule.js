@@ -237,8 +237,13 @@ export function weekTasks(payload, week) {
         .map((on, ci) => {
           if (!on || !iCfg[ci]) return '';
           const c = iCfg[ci];
+          /* The activator is chosen on the office's schedule now. A round
+             saved before it could be has no name for it and printed the
+             word "Activator", so that is what a missing one still reads as.
+             Change one, change the other: interrowAct in the office's
+             plot_maintenance_script.js. */
           return [dose(c.chem, c.chem_dose, c.chem_unit),
-                  dose('Activator', c.activator_dose, c.activator_unit)]
+                  dose(c.activator || 'Activator', c.activator_dose, c.activator_unit)]
             .filter(Boolean).join(' + ');
         })
         .filter(Boolean)
