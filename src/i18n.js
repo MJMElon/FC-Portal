@@ -359,6 +359,14 @@ const en = {
   'mtb.nextWeek': 'Next week',
   'mtb.donePct': '{pct}% done',
   'mtb.none': 'Not due',
+  'mtb.maxUse': 'Max usage this week',
+  /* Two different silences. "No programme" is the office's — nothing is
+     planned. "Figures unavailable" is this phone's — the work IS planned but
+     plot capacity could not be read, and telling a conductor there is no
+     programme would send him asking about a schedule that exists. */
+  'mtb.noFigures': 'Work is due, but plot capacity could not be read — no figures to show.',
+  'mtb.plotsN': '{n} plots',
+  'mtb.noCap': 'Not counted: {plots} — no capacity keyed in for these plots.',
   'mtb.footer': 'Open the weekly plan',
   'mtb.cached': 'Offline · cached',
   'mtb.unavailable': 'Schedule unavailable',
@@ -1089,6 +1097,10 @@ const ms = {
   'mtb.nextWeek': 'Minggu seterusnya',
   'mtb.donePct': '{pct}% siap',
   'mtb.none': 'Tiada',
+  'mtb.maxUse': 'Maksimal guna minggu ini',
+  'mtb.noFigures': 'Ada kerja, tetapi kapasiti plot tidak dapat dibaca — tiada angka.',
+  'mtb.plotsN': '{n} plot',
+  'mtb.noCap': 'Tidak dikira: {plots} — kapasiti plot belum dimasukkan.',
   'mtb.footer': 'Buka jadual mingguan',
   'mtb.cached': 'Luar talian · cache',
   'mtb.unavailable': 'Jadual tiada',
