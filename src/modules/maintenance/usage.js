@@ -72,10 +72,22 @@ export function makeCoverage(chemicals, preset) {
   };
 }
 
-/** grams → kg, millilitres → L, one decimal — the office's fmtUsage. */
+/* Always UP, never to the nearest. The figure is what somebody signs out of
+   the store before walking into the field, and rounding to the nearest tenth
+   sends a tank out short about half the time. Rounding up can only leave a
+   little in the drum, which is where it was anyway. The office's ceilTo.
+
+   The 1e9 is not decoration: 0.1 × 3 is held as 0.30000000000000004, and the
+   ceiling of that at one decimal is 0.4. The dust goes first. */
+function ceilTo(value, decimals) {
+  const factor = Math.pow(10, decimals);
+  return Math.ceil(Math.round(value * factor * 1e9) / 1e9) / factor;
+}
+
+/** grams → kg, millilitres → L, one decimal, rounded UP — the office's
+    fmtUsage. Change one, change the other. */
 function show(total, unit) {
-  const big = Math.round((total / 1000) * 10) / 10;
-  return `${big.toLocaleString()} ${unit === 'gm' ? 'kg' : 'L'}`;
+  return `${ceilTo(total / 1000, 1).toLocaleString()} ${unit === 'gm' ? 'kg' : 'L'}`;
 }
 
 /* A dose is a number or it is nothing. One keyed with a comma or a unit in
