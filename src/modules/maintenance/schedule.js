@@ -72,7 +72,91 @@ export function normalisePayload(payload) {
       if (v && !Array.isArray(v)) s.interrow[p] = keys.map((k) => [!!v[k]]);
     });
   }
+
+  alignRoundsToWeeks(s);
   return s;
+}
+
+/* ── A round's POSITION and the WEEK its dates name ─────────────────────
+   Two different things, and old payloads have them apart.
+   ── This lives in BOTH repositories. Change one, change the other:
+      alignRoundsToWeeks in nursery_ops/plot_maintenance_script.js. ──
+
+   The office's full-width sheets pushed a new round onto the END of the
+   array, so round 2 sat at index 1 whatever its dates said. Everything that
+   READS a schedule goes by the week BLOCK the from-date falls in — round 2
+   dated the 15th is week 3.
+
+   So a month built the old way showed its week columns as 1 and 3 in the
+   office and its work as weeks 1 and 2 on every phone. Both sides were
+   reading the same payload and both were certain.
+
+   Moved only where the evidence is unambiguous: the round is at its
+   position, the block its dates name is empty, and the two differ. A month
+   already filed by block is untouched. */
+function alignRoundsToWeeks(s) {
+  const filled = (x) => (Array.isArray(x) ? x.length > 0 : !!x);
+  const slotOf = (from) => Math.min(WEEKS.length, Math.max(1, Math.ceil((+from || 1) / 7))) - 1;
+  const weeksFor = (kind) => {
+    const own = s.weeksByWork && Array.isArray(s.weeksByWork[kind]) ? s.weeksByWork[kind] : null;
+    return (own || (Array.isArray(s.weeks) ? s.weeks : []))
+      .slice().sort((a, b) => (+a.from || 0) - (+b.from || 0));
+  };
+  const setOf = (xs) => new Set(xs);
+  const same = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+
+  /* Is this work filed by POSITION or by BLOCK? Asked once, of the whole
+     work, rather than round by round — a per-round guess moves data that was
+     already in the right place.
+
+     Positional means: every block holding data is one of the POSITIONS
+     0..n-1, and that is not the same set as the blocks the dates name. If
+     the data already sits on the dates' blocks, or on anything else, it is
+     left alone. Nothing is moved on a maybe. */
+  const movesFor = (weeks, hasData) => {
+    if (!weeks.length) return [];
+    const slots = weeks.map((w) => slotOf(w.from));
+    const positions = weeks.map((_, i) => i);
+    if (same(setOf(slots), setOf(positions))) return [];
+    const data = setOf([...Array(WEEKS.length).keys()].filter(hasData));
+    if (!data.size || !same(data, setOf(positions))) return [];
+    return weeks.map((w, pos) => [pos, slotOf(w.from)]).filter(([p, q]) => p !== q);
+  };
+
+  [['manuring', 'manuringConfig'], ['interrow', 'interrowConfig']].forEach(([kind, key]) => {
+    const cfg = s[key];
+    if (!Array.isArray(cfg)) return;
+    const moves = movesFor(weeksFor(kind), (b) => filled(cfg[b]));
+    if (!moves.length) return;
+    const isDest = (i) => moves.some(([, to]) => to === i);
+    const shift = (arr) => {
+      const next = arr.slice();
+      moves.forEach(([from, to]) => { next[to] = arr[from]; });
+      moves.forEach(([from]) => { if (!isDest(from)) next[from] = []; });
+      for (let b = 0; b < WEEKS.length; b++) if (!Array.isArray(next[b])) next[b] = [];
+      return next;
+    };
+    s[key] = shift(cfg);
+    Object.keys(s[kind] || {}).forEach((p) => {
+      if (Array.isArray(s[kind][p])) s[kind][p] = shift(s[kind][p]);
+    });
+  });
+
+  // Weeding keeps a key per block — R1 to R4 — rather than an array.
+  const wKey = (b) => `R${b + 1}`;
+  const wMoves = movesFor(weeksFor('weeding'),
+    (b) => Object.keys(s.weeding || {}).some((p) => s.weeding[p] && s.weeding[p][wKey(b)]));
+  if (wMoves.length) {
+    const isDest = (i) => wMoves.some(([, to]) => to === i);
+    Object.keys(s.weeding || {}).forEach((p) => {
+      const row = s.weeding[p];
+      if (!row) return;
+      const next = { ...row };
+      wMoves.forEach(([from, to]) => { next[wKey(to)] = row[wKey(from)]; });
+      wMoves.forEach(([from]) => { if (!isDest(from)) next[wKey(from)] = false; });
+      s.weeding[p] = next;
+    });
+  }
 }
 
 /**
