@@ -219,8 +219,14 @@ export function weekTasks(payload, week) {
         .join(' + '),
     }));
 
-  // ── Weeding — two rounds only, and nothing is sprayed ──
-  const wKey = ['R1', 'R2'][ri];
+  /* ── Weeding — a round per week block, and nothing is sprayed ──
+     This read ['R1','R2'][ri] and nothing else, from back when weeding was
+     planned as two rounds a month. The office has let it run in any of the
+     four week blocks for a while and writes R1 to R4, so weeding set for
+     week 3 or week 4 reached neither portal: the office showed it, the
+     field was never told, and the plots went unweeded with nobody able to
+     see why. Same key the office writes — see weToggle and plotsAtSlot. */
+  const wKey = `R${week}`;
   out.weeding = !wKey ? [] : Object.keys(s.weeding || {})
     .filter((plot) => s.weeding[plot] && s.weeding[plot][wKey])
     .sort(plotCmp)
