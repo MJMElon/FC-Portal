@@ -10,16 +10,20 @@
  * Conductor whose phone disagrees with the office sheet has no way to tell
  * which is wrong, so the two rules are stated the same way in both places:
  *
+ * PLOT BY PLOT, then added. Not the week's seedlings run through the sum
+ * once: nobody mixes one tank for thirteen plots, they mix thirteen, each
+ * filled to the next mark, and what leaves the store is the sum of those.
+ *
  *   A SPRAY is measured in pumps. One pump covers a number of seedlings —
  *   the chemical's own coverage when it has one, the preset from
  *   nops_maint_config when it does not, 800 when neither has been read.
- *       amount = (seedlings / coverage) x dose per pump
+ *       per plot:  ceil to the next 50 of ( capacity / coverage x dose )
  *
- *   A FERTILISER is measured per seedling, with no pump in it.
- *       amount = seedlings x dose
+ *   A FERTILISER is weighed, with no pump in it.
+ *       per plot:  ceil to the next 100 gm of ( capacity x dose )
  *
  * Both come out in grams or millilitres and are shown in kilograms or
- * litres to one decimal, the way the office sheet shows them.
+ * litres. The total is a whole number of steps, so it is shown exactly.
  *
  * Everything here tolerates the tables it needs being absent. A phone that
  * could not read plot capacity shows no figure rather than a wrong one.
@@ -72,22 +76,31 @@ export function makeCoverage(chemicals, preset) {
   };
 }
 
-/* Always UP, never to the nearest. The figure is what somebody signs out of
-   the store before walking into the field, and rounding to the nearest tenth
-   sends a tank out short about half the time. Rounding up can only leave a
-   little in the drum, which is where it was anyway. The office's ceilTo.
+/* ── The step a single plot is measured out in ─────────────────────────
+   Nobody mixes 58.8 mL. A sprayman fills the tank to a mark and the mark is
+   every 50, so ONE PLOT's spray is rounded up to the next 50 and the week's
+   figure is those per-plot amounts added. Fertiliser is weighed rather than
+   poured, and goes out in 100 gm steps.
 
-   The 1e9 is not decoration: 0.1 × 3 is held as 0.30000000000000004, and the
-   ceiling of that at one decimal is 0.4. The dust goes first. */
-function ceilTo(value, decimals) {
-  const factor = Math.pow(10, decimals);
-  return Math.ceil(Math.round(value * factor * 1e9) / 1e9) / factor;
+   The office's CHEM_STEP, FERT_STEP and ceilStep. Change one, change the
+   other — a phone that disagrees with the sheet leaves a Field Conductor no
+   way to tell which is wrong. */
+export const CHEM_STEP = 50;    // mL or gm, per plot, per spray
+export const FERT_STEP = 100;   // gm, per plot
+
+/* Up to the next whole step. The 1e9 clears the float dust first: 3 × 0.1 is
+   held as 0.30000000000000004, and a ceiling takes that straight up. */
+function ceilStep(value, step) {
+  if (!(value > 0)) return 0;
+  return Math.ceil(Math.round((value / step) * 1e9) / 1e9) * step;
 }
 
-/** grams → kg, millilitres → L, one decimal, rounded UP — the office's
-    fmtUsage. Change one, change the other. */
+/* The total is a whole number of steps, so it is shown exactly rather than
+   rounded again — 1950 mL is 1.95 L, and calling that 2 L would add half a
+   litre the rule did not ask for. */
 function show(total, unit) {
-  return `${ceilTo(total / 1000, 1).toLocaleString()} ${unit === 'gm' ? 'kg' : 'L'}`;
+  const shown = Math.round((total / 1000) * 100) / 100;
+  return `${shown.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${unit === 'gm' ? 'kg' : 'L'}`;
 }
 
 /* A dose is a number or it is nothing. One keyed with a comma or a unit in
@@ -117,6 +130,10 @@ export function weekUsage(entries, week, { capacityOf, coverageOf } = {}) {
      product, its unit AND its rate. Two columns of the same fertiliser at
      different rates are two lines, because one number would be neither. */
   const bag = new Map();
+  /* What accumulates is the AMOUNT, not the seedlings: each plot is taken up
+     to its own step first and those are added. Adding the seedlings and
+     stepping once at the end answers a different question — one tank for
+     thirteen plots, when thirteen get mixed. */
   const add = (job, nursery, plot, name, dose, unit, kind) => {
     if (!name || name === '—') return;
     const d = num(dose);
@@ -124,8 +141,10 @@ export function weekUsage(entries, week, { capacityOf, coverageOf } = {}) {
     const cap = capacityOf(nursery, plot);
     if (cap == null) { missing.add(plot); return; }
     const k = `${job}|${name}|${unit || ''}|${kind}|${d}`;
-    if (!bag.has(k)) bag.set(k, { job, name, dose: d, unit, kind, seed: 0 });
-    bag.get(k).seed += cap;
+    if (!bag.has(k)) bag.set(k, { job, name, unit, total: 0 });
+    bag.get(k).total += kind === 'fert'
+      ? ceilStep(cap * d, FERT_STEP)
+      : ceilStep((cap / (coverageOf ? coverageOf(name) : COVERAGE_PER_PUMP)) * d, CHEM_STEP);
   };
 
   (entries || []).forEach((e) => {
@@ -181,11 +200,8 @@ export function weekUsage(entries, week, { capacityOf, coverageOf } = {}) {
   });
 
   bag.forEach((b) => {
-    if (!b.seed) return;
-    const total = b.kind === 'fert'
-      ? b.seed * b.dose
-      : (b.seed / (coverageOf ? coverageOf(b.name) : COVERAGE_PER_PUMP)) * b.dose;
-    out[b.job].push({ name: b.name, text: show(total, b.unit) });
+    if (!b.total) return;
+    out[b.job].push({ name: b.name, text: show(b.total, b.unit) });
   });
   ['pd', 'manuring', 'weeding', 'interrow'].forEach((k) =>
     out[k].sort((a, b) => a.name.localeCompare(b.name)));
