@@ -25,6 +25,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { isOverdue, pendingCases } from '../lib/nelos.js';
+import { compressImage, dataUrlToBlob } from '../lib/image.js';
 import { useLang } from '../context/LanguageContext.jsx';
 import NelosNewCase from './NelosNewCase.jsx';
 
@@ -134,7 +135,17 @@ function CaseView({ caseId, me, onBack, onChanged }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState(null);
-  const [shot, setShot] = useState(null);   // the photo of the fix, if one was taken
+  /* EVERY photo of the fix, not one.
+
+     One is rarely the job: the gap before and the planting after, three
+     trays that needed the same thing, a wide shot and the close-up that
+     shows what it actually was. And on a phone "take a photo" IS one at a
+     time — the camera returns after each shot — so the picker appends
+     rather than replaces and stays on screen to be tapped again.
+
+     Same decision as the office side (mjm-ai-system → shared_nelos_dock.js
+     _shots). Change one, change the other. */
+  const [shots, setShots] = useState([]);
   const resolutionRef = useRef(null);
 
   /* select('*') rather than a column list. Nelos has grown columns over
@@ -179,11 +190,23 @@ function CaseView({ caseId, me, onBack, onChanged }) {
   /* The photo of the fix, into the same bucket and path shape the dock
      uses (mjm-ai-system/shared/shared_nelos_dock.js → uploadShot) so one
      case's picture is in the same place whichever surface solved it. */
-  async function uploadShot(file) {
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const path = `solve/${caseId}-${Date.now()}.${ext || 'jpg'}`;
+  async function uploadShot(file, n) {
+    /* SHRUNK FIRST. A phone camera hands over eight to twelve megabytes,
+       and an upload that size over a plot's signal is an upload that does
+       not finish — which is how "solve took no photo" happened. A photo of
+       the fix has to show what was done, not be printable. If the shrink
+       itself fails the original still goes, which is slow but not lost. */
+    let body = file, type = file.type || 'image/jpeg';
+    try {
+      const small = await compressImage(file, { maxW: 1600, quality: 0.82, maxBytes: 900 * 1024 });
+      const blob = dataUrlToBlob(small);
+      if (blob) { body = blob; type = 'image/jpeg'; }
+    } catch (e) { /* the original goes instead */ }
+    const ext = type === 'image/jpeg' ? 'jpg'
+              : (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const path = `solve/${caseId}-${Date.now()}-${n}.${ext}`;
     const { error } = await supabase.storage.from('nelos-photos')
-      .upload(path, file, { contentType: file.type || 'application/octet-stream' });
+      .upload(path, body, { contentType: type });
     if (error) return null;
     return supabase.storage.from('nelos-photos').getPublicUrl(path).data?.publicUrl || null;
   }
@@ -197,15 +220,37 @@ function CaseView({ caseId, me, onBack, onChanged }) {
     }
     /* Upload BEFORE the patch: a failed upload leaves the case as it was,
        whereas patching first would mark work solved and then lose the
-       picture of it. The column is written only when there is a photo, so
-       a database without migration_nelos_solve_photo.sql still resolves. */
-    const url = shot ? await uploadShot(shot) : null;
+       picture of it. */
+    const urls = [];
+    for (let i = 0; i < shots.length; i++) {
+      const url = await uploadShot(shots[i], i + 1);
+      if (!url) {
+        /* LOUD, and the case is NOT resolved. A photo somebody stood in a
+           plot to take, dropped silently, is the fault this is here to
+           stop: they would walk away believing it was kept. */
+        setFlash({ ok: false, msg: t('nel.photoFailed', { n: i + 1 }) });
+        return;
+      }
+      urls.push(url);
+    }
     const fields = { status: 'resolved', resolution: text, resolved_by: me.name,
                      resolved_at: new Date().toISOString() };
-    if (url) fields.resolution_photo_url = url;
+    /* The FIRST photo still goes in resolution_photo_url, which every
+       reader of a single photo goes on finding, and all of them into
+       resolution_photo_urls. */
+    if (urls.length) fields.resolution_photo_url = urls[0];
+    if (urls.length) fields.resolution_photo_urls = urls;
 
-    const ok = await patch(fields, `Resolved — ${me.name}`);
-    if (ok) { setShot(null); onBack(); }
+    let ok = await patch(fields, `Resolved — ${me.name}`);
+    /* A database that has not run shared/RUN_ME_nelos_solve_photos.sql has
+       no resolution_photo_urls column and refuses the whole patch. Rather
+       than fail the solve, it goes again with the one photo the old column
+       holds — the extras are uploaded and waiting for the column. */
+    if (!ok && urls.length > 1) {
+      delete fields.resolution_photo_urls;
+      ok = await patch(fields, `Resolved — ${me.name}`);
+    }
+    if (ok) { setShots([]); onBack(); }
   }
 
   async function closeCase() {
@@ -279,8 +324,25 @@ function CaseView({ caseId, me, onBack, onChanged }) {
         <div className="mt-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
           <div className="text-[9px] font-black uppercase tracking-[.1em] text-emerald-600">{t('nel.resolution')}</div>
           <div className="text-[12.5px] font-bold text-emerald-800 mt-1 whitespace-pre-wrap">{c.resolution}</div>
-          {c.resolution_photo_url &&
-            <img src={c.resolution_photo_url} alt={t('nel.photoOfFix')} className="w-full rounded-lg mt-2 block" />}
+          {/* Every photo of the fix. resolution_photo_urls holds them all
+              where the column exists; resolution_photo_url is the first of
+              them and the only one on a database that has not run
+              shared/RUN_ME_nelos_solve_photos.sql yet. */}
+          {(() => {
+            let list = c.resolution_photo_urls;
+            if (typeof list === 'string') { try { list = JSON.parse(list); } catch (e) { list = null; } }
+            if (!Array.isArray(list) || !list.length) list = c.resolution_photo_url ? [c.resolution_photo_url] : [];
+            if (!list.length) return null;
+            return (
+              <div className={list.length > 1 ? 'grid grid-cols-2 gap-2 mt-2' : 'mt-2'}>
+                {list.map((u, i) => (
+                  <a key={i} href={u} target="_blank" rel="noreferrer" className="block">
+                    <img src={u} alt={t('nel.photoNof', { i: i + 1 })} className="w-full rounded-lg block" />
+                  </a>
+                ))}
+              </div>
+            );
+          })()}
           <div className="text-[10px] font-bold text-emerald-700 mt-1.5">
             {t('nel.resolvedBy', { who: c.resolved_by || t('nel.unknown') })}
             {c.resolved_at ? ` · ${fmtStamp(c.resolved_at, loc)}` : ''}
@@ -311,23 +373,38 @@ function CaseView({ caseId, me, onBack, onChanged }) {
         <div className="mt-4 pt-3.5 border-t border-violet-100">
           <div className={sec}>{t('nel.solveCase')}</div>
 
-          {shot ? (
-            <div className="relative mt-2 rounded-xl overflow-hidden bg-slate-100">
-              <img src={URL.createObjectURL(shot)} alt={t('nel.photoOfFix')}
-                   className="w-full max-h-56 object-cover block" />
-              <button type="button" onClick={() => setShot(null)} aria-label={t('nel.removePhoto')}
-                className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-900/60 text-white text-[12px] leading-none cursor-pointer">✕</button>
+          {shots.length > 0 && (
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {shots.map((f, i) => (
+                <div key={i} className="relative rounded-xl overflow-hidden bg-slate-100 aspect-square">
+                  <img src={URL.createObjectURL(f)} alt={t('nel.photoNof', { i: i + 1 })}
+                       className="w-full h-full object-cover block" />
+                  <button type="button" aria-label={t('nel.removePhoto')}
+                    onClick={() => setShots(shots.filter((_, n) => n !== i))}
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-slate-900/60 text-white text-[12px] leading-none cursor-pointer">✕</button>
+                  <span className="absolute bottom-1 left-1 px-1.5 rounded bg-slate-900/60 text-white text-[9px] font-black tabular-nums">{i + 1}</span>
+                </div>
+              ))}
             </div>
-          ) : (
-            <label className="mt-2 flex flex-col items-center justify-center gap-1 min-h-[68px] cursor-pointer
-                              border-[1.5px] border-dashed border-violet-200 rounded-xl bg-violet-50/60
-                              text-violet-700 text-[11.5px] font-black">
-              <span aria-hidden="true">📷</span>
-              <span>{t('nel.takePhoto')}</span>
-              <input type="file" accept="image/*" capture="environment" className="hidden"
-                     onChange={(e) => setShot(e.target.files?.[0] || null)} />
-            </label>
           )}
+          {/* STAYS ON SCREEN with photos already taken — that is the whole
+              point. `capture` is deliberately NOT set: forcing the camera
+              takes away the gallery, and on some Android builds a captured
+              file came back with no name and was dropped. The input's value
+              is cleared after every pick so the same file can be chosen
+              twice and the camera re-opened straight away. */}
+          <label className={`mt-2 flex flex-col items-center justify-center gap-1 min-h-[68px] cursor-pointer
+                            border-[1.5px] border-dashed border-violet-200 rounded-xl bg-violet-50/60
+                            text-violet-700 text-[11.5px] font-black`}>
+            <span aria-hidden="true">📷</span>
+            <span>{shots.length ? t('nel.addPhoto', { n: shots.length }) : t('nel.takePhoto')}</span>
+            <input type="file" accept="image/*" multiple className="hidden nel-shot-in"
+                   onChange={(e) => {
+                     const picked = Array.from(e.target.files || []);
+                     if (picked.length) setShots((prev) => [...prev, ...picked]);
+                     e.target.value = '';
+                   }} />
+          </label>
 
           {/* Labelled rather than prompted from inside the box: a placeholder
               is gone the moment anybody types, so the one thing saying what
