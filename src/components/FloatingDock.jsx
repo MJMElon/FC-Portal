@@ -73,7 +73,7 @@ function defaultPos() {
 function NelosMark() {
   return (
     <span className="grid place-items-center leading-none">
-      <span className="text-[15px] font-black tracking-tight text-violet-700">NL</span>
+      <span className="text-[15px] font-black tracking-tight text-[#7b3f93]">NL</span>
     </span>
   );
 }
@@ -284,7 +284,7 @@ export default function FloatingDock() {
             title={on ? 'PALMS' : 'Nelos'}
             aria-label={on ? 'PALMS' : 'Nelos'}
             style={{ left: p.left, top: p.top, width: MINI, height: MINI, zIndex: 41 }}
-            className={`${miniCls} ${on ? 'border-teal-500' : 'border-violet-500'}`}
+            className={`${miniCls} ${on ? 'border-teal-500' : 'border-[#d49aea]'}`}
           >
             {on
               ? <span style={{ transform: 'scale(.62)' }}><Train steaming={steaming} /></span>

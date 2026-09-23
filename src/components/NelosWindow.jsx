@@ -282,7 +282,7 @@ function CaseView({ caseId, me, onBack, onChanged }) {
   const hasActions = s === 'open' || s === 'in_progress' || s === 'resolved' || s === 'closed';
 
   const btn = 'px-3.5 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider text-white cursor-pointer disabled:opacity-50';
-  const sec = 'text-[10px] font-black uppercase tracking-[.11em] text-violet-700';
+  const sec = 'text-[10px] font-black uppercase tracking-[.11em] text-[#7b3f93]';
   const kk  = 'text-[8.5px] font-black uppercase tracking-widest text-slate-400';
   const vv  = 'text-[12px] font-bold text-slate-800 mt-0.5 leading-snug break-words';
 
@@ -370,7 +370,7 @@ function CaseView({ caseId, me, onBack, onChanged }) {
           button, so opening a case showed no way to solve it until you had
           pressed something that sounded like it would solve it already. */}
       {pending && (
-        <div className="mt-4 pt-3.5 border-t border-violet-100">
+        <div className="mt-4 pt-3.5 border-t border-[#f3ddfb]">
           <div className={sec}>{t('nel.solveCase')}</div>
 
           {shots.length > 0 && (
@@ -394,8 +394,8 @@ function CaseView({ caseId, me, onBack, onChanged }) {
               is cleared after every pick so the same file can be chosen
               twice and the camera re-opened straight away. */}
           <label className={`mt-2 flex flex-col items-center justify-center gap-1 min-h-[68px] cursor-pointer
-                            border-[1.5px] border-dashed border-violet-200 rounded-xl bg-violet-50/60
-                            text-violet-700 text-[11.5px] font-black`}>
+                            border-[1.5px] border-dashed border-[#eed0f8] rounded-xl bg-[#fcf6fe]/60
+                            text-[#7b3f93] text-[11.5px] font-black`}>
             <span aria-hidden="true">📷</span>
             <span>{shots.length ? t('nel.addPhoto', { n: shots.length }) : t('nel.takePhoto')}</span>
             <input type="file" accept="image/*" multiple className="hidden nel-shot-in"
@@ -412,7 +412,7 @@ function CaseView({ caseId, me, onBack, onChanged }) {
           <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mt-3 mb-1.5">{t('nel.solveRemark')}</div>
           <textarea ref={resolutionRef} rows={3}
             className="w-full border-[1.5px] border-slate-200 rounded-xl px-3 py-2 text-[13px] font-semibold
-                       bg-white text-slate-800 outline-none focus:border-violet-400" />
+                       bg-white text-slate-800 outline-none focus:border-[#d49aea]" />
           <button className={`${btn} bg-green-600 mt-2`} disabled={busy} onClick={confirmResolve}>{t('nel.saveSolve')}</button>
         </div>
       )}
@@ -432,7 +432,7 @@ function Row({ c, onOpen }) {
   ].filter(Boolean);
   return (
     <button type="button" onClick={() => onOpen(c.id)}
-      className="w-full text-left flex items-start gap-2.5 px-4 py-2.5 border-b border-dashed border-slate-100 hover:bg-violet-50 cursor-pointer">
+      className="w-full text-left flex items-start gap-2.5 px-4 py-2.5 border-b border-dashed border-slate-100 hover:bg-[#fcf6fe] cursor-pointer">
       <span className={`w-2 h-2 rounded-full mt-[7px] shrink-0 ${DOT[c.priority] || DOT.normal}`}
         title={c.priority ? t(PRIORITY_KEY[c.priority] || 'nel.prNormal') : ''} />
       <span className="min-w-0 flex-1">
@@ -440,7 +440,7 @@ function Row({ c, onOpen }) {
           {c.title}
         </span>
         <span className="block text-[10px] font-semibold text-slate-400 mt-0.5">
-          <span className="inline-block text-[9px] font-black uppercase tracking-wider bg-violet-100 text-violet-700 px-1.5 py-px rounded">
+          <span className="inline-block text-[9px] font-black uppercase tracking-wider bg-[#f3ddfb] text-[#7b3f93] px-1.5 py-px rounded">
             {SOURCE_LABEL[c.source_module] || c.source_module}
           </span>
           {bits.map((b) => <span key={b}> · {b}</span>)}
@@ -520,7 +520,7 @@ export default function NelosWindow({ onClose, onCount, anchor }) {
       >
         <div className="shrink-0 bg-white border-b border-slate-200 px-4 py-2.5 flex items-center gap-2">
           <span className="font-black text-slate-800 text-sm">NELOS</span>
-          <span className="font-black text-violet-600 text-[10px] uppercase tracking-[0.18em]">{t('nel.toDo')}</span>
+          <span className="font-black text-[#7b3f93] text-[10px] uppercase tracking-[0.18em] bg-[#e2a9f1]/45 px-2 py-0.5 rounded-full">{t('nel.toDo')}</span>
           {state.status === 'ready' && !!rows.length && (
             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">{rows.length}</span>
           )}
@@ -528,7 +528,7 @@ export default function NelosWindow({ onClose, onCount, anchor }) {
               Conductor is the person standing in the plot. */}
           {!openId && !adding && (
             <button onClick={() => { setRaised(null); setAdding(true); }}
-              className="ml-auto px-2.5 py-1.5 rounded-full bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black uppercase tracking-wider cursor-pointer shrink-0">
+              className="ml-auto px-2.5 py-1.5 rounded-full bg-[#9a4fbd] hover:bg-[#7b3f93] text-white text-[10px] font-black uppercase tracking-wider cursor-pointer shrink-0">
               {t('nel.newCase')}
             </button>
           )}
