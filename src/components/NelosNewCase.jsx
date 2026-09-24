@@ -47,6 +47,7 @@
    If Mobile/src/components/NelosNewCase.jsx changes, change this with it.
    ══════════════════════════════════════════════════════════════════════ */
 import { useEffect, useRef, useState } from 'react';
+import CfSelect from './CfSelect.jsx';
 import { supabase } from '../lib/supabase.js';
 import { raiseCase } from '../lib/nelos.js';
 import { useLang } from '../context/LanguageContext.jsx';
@@ -292,17 +293,17 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
       )}
 
       <label className={LABEL} htmlFor="nnc-to">{t('nel.assignToLabel')}</label>
-      <select id="nnc-to" className={FIELD} value={assignTo} onChange={(e) => pickAssignTo(e.target.value)}>
+      <CfSelect id="nnc-to" value={assignTo} onChange={(e) => pickAssignTo(e.target.value)}>
         <option value="">{t('nel.chooseSystem')}</option>
         {modules.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-      </select>
+      </CfSelect>
 
       <label className={LABEL} htmlFor="nnc-work">{t('nel.work')}</label>
       {worksFor.length ? (
-        <select id="nnc-work" className={FIELD} value={work} onChange={(e) => setWork(e.target.value)}>
+        <CfSelect id="nnc-work" value={work} onChange={(e) => setWork(e.target.value)}>
           <option value="">{t('nel.chooseWork')}</option>
           {worksFor.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </select>
+        </CfSelect>
       ) : (
         /* Either no system is chosen yet, or that system has no case titles
            set up. Both are answered by saying so rather than by an empty
@@ -312,29 +313,29 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
       )}
 
       <label className={LABEL} htmlFor="nnc-pic">{t('nel.pic')}</label>
-      <select id="nnc-pic" className={FIELD} value={pic} onChange={(e) => setPic(e.target.value)} disabled={!assignTo}>
+      <CfSelect id="nnc-pic" value={pic} onChange={(e) => setPic(e.target.value)} disabled={!assignTo}>
         <option value="">
           {assignTo && !picsFor.length ? t('nel.noPeople') : t('nel.anyone')}
         </option>
         {picsFor.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </select>
+      </CfSelect>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={LABEL} htmlFor="nnc-nursery">{t('nel.nursery')}</label>
-          <select id="nnc-nursery" className={FIELD} value={nursery}
+          <CfSelect id="nnc-nursery" value={nursery}
             onChange={(e) => { setNursery(e.target.value); setPlot(''); }}>
             <option value="">{t('nel.none')}</option>
             {Object.keys(NURSERY_PLOTS).map((n) => <option key={n} value={n}>{NURSERY_LABEL[n]}</option>)}
-          </select>
+          </CfSelect>
         </div>
         <div>
           <label className={LABEL} htmlFor="nnc-plot">{t('cull.plot')}</label>
-          <select id="nnc-plot" className={FIELD} value={plot} onChange={(e) => setPlot(e.target.value)}
+          <CfSelect id="nnc-plot" value={plot} onChange={(e) => setPlot(e.target.value)}
             disabled={!nursery}>
             <option value="">{nursery ? t('nel.none') : t('nel.nurseryFirst')}</option>
             {(NURSERY_PLOTS[nursery] || []).map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
+          </CfSelect>
         </div>
       </div>
 

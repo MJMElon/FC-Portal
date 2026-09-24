@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import CfSelect from '../../components/CfSelect.jsx';
 import { fmtNum, fmtPct } from './cullingData.js';
 import { CULL_LIMIT, actionFor, caseBody } from './cullingActions.js';
 // Every figure on this screen comes from here.
@@ -479,17 +480,16 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys })
                 answer is furniture, so a single-batch plot just prints its
                 number. */}
             {batches.length > 1 && (
-              <select
+              <CfSelect
+                dark
                 value={batchId || ''}
                 onChange={(e) => setBatchId(e.target.value)}
-                className="bg-[#1a1a1f] border border-[#2a2a33] text-slate-200 font-bold text-[11px]
-                           rounded-lg px-2 py-1 tabular-nums cursor-pointer outline-none max-w-[130px]"
-                aria-label={t('cull.batch')}
+                ariaLabel={t('cull.batch')}
               >
                 {batches.map((b) => (
                   <option key={b.batch} value={b.batch}>{b.batch}</option>
                 ))}
-              </select>
+              </CfSelect>
             )}
             {batches.length === 1 && batches[0].batch && (
               <span className="font-bold text-slate-400 text-[11px] tabular-nums">{batches[0].batch}</span>

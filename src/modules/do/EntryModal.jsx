@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import CfSelect from '../../components/CfSelect.jsx';
 import SignaturePad from './SignaturePad.jsx';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { callGemini, compressImage, DO_SCAN_PROMPT } from '../../lib/gemini.js';
@@ -262,17 +263,15 @@ export default function EntryModal({ al, plots, breeds, photoBase64, initialQty,
                             ))}
                           </div>
                           {/* Plot — dropdown, filtered by selected nursery */}
-                          <select
+                          <CfSelect
                             value={r.plot}
                             onChange={(e) => updateRow(r.key, 'plot', e.target.value)}
-                            className="search-input text-sm w-full"
-                            style={{ padding: '8px 12px' }}
                           >
                             <option value="">{t('do.plotPlaceholder')}</option>
                             {withCurrent(rowPlotOpts, r.plot).map((p) => (
                               <option key={p} value={p}>{p}</option>
                             ))}
-                          </select>
+                          </CfSelect>
                           {/* Breed — button toggle group */}
                           <div className="flex flex-wrap gap-1.5">
                             {withCurrent(breedOptions, r.breed).map((b) => (

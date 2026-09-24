@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAutoSync, useOnline } from '../../hooks/useOnline.js';
 import { agoText } from '../../lib/ago.js';
 import TopNav from '../../components/TopNav.jsx';
+import CfSelect from '../../components/CfSelect.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useLang } from '../../context/LanguageContext.jsx';
 import {
@@ -545,15 +546,13 @@ export default function MaintenanceModule({
           {/* One nursery at a time. "All" only ever produced a schedule the
               Field Conductor could not work through as one list. */}
           {nurseryOptions.length > 0 && (
-            <select
-              value={nursery}
-              onChange={(e) => setNursery(e.target.value)}
-              className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-emerald-500"
-            >
-              {nurseryOptions.map((n) => (
-                <option key={n}>{n}</option>
-              ))}
-            </select>
+            <div className="w-[160px]">
+              <CfSelect value={nursery} onChange={(e) => setNursery(e.target.value)}>
+                {nurseryOptions.map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </CfSelect>
+            </div>
           )}
           <button
             onClick={() => setHistory(true)}
@@ -898,19 +897,17 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
           {t('mt.plot')}
         </label>
-        <select
-          value={plotName}
-          onChange={(e) => setPlotName(e.target.value)}
-          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-3 text-sm font-bold text-slate-800 outline-none focus:border-emerald-500 mb-3"
-        >
-          <option value="">{t('mt.pickPlot')}</option>
-          {plots.map((p) => (
-            <option key={p.plot_name} value={p.plot_name}>
-              {p.plot_name}
-              {p.nursery_name ? ` — ${p.nursery_name}` : ''}
-            </option>
-          ))}
-        </select>
+        <div className="mb-3">
+          <CfSelect value={plotName} onChange={(e) => setPlotName(e.target.value)}>
+            <option value="">{t('mt.pickPlot')}</option>
+            {plots.map((p) => (
+              <option key={p.plot_name} value={p.plot_name}>
+                {p.plot_name}
+                {p.nursery_name ? ` — ${p.nursery_name}` : ''}
+              </option>
+            ))}
+          </CfSelect>
+        </div>
 
         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
           {t('mt.date')}
