@@ -73,7 +73,7 @@ function defaultPos() {
 function NelosMark() {
   return (
     <span className="grid place-items-center leading-none">
-      <span className="text-[15px] font-black tracking-tight text-[#7b3f93]">NL</span>
+      <span className="text-[15px] font-black tracking-tight text-[#3b162f]">NL</span>
     </span>
   );
 }
@@ -251,7 +251,7 @@ export default function FloatingDock() {
   };
 
   const miniCls =
-    'fixed grid place-items-center rounded-full bg-white border-2 shadow-[0_6px_18px_rgba(0,0,0,.2)] cursor-pointer select-none';
+    'fixed grid place-items-center rounded-full border-2 shadow-[0_6px_18px_rgba(0,0,0,.2)] cursor-pointer select-none';
 
   // What the × on each window already does on close, shared with the two
   // other ways a window now closes without it: tapping the trigger again,
@@ -284,7 +284,7 @@ export default function FloatingDock() {
             title={on ? 'PALMS' : 'Nelos'}
             aria-label={on ? 'PALMS' : 'Nelos'}
             style={{ left: p.left, top: p.top, width: MINI, height: MINI, zIndex: 41 }}
-            className={`${miniCls} ${on ? 'border-teal-500' : 'border-[#d49aea]'}`}
+            className={`${miniCls} ${on ? 'bg-white border-teal-500' : 'bg-[#efc7e2] border-[#cf6eaf]'}`}
           >
             {on
               ? <span style={{ transform: 'scale(.62)' }}><Train steaming={steaming} /></span>

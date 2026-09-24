@@ -78,7 +78,7 @@ const MAX_PHOTO = 8 * 1024 * 1024;
 
 const FIELD =
   'w-full border-[1.5px] border-slate-200 rounded-xl px-3 py-2.5 text-[13px] font-semibold ' +
-  'bg-white text-slate-800 outline-none focus:border-[#d49aea] disabled:bg-slate-50 disabled:text-slate-400';
+  'bg-white text-slate-800 outline-none focus:border-[#e4a0ce] disabled:bg-slate-50 disabled:text-slate-400';
 const LABEL = 'block text-[9px] font-black uppercase tracking-widest text-slate-400 mt-3 mb-1';
 
 export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
@@ -279,7 +279,7 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
   return (
     <div className="p-4 pb-6">
       <button onClick={onBack}
-        className="text-[11px] font-black uppercase tracking-widest text-[#7b3f93] hover:text-[#4a2158] cursor-pointer">
+        className="text-[11px] font-black uppercase tracking-widest text-[#913673] hover:text-[#511f41] cursor-pointer">
         ‹ {t('common.back')}
       </button>
 
@@ -354,7 +354,7 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
         /* capture="environment" opens the camera straight onto the back lens
            on a phone, and is simply ignored on a desktop, where the same
            control is a file picker. One control, both jobs. */
-        <label className="flex items-center justify-center gap-2 w-full py-4 rounded-xl border-[1.5px] border-dashed border-slate-300 text-[12.5px] font-bold text-slate-500 cursor-pointer hover:border-[#d49aea] hover:text-[#7b3f93]">
+        <label className="flex items-center justify-center gap-2 w-full py-4 rounded-xl border-[1.5px] border-dashed border-slate-300 text-[12.5px] font-bold text-slate-500 cursor-pointer hover:border-[#e4a0ce] hover:text-[#913673]">
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={pickPhoto} hidden />
           <span>📷 {t('nel.takeOrUpload')}</span>
         </label>
@@ -364,7 +364,7 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
       <textarea id="nnc-remarks" ref={remarksRef} rows={3} className={FIELD} placeholder={t('nel.whatYouSaw')} />
 
       <button onClick={submit} disabled={busy}
-        className="w-full mt-4 px-3.5 py-3 rounded-xl text-[12px] font-black uppercase tracking-wider text-white bg-[#9a4fbd] cursor-pointer disabled:opacity-50">
+        className="w-full mt-4 px-3.5 py-3 rounded-xl text-[12px] font-black uppercase tracking-wider text-white bg-[#bc4996] cursor-pointer disabled:opacity-50">
         {busy ? t('nel.creating') : t('nel.createNewCase')}
       </button>
     </div>
