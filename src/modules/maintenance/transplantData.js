@@ -2,10 +2,14 @@
  * The four jobs a plot needs when seedlings go into it.
  *
  * Everything on the left of this screen is the office's: which plots were
- * transplanted this month, with which batch and how many, read straight out
- * of shared_inventory_logs — the same ledger the operation report adds up.
- * Nobody re-keys a quantity, so the field and the office cannot disagree
- * about what was planted.
+ * transplanted this month, with which batch and how many, read the same way
+ * the Transplanting Report reads it — shared_inventory_logs, transaction
+ * type Transplanted, quantity_change summed. Nobody re-keys a figure, so the
+ * field and the office cannot disagree about what was planted.
+ *
+ * The report's approved Stock_Calibration adjustments only annotate its Qty
+ * cell, they do not change the number, so the figure here is the report's
+ * figure and not a near-miss of it.
  *
  * What the Field Conductor adds is the right of it: who did the work. Three
  * of the jobs are "these people did this plot". Polybag filling is paid by
@@ -24,11 +28,22 @@ export const TRANSPLANT_SETUP_NEEDED = 'TRANSPLANT_SETUP_NEEDED';
 
 const TABLE = 'nops_transplant_field_records';
 
-/* Transplanting puts seedlings INTO a plot. Three types, because the Batch
-   Report offers three destinations; reading all three matches the office
-   movement report rather than being a second opinion on it. Same list as
-   modules/palms/cullingSource.js — change one, change the other. */
-const TRANSPLANT_TYPES = ['Transplanted', 'Transplanted_Premium', 'Transplanted_DoubleTone'];
+/* ONE type, because this screen answers to the Transplanting Report and that
+   report reads one — see runTransplantingReport() in
+   operation/operation_reports.html, which says why in its own comment:
+   Transplanted_Premium and Transplanted_DoubleTone are pre-nursery moves
+   into the Premium Care and Double Tone holding TRAYS, not into a plot, and
+   do not belong in a report titled Transplanting.
+
+   They do not belong here either, and for a sharper reason: there is no plot
+   to blanket-spray, line, fill or plant. A tray on this list is four jobs
+   nobody can do.
+
+   Deliberately NOT the three-type list in modules/palms/cullingSource.js.
+   That one is measuring how much stock went into a block and wants every
+   destination; this one is asking which plots need work. Two questions, two
+   answers — do not "align" them. */
+const TRANSPLANT_TYPES = ['Transplanted'];
 
 /**
  * The four jobs, in the order they happen in the nursery.
