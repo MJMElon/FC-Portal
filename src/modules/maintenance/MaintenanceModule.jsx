@@ -42,6 +42,7 @@ import { formatDistance, mapsUrl } from './track/track.js';
 import GpsTrack from './GpsTrack.jsx';
 import HistoryDialog from './HistoryDialog.jsx';
 import PhotoSlots from './PhotoSlots.jsx';
+import TransplantSheet from './TransplantSheet.jsx';
 import VerifyHub from './VerifyHub.jsx';
 import WeekBoard from './WeekBoard.jsx';
 import WorkIcon from './WorkIcons.jsx';
@@ -138,6 +139,7 @@ export default function MaintenanceModule({
   const [cap, setCap] = useState(null);
   const [sheet, setSheet] = useState(null);         // { week, workType }
   const [history, setHistory] = useState(false);
+  const [transplant, setTransplant] = useState(false);
   const [saving, setSaving] = useState(false);
   const [workers, setWorkers] = useState([]);   // the roster a conductor may credit work to
   const [pending, setPending] = useState([]);   // records the queue is holding
@@ -739,6 +741,21 @@ export default function MaintenanceModule({
           </button>
         )}
 
+        {/* The jobs a plot needs when seedlings go INTO it. Its own button
+            rather than a fifth work type on the week board: these four are
+            not planned by the month's schedule at all — the operation report
+            decides which plots they apply to, by having transplanted into
+            them. */}
+        {mayRecord && (
+          <button
+            onClick={() => setTransplant(true)}
+            disabled={setup || !visiblePlots.length}
+            className="w-full bg-white hover:bg-slate-50 border-2 border-emerald-600 disabled:opacity-40 text-emerald-700 font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors"
+          >
+            🌱 {t('tp.button')}
+          </button>
+        )}
+
         {setup && (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm font-bold">
             {t('mt.setupNeeded')}
@@ -789,6 +806,22 @@ export default function MaintenanceModule({
           </div>
         )}
       </div>
+
+      {transplant && (
+        <TransplantSheet
+          nursery={nursery}
+          month={month}
+          plotNames={visiblePlots.map((p) => p.plot_name)}
+          /* The nursery's general workers, and the whole register only if
+             that narrowing leaves nobody. Not gated on the `workers`
+             function switch the way the maintenance form is: crediting the
+             work IS this screen, so turning it off would leave a form that
+             cannot be filled in. */
+          workers={nurseryWorkers.length ? nurseryWorkers : workers}
+          staffName={staffName}
+          onClose={() => setTransplant(false)}
+        />
+      )}
 
       {history && (
         <HistoryDialog
