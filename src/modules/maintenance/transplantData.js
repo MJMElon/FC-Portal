@@ -21,6 +21,7 @@
  * shared/RUN_ME_transplant_records.sql in the office repository.
  */
 
+import { nurseryKey } from '../../lib/access.js';
 import { fetchAllRows, supabase } from '../../lib/supabase.js';
 
 /** Raised when the table has not been created yet. */
@@ -142,9 +143,16 @@ export async function loadTransplantRecords(nursery, monthLabel) {
     if (missingTable(error)) throw new Error(TRANSPLANT_SETUP_NEEDED);
     throw error;
   }
-  // Filtered here rather than in the query: a record made before the nursery
-  // was written would vanish from its own plot's list.
-  return (data || []).filter((r) => !nursery || !r.nursery_name || r.nursery_name === nursery);
+  /* Filtered here rather than in the query: a record made before the nursery
+     was written would vanish from its own plot's list.
+
+     Matched through the same key the plot list uses — "UNN 1" and "UNN1" are
+     one nursery, and a record saved under one spelling must not hide from
+     the other. */
+  const want = nursery ? nurseryKey(nursery) : null;
+  return (data || []).filter(
+    (r) => !want || !r.nursery_name || nurseryKey(r.nursery_name) === want
+  );
 }
 
 /**

@@ -290,6 +290,23 @@ export default function MaintenanceModule({
     return generalWorkers(mine);
   }, [workers, nursery]);
 
+  /* The plots of the nursery CHOSEN at the top, which is not the same list
+     as visiblePlots. That one is scoped by permission — every nursery this
+     conductor may open — and permission is the wrong question here: with BNN
+     chosen he was being offered UNN 1's and UNN 2's transplanting as well,
+     on one undifferentiated list.
+
+     Compared through nurseryKey because shared_plots says "UNN 1" where the
+     office files "UNN1", and a screen that matched on the raw string would
+     show an empty list for half the nurseries. */
+  const transplantPlots = useMemo(() => {
+    const want = nursery ? nurseryKey(nursery) : null;
+    const mine = want
+      ? visiblePlots.filter((p) => nurseryKey(p.nursery_name) === want)
+      : visiblePlots;
+    return mine.map((p) => p.plot_name);
+  }, [visiblePlots, nursery]);
+
   const nurseryOptions = useMemo(
     () => [...new Set(visiblePlots.map((p) => p.nursery_name).filter(Boolean))].sort(),
     [visiblePlots]
@@ -811,7 +828,7 @@ export default function MaintenanceModule({
         <TransplantSheet
           nursery={nursery}
           month={month}
-          plotNames={visiblePlots.map((p) => p.plot_name)}
+          plotNames={transplantPlots}
           /* The nursery's general workers, and the whole register only if
              that narrowing leaves nobody. Not gated on the `workers`
              function switch the way the maintenance form is: crediting the
