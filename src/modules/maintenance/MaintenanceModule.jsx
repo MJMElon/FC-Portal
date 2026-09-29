@@ -18,6 +18,7 @@ import {
   hasRejectColumns,
   hasVerifyColumns,
   isModuleAdmin,
+  loadCapacity,
   loadMaintenanceData,
   loadPlotBatches,
   loadWorkers,
@@ -42,12 +43,14 @@ import { formatDistance, mapsUrl } from './track/track.js';
 import GpsTrack from './GpsTrack.jsx';
 import HistoryDialog from './HistoryDialog.jsx';
 import PhotoSlots from './PhotoSlots.jsx';
+import TransplantSheet from './TransplantSheet.jsx';
 import VerifyHub from './VerifyHub.jsx';
 import WeekBoard from './WeekBoard.jsx';
 import WorkIcon from './WorkIcons.jsx';
 import WhoDidIt from './WhoDidIt.jsx';
 import WorkSheet from './WorkSheet.jsx';
 import { batchesIn } from './plotBatches.js';
+import { makeCapacity, makeCoverage, weekUsage } from './usage.js';
 import RecordCard from './RecordCard.jsx';
 import { tintOf } from './tints.js';
 import {
@@ -77,6 +80,11 @@ const MAX_PHOTOS = 3;
  */
 const FC_SOURCE = {
   loadData:       loadMaintenanceData,
+  /* Only the FC portal. The store figures come from four tables a worker,
+     who is `anon`, cannot read — and does not need: a worker is told which
+     plots to do, not how much to sign out of the store. The board simply
+     draws no figures when its source has no answer for this. */
+  loadCapacity,
   loadPlotBatches,
   loadWorkers,
   loadSchedules,
@@ -126,8 +134,13 @@ export default function MaintenanceModule({
   const [toast, setToast] = useState(null);
   const [schedule, setSchedule] = useState([]);     // one row per nursery that has a plan
   const [batchMap, setBatchMap] = useState(new Map());
+  /* Plot capacity and pump coverage — what the week's store figures are
+     worked out from. Null until read, and null forever on a source that
+     cannot read it, which the board takes as "say nothing". */
+  const [cap, setCap] = useState(null);
   const [sheet, setSheet] = useState(null);         // { week, workType }
   const [history, setHistory] = useState(false);
+  const [transplant, setTransplant] = useState(false);
   const [saving, setSaving] = useState(false);
   const [workers, setWorkers] = useState([]);   // the roster a conductor may credit work to
   const [pending, setPending] = useState([]);   // records the queue is holding
@@ -278,6 +291,23 @@ export default function MaintenanceModule({
     return generalWorkers(mine);
   }, [workers, nursery]);
 
+  /* The plots of the nursery CHOSEN at the top, which is not the same list
+     as visiblePlots. That one is scoped by permission — every nursery this
+     conductor may open — and permission is the wrong question here: with BNN
+     chosen he was being offered UNN 1's and UNN 2's transplanting as well,
+     on one undifferentiated list.
+
+     Compared through nurseryKey because shared_plots says "UNN 1" where the
+     office files "UNN1", and a screen that matched on the raw string would
+     show an empty list for half the nurseries. */
+  const transplantPlots = useMemo(() => {
+    const want = nursery ? nurseryKey(nursery) : null;
+    const mine = want
+      ? visiblePlots.filter((p) => nurseryKey(p.nursery_name) === want)
+      : visiblePlots;
+    return mine.map((p) => p.plot_name);
+  }, [visiblePlots, nursery]);
+
   const nurseryOptions = useMemo(
     () => [...new Set(visiblePlots.map((p) => p.nursery_name).filter(Boolean))].sort(),
     [visiblePlots]
@@ -385,6 +415,18 @@ export default function MaintenanceModule({
     return () => { live = false; };
   }, [source]);
 
+  /* Once, with the plot balances. Capacity changes when the nursery is
+     rebuilt, not when a plot is sprayed, so there is nothing to re-read
+     after a record. */
+  useEffect(() => {
+    let live = true;
+    if (!source.loadCapacity) { setCap(null); return undefined; }
+    source.loadCapacity()
+      .then((c) => { if (live) setCap(c || null); })
+      .catch((e) => { console.warn('[maintenance] capacity unavailable:', e); if (live) setCap(null); });
+    return () => { live = false; };
+  }, [source]);
+
   // Once, when the module opens. Deliberately NOT re-read after a save:
   // recording that a plot was sprayed moves no seedlings, so the balances
   // cannot have changed — and this read pages the entire inventory ledger.
@@ -407,6 +449,19 @@ export default function MaintenanceModule({
     acc[w] = WORK_TYPES.reduce((c, wt) => { c[wt.key] = tasksByWeek[w][wt.key].length; return c; }, {});
     return acc;
   }, {}), [tasksByWeek]);
+  /* How much to draw from the store, per job, for each week. Same
+     arithmetic as the office's Schedule tab — see usage.js. Empty when this
+     phone has no capacity table, which reads as no line rather than zero. */
+  const usageByWeek = useMemo(() => {
+    if (!cap) return {};
+    const capacityOf = makeCapacity(cap);
+    const coverageOf = makeCoverage(cap.chemicals, cap.preset);
+    return WEEKS.reduce((acc, w) => {
+      acc[w] = weekUsage(schedule, w, { capacityOf, coverageOf });
+      return acc;
+    }, {});
+  }, [schedule, cap]);
+
   const doneCounts = useMemo(() => WEEKS.reduce((acc, w) => {
     acc[w] = WORK_TYPES.reduce((c, wt) => {
       c[wt.key] = tasksByWeek[w][wt.key].filter((x) =>
@@ -625,6 +680,7 @@ export default function MaintenanceModule({
                   isNow={viewingNow}
                   counts={counts[currentWeek]}
                   doneCounts={doneCounts[currentWeek]}
+                  usage={usageByWeek[currentWeek]}
                   onPrev={() => stepWeek(-1)}
                   onNext={() => stepWeek(1)}
                   onNow={() => setView({ month: nowMonth, week: nowWeek })}
@@ -701,6 +757,21 @@ export default function MaintenanceModule({
           </button>
         )}
 
+        {/* The jobs a plot needs when seedlings go INTO it. Its own button
+            rather than a fifth work type on the week board: these four are
+            not planned by the month's schedule at all — the operation report
+            decides which plots they apply to, by having transplanted into
+            them. */}
+        {mayRecord && (
+          <button
+            onClick={() => setTransplant(true)}
+            disabled={setup || !visiblePlots.length}
+            className="w-full bg-white hover:bg-slate-50 border-2 border-emerald-600 disabled:opacity-40 text-emerald-700 font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors"
+          >
+            🌱 {t('tp.button')}
+          </button>
+        )}
+
         {setup && (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm font-bold">
             {t('mt.setupNeeded')}
@@ -751,6 +822,22 @@ export default function MaintenanceModule({
           </div>
         )}
       </div>
+
+      {transplant && (
+        <TransplantSheet
+          nursery={nursery}
+          month={month}
+          plotNames={transplantPlots}
+          /* The nursery's general workers, and the whole register only if
+             that narrowing leaves nobody. Not gated on the `workers`
+             function switch the way the maintenance form is: crediting the
+             work IS this screen, so turning it off would leave a form that
+             cannot be filled in. */
+          workers={nurseryWorkers.length ? nurseryWorkers : workers}
+          staffName={staffName}
+          onClose={() => setTransplant(false)}
+        />
+      )}
 
       {history && (
         <HistoryDialog

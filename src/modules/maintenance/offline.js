@@ -116,6 +116,20 @@ export function cachedSchedules(monthLabel) {
   return { rows: hit.rows, at: Number(hit.at) || 0 };
 }
 
+/* What the store figures are worked out from: plot capacity, tray sizes,
+   the chemicals' own pump coverage and the preset. Small, and it changes
+   about as often as the nursery is rebuilt — so it is kept, and a phone
+   with no signal still shows the week's usage rather than nothing. */
+export function cacheCapacity(c) {
+  const now = read() || {};
+  write({ ...now, capAt: Date.now(), cap: c || null });
+}
+
+export function cachedCapacity() {
+  const raw = read();
+  return (raw && raw.cap) || null;
+}
+
 /** The roster the record form credits work to. */
 export function cacheWorkers(rows) {
   const now = read() || {};

@@ -6,6 +6,7 @@ import { allowedNurseries } from '../lib/access.js';
 import { cacheGet, cacheSet } from '../lib/cache.js';
 import {
   WORK_TYPES,
+  loadCapacity,
   loadMaintenanceData,
   loadSchedules,
   nurseryKey,
@@ -23,10 +24,14 @@ import {
   weekOfDate,
 } from '../modules/maintenance/schedule.js';
 import { tintOf } from '../modules/maintenance/tints.js';
+import { makeCapacity, makeCoverage, weekUsage } from '../modules/maintenance/usage.js';
 import ProgressDial from '../modules/maintenance/ProgressDial.jsx';
 import WorkIcon from '../modules/maintenance/WorkIcons.jsx';
 
-const CACHE_KEY = 'maintenance_board_month_v2';
+/* v3: the cached shape gained usageByWeek. An older cache would simply have
+   no figures, which is survivable — but a new key means the first load after
+   a deploy fetches them rather than showing a card that never has them. */
+const CACHE_KEY = 'maintenance_board_month_v3';
 
 /** One week-stepper arrow. Greys out at the ends of the month instead of
     disappearing, so the control does not change shape as you move. */
@@ -117,8 +122,17 @@ export default function MaintenanceBoard() {
         // The office files under BNN / UNN1; shared_plots says "UNN 1". Ask
         // for both spellings and keep whichever comes back.
         const keys = [...new Set(nurseries.flatMap((n) => [n, nurseryKey(n)]))];
-        const schedule = await loadSchedules(keys, month);
+        /* The plan, and what the week's work takes out of the store. The
+           capacity read is allowed to fail on its own: a card that shows the
+           counts is worth having even where the figures cannot be worked
+           out, and they are the optional half of it. */
+        const [schedule, cap] = await Promise.all([
+          loadSchedules(keys, month),
+          loadCapacity().catch(() => null),
+        ]);
         const all = withQueued(records, queued);
+        const capacityOf = cap ? makeCapacity(cap) : null;
+        const coverageOf = cap ? makeCoverage(cap.chemicals, cap.preset) : null;
 
         // Kept week by week rather than summed. The board shows one week at
         // a time and you step between them, so a month-wide total would have
@@ -138,6 +152,12 @@ export default function MaintenanceBoard() {
             ).length;
           });
           byWeek[w] = { totals, done };
+          /* How much chemical, fertiliser and sticker this week comes to —
+             the same arithmetic the office prints under each work and the
+             module's own board shows under each job. See usage.js. */
+          if (capacityOf) {
+            byWeek[w].usage = weekUsage(schedule, w, { capacityOf, coverageOf });
+          }
         });
 
         const next = { byWeek, month, scheduled: schedule.length > 0 };
@@ -181,13 +201,13 @@ export default function MaintenanceBoard() {
           </span>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] font-black text-teal-700">{month}</span>
-            {/* The programme schedule. Nothing to show yet — it says so
-                rather than going somewhere, so the button means the same
-                thing on the day it starts listing programmes. */}
+            {/* What the week takes out of the store. It used to open a box
+                that said "no programme listed yet" whatever the month held —
+                a button with one answer. */}
             <button
               onClick={() => setShowInfo(true)}
-              title={t('mtb.schedule')}
-              aria-label={t('mtb.schedule')}
+              title={t('mtb.maxUse')}
+              aria-label={t('mtb.maxUse')}
               className="grid place-items-center w-6 h-6 rounded-full border border-teal-300 text-teal-700 text-[11px] font-black italic hover:bg-teal-100 transition-colors cursor-pointer shrink-0"
             >
               i
@@ -287,21 +307,48 @@ export default function MaintenanceBoard() {
         </>
       )}
 
-      {showInfo && <SchedulePopover t={t} month={month} week={week} onClose={() => setShowInfo(false)} />}
+      {showInfo && (
+        <SchedulePopover
+          t={t} lang={lang} month={month} week={week}
+          usage={wk.usage} totals={wk.totals}
+          onClose={() => setShowInfo(false)}
+        />
+      )}
     </div>
   );
 }
 
 /** What the i button opens. There is no programme feed behind it yet, so it
     says so plainly instead of showing an empty list that looks broken. */
-function SchedulePopover({ t, month, week, onClose }) {
+/**
+ * What this week takes out of the store.
+ *
+ * The ⓘ said "no programme listed yet" whatever the month held — a button
+ * that only ever had one answer. The question worth asking of the front page
+ * is how much to sign out, so that is what it answers now: per job, each
+ * chemical, fertiliser and sticker with the amount that week's plots come to.
+ *
+ * One line per product, never one added-up number. Two products are two
+ * things to draw, and litres of Becker do not add to kilograms of Antracol.
+ */
+function SchedulePopover({ t, lang, month, week, usage, totals, onClose }) {
+  const jobs = WORK_TYPES
+    .map((wt) => ({ wt, rows: (usage && usage[wt.key]) || [], due: (totals || {})[wt.key] || 0 }))
+    .filter((j) => j.rows.length > 0);
+  /* Nothing to show has two different causes, and they are not the same
+     sentence. No plan at all is the office's; a plan whose figures could not
+     be worked out is this phone's, and saying "no programme" for it would
+     send a Field Conductor asking the office about a schedule that exists. */
+  const anyDue = WORK_TYPES.some((wt) => ((totals || {})[wt.key] || 0) > 0);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white w-full sm:max-w-xs rounded-t-3xl sm:rounded-3xl p-5 pb-7 shadow-2xl">
+      <div className="relative bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-5 pb-7 shadow-2xl
+                      max-h-[80vh] overflow-y-auto">
         <div className="flex items-center justify-between gap-3 mb-3">
           <h3 className="font-black text-slate-800 text-[14px] uppercase tracking-wide">
-            {t('mtb.schedule')}
+            {t('mtb.maxUse')}
           </h3>
           <button
             onClick={onClose}
@@ -311,12 +358,52 @@ function SchedulePopover({ t, month, week, onClose }) {
             ×
           </button>
         </div>
-        <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2">
+        <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">
           {month} · {t('mt.weekN', { n: week })}
         </div>
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-[12px] font-bold text-slate-400">
-          {t('mtb.noProgram')}
-        </div>
+
+        {jobs.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-[12px] font-bold text-slate-400">
+            {anyDue ? t('mtb.noFigures') : t('mtb.noProgram')}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {jobs.map(({ wt, rows, due }) => {
+              const tint = tintOf(wt.key);
+              return (
+                <div key={wt.key} className="rounded-xl border border-slate-200 overflow-hidden">
+                  <div className={`flex items-center gap-2 px-3 py-2 ${tint.bg || 'bg-slate-50'}`}>
+                    <WorkIcon workKey={wt.key} className={`w-4 h-4 shrink-0 ${tint.fg}`} />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-600 truncate">
+                      {workTypeLabel(wt, lang)}
+                    </span>
+                    <span className="ml-auto text-[10px] font-black tabular-nums text-slate-400 shrink-0">
+                      {t('mtb.plotsN', { n: due })}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {rows.map((r) => (
+                      <div key={r.name} className="flex items-baseline justify-between gap-3 px-3 py-1.5">
+                        <span className="text-[12px] font-bold text-slate-600 truncate">{r.name}</span>
+                        <span className="text-[12px] font-black tabular-nums text-slate-800 shrink-0">
+                          {r.text}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {/* A plot whose capacity this phone has no figure for is left out
+                of the sums rather than counted as nothing, so a partial answer
+                says that it is partial. */}
+            {(usage && usage.missing && usage.missing.length > 0) && (
+              <div className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {t('mtb.noCap', { plots: usage.missing.join(', ') })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -40,6 +40,11 @@ function NavArrow({ dir, onClick, label }) {
  */
 export default function WeekBoard({
   month, week, isNow, counts, doneCounts, onPrev, onNext, onNow, onOpen,
+  /* How much to draw from the store for each job THIS week, as
+     { pd: [{ name, text }], … } — see usage.js. Absent on a phone with no
+     capacity table and on the Worker Portal, which is not asked to sign
+     anything out; the column then simply carries no figures. */
+  usage = null,
   /* True when this phone is drawing a plan it has never actually loaded.
      Without it the footer says "you're all clear" over four empty jobs,
      which is the difference between a conductor going home and a conductor
@@ -137,6 +142,25 @@ export default function WeekBoard({
                   t('mtb.none')
                 )}
               </span>
+
+              {/* What this job takes out of the store this week. One line per
+                  product — the chemical and the sticker that goes in the tank
+                  with it are two different things to sign out, so they are
+                  two lines and never one added-up number.
+
+                  Only where something is actually due: a figure under a job
+                  with no plots is arithmetic about nothing. */}
+              {total > 0 && (usage && usage[wt.key] || []).length > 0 && (
+                <span className="mt-1 w-full px-0.5 flex flex-col items-center gap-px">
+                  {(usage[wt.key] || []).map((u) => (
+                    <span key={u.name + u.text}
+                      className="w-full text-[8px] sm:text-[9px] font-bold leading-[1.25] text-center">
+                      <span className="block truncate text-slate-400">{u.name}</span>
+                      <span className="block tabular-nums text-slate-600">{u.text}</span>
+                    </span>
+                  ))}
+                </span>
+              )}
             </button>
           );
         })}
