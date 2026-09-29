@@ -49,19 +49,35 @@ const TRANSPLANT_TYPES = ['Transplanted'];
 /**
  * The four jobs, in the order they happen in the nursery.
  *
- * `jenis` is the office's own wording, stored alongside so a job recorded in
- * the field lines up with the office record instead of being a near-miss
- * spelling of it. `split` marks the one paid by the bag.
+ * `jenis` is the office's own wording — the nursery's names for these jobs,
+ * not a translation of the English. It is stored on each record and is what
+ * a Piece Rate is matched on in the payroll, so a job recorded in the field
+ * lines up with the office record instead of being a near-miss spelling.
+ *
+ * `aka` is the wording a job carried BEFORE. Records saved under it are still
+ * in the table with that jenis on them, and the payroll matches on the whole
+ * list — so renaming a job here does not stop last month's work pricing.
+ * Nothing is rewritten in the database; the old string simply stays known.
+ *
+ * `split` marks the one paid by the bag.
  */
 export const TRANSPLANT_JOBS = [
-  { key: 'blanket_spray', icon: '💨', jenis: 'Blanket Spray',
-    en: 'Blanket Spray',                ms: 'Semburan Blanket' },
-  { key: 'lining',        icon: '📐', jenis: 'Menyusun polibeg',
-    en: 'Lining & Arranging Polybag',   ms: 'Menyusun & Mengatur Polibeg' },
-  { key: 'polybag_fill',  icon: '🪣', jenis: 'Mengisi polibeg', split: true,
-    en: 'Polybag Filling 15" × 18"',    ms: 'Mengisi Polibeg 15" × 18"' },
-  { key: 'transplanting', icon: '🌱', jenis: 'Menanam anak benih',
-    en: 'Transplanting (Hy Plug → polybag)', ms: 'Menanam (Hy Plug → polibeg)' },
+  { key: 'blanket_spray', icon: '💨', jenis: 'Menyembur rumput secara rata',
+    en: 'Blanket Spray',
+    ms: 'Menyembur rumput secara rata',
+    aka: ['Blanket Spray'] },
+  { key: 'lining',        icon: '📐', jenis: 'Menyusun dan mengatur polibeg 15" X 18"',
+    en: 'Lining & Arranging Polybag 15" × 18"',
+    ms: 'Menyusun dan mengatur polibeg 15" X 18"',
+    aka: ['Menyusun polibeg'] },
+  { key: 'polybag_fill',  icon: '🪣', jenis: 'Mengisi polibeg 15" X 18"', split: true,
+    en: 'Polybag Filling 15" × 18"',
+    ms: 'Mengisi polibeg 15" X 18"',
+    aka: ['Mengisi polibeg'] },
+  { key: 'transplanting', icon: '🌱', jenis: 'Memindah anak sawit ke polibeg besar',
+    en: 'Transplanting (Hy Plug → big polybag)',
+    ms: 'Memindah anak sawit ke polibeg besar',
+    aka: ['Menanam anak benih'] },
 ];
 
 export const jobByKey   = (key) => TRANSPLANT_JOBS.find((j) => j.key === key) || null;
