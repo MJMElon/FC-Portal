@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { printDO } from '../../lib/pdf.js';
 import EntryModal from '../do/EntryModal.jsx';
-import { loadALByNumber, loadDropdownData, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL } from '../do/data.js';
+import { loadALByNumber, loadDropdownData, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
 import {
   cachedConsents,
   fetchConsents,
@@ -56,6 +56,7 @@ export default function ScanModule() {
   const lastOverRef = useRef(0);
   const activeRef = useRef(null);
   const realtimeChannelRef = useRef(null);
+  const consentsRef = useRef([]);
 
   const flash = useCallback((text, kind = '') => {
     setToast({ text, kind });
@@ -64,6 +65,7 @@ export default function ScanModule() {
   }, []);
 
   const consents = useMemo(() => mergeConsents(serverConsents, progress), [serverConsents, progress]);
+  consentsRef.current = consents;
   const active = consents.find((c) => c.id === activeId) || null;
   activeRef.current = active;
 
@@ -116,6 +118,41 @@ export default function ScanModule() {
       });
     }).catch(() => {});
   }, [active?.al_number]);
+
+  // Same idea as the per-AL effect above, but for every consent in the list
+  // up front — otherwise a fully collected order (its DO issued via another
+  // device, or through the AI system, never opened here yet) kept showing
+  // in Signed Consents as "Pending to Scan" until someone happened to tap
+  // into it once. One request covering every AL in the list, run after
+  // each sync() rather than per consent opened.
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    const alNumbers = [...new Set(
+      consentsRef.current.map((c) => c.al_number).filter((al) => al && !/^MANUAL-/i.test(al))
+    )];
+    if (!alNumbers.length) return;
+    loadIssuedQtyByALs(alNumbers).then((byAL) => {
+      setProgress((prev) => {
+        let changed = false;
+        const map = { ...prev };
+        consentsRef.current.forEach((c) => {
+          const serverIssuedQty = byAL[c.al_number] || 0;
+          if (!serverIssuedQty) return;
+          const cur = map[c.id] || defaultProgress();
+          if ((cur.issuedQty || 0) >= serverIssuedQty) return;
+          map[c.id] = { ...cur, issuedQty: serverIssuedQty, doIssued: true };
+          changed = true;
+        });
+        if (!changed) return prev;
+        saveProgress(map);
+        return map;
+      });
+    }).catch(() => {});
+    // Re-runs only when the server list itself changes (a sync), not on
+    // every local progress update this same effect can trigger — consents
+    // is read from consentsRef so the closure still sees the latest list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverConsents]);
 
   // Unsubscribe from Realtime on full unmount.
   useEffect(() => {
