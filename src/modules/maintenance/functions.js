@@ -152,3 +152,19 @@ export function canMaintCorrect(permissions, key) {
   const acts = (permissions && permissions.scan_actions && permissions.scan_actions.maintenance) || {};
   return acts[key] === true;
 }
+
+/**
+ * The ticks that decide whether something already saved may be changed.
+ *
+ * `edit` and `delete` are the maintenance record's. `transplant_edit` is the
+ * Transplanting Job sheet's, and it is separate on purpose: a transplanting
+ * record is the crew for a plot, and the payroll pays a month on the strength
+ * of it. Somebody trusted to fix a quantity on a spraying record is not
+ * automatically somebody who may move a day's pay from one name to another
+ * after the fact.
+ *
+ * All three fail CLOSED — see canMaintCorrect. SHARED LIST: the office screen
+ * that sets these is scan/scan_user_access.html in the mjm-ai-system
+ * repository and carries its own copy. Change one, change the other.
+ */
+export const MAINT_CORRECT_KEYS = ['edit', 'delete', 'transplant_edit'];

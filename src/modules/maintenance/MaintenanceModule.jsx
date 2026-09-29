@@ -163,6 +163,12 @@ export default function MaintenanceModule({
      the screen lying in the expensive direction. See canMaintCorrect. */
   const mayEdit   = canMaintCorrect(permissions, 'edit');
   const mayDelete = canMaintCorrect(permissions, 'delete');
+  /* And the Transplanting Job sheet's own, which is NOT `edit`. A
+     transplanting record is the crew for a plot, and the payroll divides that
+     plot's quantity among exactly those names — so reopening one moves a
+     day's pay. Somebody trusted to fix a quantity on a spraying record is not
+     automatically trusted with that. Fails closed, like the other two. */
+  const mayEditTransplant = canMaintCorrect(permissions, 'transplant_edit');
   const mayExport = canMaintain(permissions, 'export');
   /* Not a permission — what the work sheet uses to decide whether a job
      already ticked off can be opened again. Nothing is changed or removed by
@@ -836,6 +842,7 @@ export default function MaintenanceModule({
              cannot be filled in. */
           workers={nurseryWorkers.length ? nurseryWorkers : workers}
           staffName={staffName}
+          mayEdit={mayEditTransplant}
           onClose={() => setTransplant(false)}
         />
       )}
