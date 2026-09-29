@@ -25,6 +25,17 @@ const plantedOn = (raw) => {
   return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+/* Was this record priced on a figure the report has since moved?
+   Compared on the number the record STORED, because that is the number the
+   payroll divides among the crew — not the one on screen. */
+const staleQty = (rec, row) => {
+  if (!rec || !row) return false;
+  const was = Number(rec.source_qty);
+  const now = Number(row.qty);
+  if (!Number.isFinite(was) || !Number.isFinite(now)) return false;
+  return Math.round(was) !== Math.round(now);
+};
+
 const savedOn = (rec) => {
   const raw = (rec && (rec.created_at || rec.work_date)) || null;
   if (!raw) return null;
@@ -290,6 +301,17 @@ function JobList({ row, recordOf, onPick, t, lang }) {
                     {rec.reported_by ? ` · ${rec.reported_by}` : ''}
                   </div>
                 )}
+                {/* The record stored the plot's quantity as it stood when it
+                    was saved, and the payroll prices from THAT, not from the
+                    report. So a plot whose report figure has since moved —
+                    a delivery keyed in late, a row that was undated until
+                    now — has records that quietly pay the old number. Said
+                    here, on the job, because that is where it is fixed. */}
+                {rec && staleQty(rec, row) && (
+                  <div className="text-[10.5px] font-black text-amber-700 mt-1 leading-snug">
+                    ⚠ {t('tp.qtyMoved', { was: num(rec.source_qty), now: num(row.qty) })}
+                  </div>
+                )}
                 {/* The split, where there is one. Seeing it on the list is
                     what stops somebody opening all four to find it. */}
                 {rec && j.split && (
@@ -481,6 +503,13 @@ function JobForm({ job, row, workers, existing, mayEdit, onSave, t, lang }) {
             locked ? 'bg-slate-50 border-slate-200 text-slate-500'
                    : 'bg-white border-slate-300 focus:border-emerald-500'}`} />
       </div>
+      )}
+
+      {existing && staleQty(existing, row) && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3
+                        text-[11.5px] font-bold leading-snug">
+          {t('tp.qtyMovedLong', { was: num(existing.source_qty), now: num(row.qty) })}
+        </div>
       )}
 
       {existing && mayEdit && (
