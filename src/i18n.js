@@ -425,6 +425,8 @@ const en = {
   'scan.hwTitle': 'Barcode scanner connected',
   'scan.hwReady': 'Ready — just scan, items record automatically.',
   'scan.hwUseCamera': '📷 Use Camera Instead',
+  'scan.fullyCollected': 'Fully Collected',
+  'scan.fullyCollectedHint': 'This order\'s full quantity has already been issued — nothing left to scan.',
   'scan.hwHint': 'Using a Bluetooth scanner? Just scan — it will be detected automatically.',
 
   // DO module
@@ -1155,6 +1157,8 @@ const ms = {
   'scan.hwTitle': 'Pengimbas kod bar disambung',
   'scan.hwReady': 'Sedia — imbas sahaja, item direkod secara automatik.',
   'scan.hwUseCamera': '📷 Guna Kamera',
+  'scan.fullyCollected': 'Sudah Dikutip Sepenuhnya',
+  'scan.fullyCollectedHint': 'Kuantiti penuh pesanan ini telah dikeluarkan — tiada apa lagi untuk diimbas.',
   'scan.hwHint': 'Guna pengimbas Bluetooth? Imbas sahaja — ia akan dikesan secara automatik.',
 
   // DO module

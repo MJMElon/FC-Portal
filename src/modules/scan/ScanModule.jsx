@@ -583,7 +583,13 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
   // This ensures the correct balance even when DOs were issued through the AI system.
   const serverIssuedQty = activeDOs.reduce((sum, d) => sum + (d.total_qty || 0), 0);
   const issuedQty = Math.max(consent.issuedQty || 0, serverIssuedQty);
-  const sessionQty = Math.max(1, consent.qty - issuedQty);
+  // No floor here — a consent whose whole qty is already issued (balance 0)
+  // has nothing left to scan for, and used to show a phantom "0/1, 1
+  // remaining" from Math.max(1, ...) that let scanning carry on past a
+  // fully collected order. fullyCollected below is what actually turns the
+  // scan controls off.
+  const sessionQty = Math.max(0, consent.qty - issuedQty);
+  const fullyCollected = sessionQty === 0;
   // When issuedQty > consent.unique the DO was issued before any scanning (e.g. via
   // the AI system). In that case every scan in this module counts toward the current
   // balance, so use consent.unique directly rather than subtracting issuedQty.
@@ -733,6 +739,9 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
   }
 
   useEffect(() => {
+    // Balance 0 — nothing left to scan for, so don't even open the camera.
+    // See fullyCollected above and the camera panel's own conditional below.
+    if (fullyCollected) { setStatusKey('ready'); return; }
     // A linked hardware scanner replaces the camera; the camera stays one tap
     // away via the "Use Camera Instead" button.
     if (hwModeRef.current) setStatusKey('hwLinked');
@@ -743,6 +752,15 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Covers the rarer case: the camera was already open when the balance hit
+  // 0 out from under it (e.g. a DO for this same consent got issued from
+  // another device mid-session) — stop scanning rather than let it keep
+  // reading seals against an order that no longer has anything to collect.
+  useEffect(() => {
+    if (fullyCollected && scanning) stopCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullyCollected]);
 
   // Keyboard-wedge listener: catches the fast keystroke bursts a hardware
   // barcode scanner sends and routes them into the same recordScan flow as
@@ -829,62 +847,70 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
         </div>
       </div>
 
-      <div className="bg-[#0f1620] border border-[#1f2a38] rounded-2xl p-3 mb-3">
-        {/* #reader must stay mounted (html5-qrcode targets it by id), so it is
-            hidden — not removed — while the hardware-scanner panel shows. */}
-        <div
-          id="reader"
-          onClick={scanning ? refocus : undefined}
-          className={`rounded-xl overflow-hidden bg-black min-h-[160px] cursor-pointer ${hwMode && !scanning ? 'hidden' : ''}`}
-        />
-        {hwMode && !scanning && (
-          <div className="rounded-xl bg-[#0a0f14] border border-emerald-600/40 min-h-[160px] flex flex-col items-center justify-center gap-2.5 px-4 text-center">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-            </span>
-            <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider">🔗 {t('scan.hwTitle')}</div>
-            <div className="font-mono text-[11px] text-slate-400">{t('scan.hwReady')}</div>
-          </div>
-        )}
-        {scanning && (
-          <div className="text-center text-[10px] font-mono text-slate-500 mt-1.5">{t('scan.focusHint')}</div>
-        )}
-        <div className="flex gap-2 mt-2.5">
-          {hwMode && !scanning ? (
-            <button
-              onClick={() => {
-                setHwMode(false);
-                try { localStorage.removeItem('mjm_hw_scanner'); } catch (e) { /* ignore */ }
-                setTimeout(() => startCamera().catch((e) => { setStatusKey('error'); alert(t('scan.cameraError', { msg: e?.message || e })); }), 50);
-              }}
-              className="flex-1 bg-[#111821] border border-[#1f2a38] text-slate-200 font-mono font-bold text-xs uppercase tracking-wider rounded-lg py-3.5"
-            >
-              {t('scan.hwUseCamera')}
-            </button>
-          ) : (
-            <>
+      {fullyCollected ? (
+        <div className="bg-[#0f1620] border border-emerald-600/40 rounded-2xl p-6 mb-3 flex flex-col items-center text-center gap-1.5">
+          <div className="text-3xl">✅</div>
+          <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider">{t('scan.fullyCollected')}</div>
+          <div className="font-mono text-[11px] text-slate-400">{t('scan.fullyCollectedHint')}</div>
+        </div>
+      ) : (
+        <div className="bg-[#0f1620] border border-[#1f2a38] rounded-2xl p-3 mb-3">
+          {/* #reader must stay mounted (html5-qrcode targets it by id), so it is
+              hidden — not removed — while the hardware-scanner panel shows. */}
+          <div
+            id="reader"
+            onClick={scanning ? refocus : undefined}
+            className={`rounded-xl overflow-hidden bg-black min-h-[160px] cursor-pointer ${hwMode && !scanning ? 'hidden' : ''}`}
+          />
+          {hwMode && !scanning && (
+            <div className="rounded-xl bg-[#0a0f14] border border-emerald-600/40 min-h-[160px] flex flex-col items-center justify-center gap-2.5 px-4 text-center">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+              <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider">🔗 {t('scan.hwTitle')}</div>
+              <div className="font-mono text-[11px] text-slate-400">{t('scan.hwReady')}</div>
+            </div>
+          )}
+          {scanning && (
+            <div className="text-center text-[10px] font-mono text-slate-500 mt-1.5">{t('scan.focusHint')}</div>
+          )}
+          <div className="flex gap-2 mt-2.5">
+            {hwMode && !scanning ? (
               <button
-                onClick={() => (scanning ? stopCamera() : startCamera().catch((e) => { setStatusKey('error'); alert(t('scan.cameraError', { msg: e?.message || e })); }))}
-                className="flex-1 bg-emerald-500 text-[#0a0f14] font-mono font-bold text-xs uppercase tracking-wider rounded-lg py-3.5"
+                onClick={() => {
+                  setHwMode(false);
+                  try { localStorage.removeItem('mjm_hw_scanner'); } catch (e) { /* ignore */ }
+                  setTimeout(() => startCamera().catch((e) => { setStatusKey('error'); alert(t('scan.cameraError', { msg: e?.message || e })); }), 50);
+                }}
+                className="flex-1 bg-[#111821] border border-[#1f2a38] text-slate-200 font-mono font-bold text-xs uppercase tracking-wider rounded-lg py-3.5"
               >
-                {scanning ? t('scan.stopCamera') : t('scan.startCamera')}
+                {t('scan.hwUseCamera')}
               </button>
-              {scanning && (
+            ) : (
+              <>
                 <button
-                  onClick={refocus}
-                  className="shrink-0 bg-[#111821] border border-[#1f2a38] text-emerald-400 font-mono font-bold text-xs uppercase tracking-wider rounded-lg px-4 py-3.5"
+                  onClick={() => (scanning ? stopCamera() : startCamera().catch((e) => { setStatusKey('error'); alert(t('scan.cameraError', { msg: e?.message || e })); }))}
+                  className="flex-1 bg-emerald-500 text-[#0a0f14] font-mono font-bold text-xs uppercase tracking-wider rounded-lg py-3.5"
                 >
-                  🎯 {t('scan.refocus')}
+                  {scanning ? t('scan.stopCamera') : t('scan.startCamera')}
                 </button>
-              )}
-            </>
+                {scanning && (
+                  <button
+                    onClick={refocus}
+                    className="shrink-0 bg-[#111821] border border-[#1f2a38] text-emerald-400 font-mono font-bold text-xs uppercase tracking-wider rounded-lg px-4 py-3.5"
+                  >
+                    🎯 {t('scan.refocus')}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {!hwMode && (
+            <div className="text-center text-[10px] font-mono text-slate-500 mt-2">{t('scan.hwHint')}</div>
           )}
         </div>
-        {!hwMode && (
-          <div className="text-center text-[10px] font-mono text-slate-500 mt-2">{t('scan.hwHint')}</div>
-        )}
-      </div>
+      )}
 
       <div className={`bg-[#0f1620] border rounded-2xl px-5 py-4 text-center mb-3 ${st === 'over' ? 'border-red-500' : 'border-[#1f2a38]'}`}>
         <div className="font-mono text-[10px] tracking-[0.3em] text-slate-400 uppercase mb-1.5">{t('scan.sealsScanned')}</div>
@@ -918,7 +944,14 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
           {consent.scans.length === 0 ? (
             <div className="text-center py-6 text-slate-500">{t('scan.noScans')}</div>
           ) : (
-            consent.scans.slice(0, 100).map((s, i) => (
+            // consent.scans is stored newest-first (each new scan is
+            // prepended — see recordScan/pushScan). Capped at the 100 most
+            // recent before reversing (slice(0,100) already returns a new
+            // array, so reverse() here is safe and never mutates
+            // consent.scans itself) — "ascending" means oldest-of-those-
+            // 100 first, not the very first scan ever made once there are
+            // more than 100.
+            consent.scans.slice(0, 100).reverse().map((s, i) => (
               <div key={i} className="flex justify-between items-center gap-2 py-2 border-b border-[#1f2a38] last:border-0 text-slate-400">
                 <span className={`flex-1 break-all ${s.over ? 'text-red-400' : 'text-slate-200'}`}>{s.code}</span>
                 {s.over && <span className="text-[9px] text-red-400 tracking-widest uppercase">{t('scan.statusOver')}</span>}
@@ -930,7 +963,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
       </div>
 
       <button
-        disabled={issuing}
+        disabled={issuing || fullyCollected}
         onClick={async () => {
           await stopCamera();
           onIssueDO();
