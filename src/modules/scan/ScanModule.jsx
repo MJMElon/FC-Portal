@@ -946,12 +946,16 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
           ) : (
             // consent.scans is stored newest-first (each new scan is
             // prepended — see recordScan/pushScan). Capped at the 100 most
-            // recent before reversing (slice(0,100) already returns a new
-            // array, so reverse() here is safe and never mutates
-            // consent.scans itself) — "ascending" means oldest-of-those-
-            // 100 first, not the very first scan ever made once there are
-            // more than 100.
-            consent.scans.slice(0, 100).reverse().map((s, i) => (
+            // recent, then sorted by the CODE's own value ascending —
+            // reversing scan order only undoes the prepend, it doesn't put
+            // the seal numbers themselves in order, which is what
+            // "ascending" actually means for a list of barcodes. Numeric
+            // compare (not localeCompare's default) so "9" sorts before
+            // "10" rather than after it; slice(0,100) already returns a
+            // new array, so sort() here never mutates consent.scans.
+            consent.scans.slice(0, 100)
+              .sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true, sensitivity: 'base' }))
+              .map((s, i) => (
               <div key={i} className="flex justify-between items-center gap-2 py-2 border-b border-[#1f2a38] last:border-0 text-slate-400">
                 <span className={`flex-1 break-all ${s.over ? 'text-red-400' : 'text-slate-200'}`}>{s.code}</span>
                 {s.over && <span className="text-[9px] text-red-400 tracking-widest uppercase">{t('scan.statusOver')}</span>}
