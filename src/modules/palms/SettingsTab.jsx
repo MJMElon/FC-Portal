@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import CfSelect from '../../components/CfSelect.jsx';
 import PlotAreaEditor from './PlotAreaEditor.jsx';
 import { fetchPlotMaps, loadCachedMaps, weightsFromDividers } from './plotMaps.js';
 import {
@@ -296,37 +297,33 @@ export default function SettingsTab({ db, t, flash, refresh }) {
           <div className="flex items-end gap-2 flex-wrap">
             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
               Plot
-              <select
-                value={plot}
-                onChange={(e) => selectPlot(e.target.value)}
-                className="mt-1 block bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-emerald-500"
-              >
-                {Object.keys(NURSERIES).map((nk) => (
-                  <optgroup key={nk} label={NURSERIES[nk].label}>
-                    {plotsOf(nk).map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                        {settings.multi[p] ? ` — ${settings.multi[p].areas.length} ${t('set.areasWord')}` : ''}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <div className="mt-1">
+                <CfSelect value={plot} onChange={(e) => selectPlot(e.target.value)}>
+                  {Object.keys(NURSERIES).map((nk) => (
+                    <optgroup key={nk} label={NURSERIES[nk].label}>
+                      {plotsOf(nk).map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                          {settings.multi[p] ? ` — ${settings.multi[p].areas.length} ${t('set.areasWord')}` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </CfSelect>
+              </div>
             </label>
 
             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
               {t('set.areaCount')}
-              <select
-                value={count}
-                onChange={(e) => changeCount(Number(e.target.value))}
-                className="mt-1 block bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-emerald-500"
-              >
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <option key={n} value={n}>
-                    {n === 1 ? t('set.oneArea') : n}
-                  </option>
-                ))}
-              </select>
+              <div className="mt-1">
+                <CfSelect value={count} onChange={(e) => changeCount(Number(e.target.value))}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n === 1 ? t('set.oneArea') : n}
+                    </option>
+                  ))}
+                </CfSelect>
+              </div>
             </label>
           </div>
 
@@ -450,17 +447,15 @@ export default function SettingsTab({ db, t, flash, refresh }) {
           )}
           {rules.map((r, i) => (
             <div key={i} className="flex items-center gap-2 flex-wrap">
-              <select
-                value={r.n}
-                onChange={(e) => setRule(i, 'n', Number(e.target.value))}
-                className="flex-1 min-w-[150px] bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-emerald-500"
-              >
-                {ACTIVITIES.map((a) => (
-                  <option key={a.n} value={a.n}>
-                    {a.n}. {a.name}
-                  </option>
-                ))}
-              </select>
+              <div className="flex-1 min-w-[150px]">
+                <CfSelect value={r.n} onChange={(e) => setRule(i, 'n', Number(e.target.value))}>
+                  {ACTIVITIES.map((a) => (
+                    <option key={a.n} value={a.n}>
+                      {a.n}. {a.name}
+                    </option>
+                  ))}
+                </CfSelect>
+              </div>
               <span className="text-[11px] font-bold text-slate-500">{t('set.warnUnder')}</span>
               <input
                 type="number"

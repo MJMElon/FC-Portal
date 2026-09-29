@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import CfSelect from '../../components/CfSelect.jsx';
 import { areaIndexAt, bbox, loadCachedMaps } from './plotMaps.js';
 import {
   ACTIVITIES,
@@ -275,17 +276,16 @@ export default function EntryTab({ db, t, staffName, refresh, flash, nurseryKeys
         </div>
         <label className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
           {t('pm.nursery')}
-          <select
+          <CfSelect
             value={nursery}
             onChange={(e) => setNursery(e.target.value)}
-            className="bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-emerald-500"
           >
             {nurseryKeys.map((k) => (
               <option key={k} value={k}>
                 {NURSERIES[k].label}
               </option>
             ))}
-          </select>
+          </CfSelect>
         </label>
       </div>
 
