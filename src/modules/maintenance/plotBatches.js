@@ -37,9 +37,22 @@ export function plotKey(v) {
     .replace(/[^0-9A-Z-]/g, '');
 }
 
-/** A batch by its trailing digits: "MJM-225", "225." and " 225 " are all 225. */
+/**
+ * A batch by its trailing digits: "MJM-225", "225." and " 225 " are all 225.
+ *
+ * A PARENTHETICAL NOTE GOES FIRST. "232 (B13)" is batch 232, not batch 13 —
+ * left in, the trailing-digits rule reads the "13" inside the note and files
+ * the row under a batch nobody meant. Not hypothetical: it is the bug
+ * _mvBatchKey() in the office's operation_reports.html records having hit, on
+ * a delivery order whose batch field read "232 (B13)". Same split plotKey
+ * already does for its own notes.
+ *
+ * SHARED RULE - _mvBatchKey() in operation_reports.html and mjm_batch_key()
+ * in shared/create_plot_batch_balance.sql. Change one, change the others.
+ */
 export function batchKey(v) {
-  const cleaned = String(v == null ? '' : v).trim().replace(/[^0-9A-Za-z]+$/, '');
+  const noNote = String(v == null ? '' : v).trim().split(/[\s(,[]/)[0];
+  const cleaned = noNote.replace(/[^0-9A-Za-z]+$/, '');
   const m = /(\d+)$/.exec(cleaned);
   return m ? String(parseInt(m[1], 10)) : '';
 }
