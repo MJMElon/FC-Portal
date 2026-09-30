@@ -9,15 +9,28 @@
  * and is not offered.
  *
  * "The same arithmetic" is load-bearing and was once only a claim: this file
- * took the 2nd culling off on top of the 3rd and ignored stock calibrations
- * altogether, so the phone showed -2 where the office showed 447. See the
- * 2nd-culling note in batchesByPlot below.
+ * deducted the 2nd culling, counted an unevidenced 3rd and ignored stock
+ * calibrations altogether, so the phone showed -2 where the office showed
+ * 447 and 4,191 where it showed 4,201. See the notes on OUT_TYPES below.
  *
  * No imports, so it stays unit-testable in plain node.
  */
 
 const IN_TYPES  = ['Transplanted', 'Transplanted_Premium', 'Transplanted_DoubleTone', 'Planted', 'Seeds_Received'];
-const OUT_TYPES = ['Damaged_Seeds', '1st_Culling', '2nd_Culling', '3rd_Culling'];
+/* 2nd_Culling is NOT here and never is: it is Batch Detail Tab 6's running
+   snapshot of a batch working through the 3rd culling, not a loss on top of
+   it, and the Movement Report gives it no column at all. Deducting it is
+   what made U1's batch 252 read 4,191 where the report read 4,201.
+   3rd_Culling is not here either — it deducts only once evidenced, below. */
+const OUT_TYPES = ['Damaged_Seeds', '1st_Culling'];
+
+/* A 3rd culling counts only once the drone-map figure has been keyed. Until
+   the plot has been flown the culled figure is a claim, and one still waiting
+   on its map leaves the batch standing on the report — so it leaves it
+   standing here.
+   SHARED RULE — the same test in operation_reports.html (runLifeOfPlot and
+   runMovementReportCombined) and in shared/create_plot_batch_balance.sql. */
+const CULL3_EVIDENCED = /MapQty:\s*\d+/;
 
 /* An approved stock calibration, and only an approved one. The same marker
    operation_batch_detail.html writes and the Movement Report reads; a pending
@@ -62,13 +75,13 @@ export function batchKey(v) {
  * `logs` are shared_inventory_logs rows; `dos` are shared_do_records rows.
  */
 export function batchesByPlot(logs, dos) {
-  const bal = new Map();   // plotKey → Map(batchKey → { batch, qty, cull2, cull3 })
+  const bal = new Map();   // plotKey → Map(batchKey → { batch, qty })
   const cell = (plot, batch) => {
     const pk = plotKey(plot), bk = batchKey(batch);
     if (!pk || !bk) return null;
     if (!bal.has(pk)) bal.set(pk, new Map());
     const m = bal.get(pk);
-    if (!m.has(bk)) m.set(bk, { batch, qty: 0, cull2: 0, cull3: 0 });
+    if (!m.has(bk)) m.set(bk, { batch, qty: 0 });
     return m.get(bk);
   };
   const add = (plot, batch, n) => { const c = cell(plot, batch); if (c) c.qty += n; };
@@ -76,14 +89,9 @@ export function batchesByPlot(logs, dos) {
   for (const l of logs || []) {
     const q = Math.abs(Number(l.quantity_change || 0));
     if (IN_TYPES.includes(l.transaction_type))  add(l.plot_name, l.batch_name, q);
-    else if (OUT_TYPES.includes(l.transaction_type)) {
-      add(l.plot_name, l.batch_name, -q);
-      // Kept aside so the 2nd culling can be given back below where a 3rd
-      // has since replaced it.
-      if (l.transaction_type === '2nd_Culling' || l.transaction_type === '3rd_Culling') {
-        const c = cell(l.plot_name, l.batch_name);
-        if (c) c[l.transaction_type === '2nd_Culling' ? 'cull2' : 'cull3'] += q;
-      }
+    else if (OUT_TYPES.includes(l.transaction_type)) add(l.plot_name, l.batch_name, -q);
+    else if (l.transaction_type === '3rd_Culling') {
+      if (CULL3_EVIDENCED.test(l.remark || '')) add(l.plot_name, l.batch_name, -q);
     } else if (l.transaction_type === 'Cull3_Transfer') {
       // One log, two sides: plot_name is where they landed, the remark says
       // where they left.
@@ -95,22 +103,6 @@ export function batchesByPlot(logs, dos) {
       add(l.plot_name, l.batch_name, Number(l.quantity_change) || 0);
     }
   }
-
-  /* THE 2ND CULLING COUNTS ONLY UNTIL A 3RD REPLACES IT.
-
-     The 3rd culling is keyed against the ORIGINAL transplanted figure, not
-     against what was left of it, so it already contains the 2nd. Taking both
-     off subtracts the same seedlings twice, and the tell is a batch that
-     should have netted to nought reading as a small negative instead — B1's
-     batch 237 read -2 that way.
-
-     SHARED RULE — the same one liveCount() applies in
-     shared/shared_plot_movement.js (which decides what a maintenance plot's
-     capacity is worth in the payroll), the same one the Movement Report
-     applies by giving 2nd Culled no column at all, and the same one
-     create_plot_batch_balance.sql now applies in the database. Change one,
-     change the others, or the phone and the office go back to disagreeing. */
-  bal.forEach((m) => m.forEach((b) => { if (b.cull3 > 0) b.qty += b.cull2; }));
 
   // A delivery order can only take seedlings OFF a plot that already has them.
   // Its batch column is free text, so a mistyped batch must not conjure one up.
