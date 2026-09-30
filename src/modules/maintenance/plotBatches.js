@@ -1,64 +1,40 @@
 /**
  * Which batches are standing in a plot right now.
  *
- * THIS IS THE MOVEMENT REPORT, both of its sections, and nothing else. The
- * batches a Field Conductor is offered and the quantity beside each are the
- * ones Operation Reports shows for that plot; if the two ever disagree, one
- * of them has a bug. The rules are written out at the top of runLifeOfPlot()
- * in operation_reports.html and are mirrored here line for line:
+ * THE MAIN NURSERY MOVEMENT REPORT, AND NOTHING ELSE. One rule and no
+ * exceptions: the batches a Field Conductor is offered for a plot, and the
+ * quantity beside each, are that report's own. MOVE_COLS.main in the
+ * office's operation_reports.html, column for column:
  *
- *   MAIN NURSERY (MOVE_COLS.main)
- *     + Transplanted from PN, arriving at the plot named on the row
- *     + Transfer in  (Cull3_Transfer, the side that arrived)
- *     - Transfer out (the same log, leaving the plot its remark names)
- *     - 3rd culled, ONLY ONCE EVIDENCED (MapQty: keyed — until the plot has
- *       been flown the culled figure is a claim, and the report leaves the
- *       batch standing)
- *     - Sold (delivery orders, against a plot·batch the ledger already has)
- *     + Stock adjustment, approved only, with its own sign
+ *   Balance = transplanted from PN + transfer in
+ *           - sold - 3rd culled - transfer out + stock adjustment
  *
- *   PRE-NURSERY (MOVE_COLS.pre) — what gives a PN plot (P01–P52) and the
- *   PREMIUM CARE / DOUBLE-TONE holding trays their batches
- *     + Planted into the tray
- *     + Transfer in (a Premium Care / Double Tone tray filling up)
- *     - 1st culled, in the tray
- *     - Transplanted out: the SOURCE tray's own loss, read from the remark
+ * Two of those carry the report's own condition: a 3rd culling counts only
+ * once the drone map has been keyed (MapQty:) — until the plot has been
+ * flown the figure is a claim, and the report leaves the batch standing —
+ * and a stock calibration only once [APPROVED …], keeping its own sign.
  *
- *   THE 2ND CULLING NEVER DEDUCTS, in either section. It is Batch Detail
- *   Tab 6's running snapshot of a batch working through the 3rd culling,
- *   not a loss on top of it, and the report gives it no column at all.
+ * Everything else takes no part, because that report has no column for it:
+ * the 1st and 2nd cullings, Planted, Seeds_Received and Seed Damage.
  *
- *   SEED DAMAGE never entered a tray, so it counts at zero — the report
- *   shows it and does not subtract it. Seeds_Received is not a movement
- *   column in either section.
+ * U1 is the worked example: the report prints batch 250 at 447 and batch
+ * 252 at 4,201, 4,648 for the plot. So does this.
  *
- * A batch whose balance works out to zero has been culled, sold or moved on
- * and is not offered.
+ * A batch that works out to zero has been culled, sold or moved on and is
+ * not offered. A PN plot has no main-nursery movement and offers nothing.
  *
- * "The same arithmetic" is load-bearing and was once only a claim. This file
- * deducted the 2nd culling, counted an unevidenced 3rd, ignored stock
- * calibrations and never deducted a transplant from its source tray — so the
- * phone showed -2 where the office showed 447, 4,191 where it showed 4,201,
- * and trays carrying seedlings they had sent to the field months earlier.
+ * SHARED RULE — shared/create_plot_batch_balance.sql is the same arithmetic
+ * in the database, and is what the app actually reads; this is the fallback
+ * for a database without that view. Change one, change the other.
  *
  * No imports, so it stays unit-testable in plain node.
  */
 
-/* A 3rd culling counts only once the drone-map figure has been keyed.
-   SHARED RULE — the same test in operation_reports.html (runLifeOfPlot and
-   runMovementReportCombined) and in shared/create_plot_batch_balance.sql. */
+/* A 3rd culling counts only once the drone-map figure has been keyed. */
 const CULL3_EVIDENCED = /MapQty:\s*\d+/;
-
-/* An approved stock calibration, and only an approved one — a pending
-   adjustment has not been ruled on and moves no figure anywhere else. Its
-   quantity_change is ALREADY SIGNED: a Found is positive, a Stolen negative.
-   SHARED RULE — same marker in operation_reports.html and the view. */
+/* An approved stock calibration, and only an approved one. Its
+   quantity_change is ALREADY SIGNED: a Found is positive, a Stolen negative. */
 const APPROVED = /\[APPROVED by [^\]]+ on [^\]]+\]/;
-
-/* "Transplanted from tray [T4] to Main Plot [U1]" → T4. The source tray's
-   own loss: without it a tray goes on showing seedlings it sent to the field
-   months ago, and the holding trays never net out. */
-const SRC_TRAY = /from tray \[([^\]]+)\]/i;
 /* "3rd Culling transfer. From: [B7|main] To: ..." → B7. */
 const SRC_PLOT = /From:\s*\[([^\]|]+)\|/;
 
@@ -107,35 +83,23 @@ export function batchesByPlot(logs, dos) {
 
   for (const l of logs || []) {
     const q = Math.abs(Number(l.quantity_change || 0));
-    const t = l.transaction_type;
-
-    // Every transplant out of a tray is that tray's own loss, whichever
-    // section the seedlings arrived in.
-    if (t === 'Transplanted' || t === 'Transplanted_Premium' || t === 'Transplanted_DoubleTone') {
-      const src = (l.remark || '').match(SRC_TRAY);
-      if (src) add(src[1], l.batch_name, -q);
-      // …and the plot or tray named on the row gains them.
-      add(l.plot_name, l.batch_name, q);
-      continue;
+    switch (l.transaction_type) {
+      case 'Transplanted':                       // transplanted from PN
+        add(l.plot_name, l.batch_name, q); break;
+      case '3rd_Culling':                        // once flown, and only then
+        if (CULL3_EVIDENCED.test(l.remark || '')) add(l.plot_name, l.batch_name, -q);
+        break;
+      case 'Cull3_Transfer': {                   // one log, two sides
+        add(l.plot_name, l.batch_name, q);
+        const from = (l.remark || '').match(SRC_PLOT);
+        if (from) add(from[1], l.batch_name, -q);
+        break;
+      }
+      case 'Stock_Calibration':                  // approved only, sign as stored
+        if (APPROVED.test(l.remark || '')) add(l.plot_name, l.batch_name, Number(l.quantity_change) || 0);
+        break;
+      default: break;   // no column on the main report, so no part here
     }
-    if (t === 'Planted') { add(l.plot_name, l.batch_name, q); continue; }
-    if (t === '1st_Culling') { add(l.plot_name, l.batch_name, -q); continue; }
-    if (t === '3rd_Culling') {
-      if (CULL3_EVIDENCED.test(l.remark || '')) add(l.plot_name, l.batch_name, -q);
-      continue;
-    }
-    if (t === 'Cull3_Transfer') {
-      add(l.plot_name, l.batch_name, q);
-      const from = (l.remark || '').match(SRC_PLOT);
-      if (from) add(from[1], l.batch_name, -q);
-      continue;
-    }
-    if (t === 'Stock_Calibration') {
-      if (APPROVED.test(l.remark || '')) add(l.plot_name, l.batch_name, Number(l.quantity_change) || 0);
-      continue;
-    }
-    // 2nd_Culling, Damaged_Seeds, Seeds_Received and everything else: no
-    // column in either section of the report, so no part here.
   }
 
   // A delivery order can only take seedlings OFF a plot that already has them.
