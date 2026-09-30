@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import {
+  TRANSPLANT_FLOW_FROM,
   TRANSPLANT_JOBS,
   TRANSPLANT_SETUP_NEEDED,
   jobByKey,
   jobLabel,
-  loadMonthTransplanting,
+  loadTransplantingSince,
   loadTransplantRecords,
   saveTransplantRecord,
 } from './transplantData.js';
@@ -16,6 +17,25 @@ const num = (n) => Number(n || 0).toLocaleString();
    columns a row might have: created_at is the first save, work_date is the
    day it was recorded for, and an older row saved before created_at existed
    has only the latter. */
+/* A transplanting date from the ledger — a plain YYYY-MM-DD, no time. */
+const plantedOn = (raw) => {
+  if (!raw) return '';
+  const d = new Date(`${String(raw).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return String(raw).slice(0, 10);
+  return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+/* Was this record priced on a figure the report has since moved?
+   Compared on the number the record STORED, because that is the number the
+   payroll divides among the crew — not the one on screen. */
+const staleQty = (rec, row) => {
+  if (!rec || !row) return false;
+  const was = Number(rec.source_qty);
+  const now = Number(row.qty);
+  if (!Number.isFinite(was) || !Number.isFinite(now)) return false;
+  return Math.round(was) !== Math.round(now);
+};
+
 const savedOn = (rec) => {
   const raw = (rec && (rec.created_at || rec.work_date)) || null;
   if (!raw) return null;
@@ -70,8 +90,8 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
     setLoading(true);
     try {
       const [tp, recs] = await Promise.all([
-        loadMonthTransplanting(plotNames, month),
-        loadTransplantRecords(nursery, month).catch((e) => {
+        loadTransplantingSince(plotNames),
+        loadTransplantRecords(nursery).catch((e) => {
           if (e && e.message === TRANSPLANT_SETUP_NEEDED) { setSetupNeeded(true); return []; }
           throw e;
         }),
@@ -130,8 +150,15 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
               🌱 {title}
             </h3>
             <div className="text-[11px] font-bold text-slate-400 truncate">
-              {[nursery, month, row ? t('tp.nPlanted', { n: num(row.qty) }) : null]
-                .filter(Boolean).join(' · ')}
+              {/* The plot list is not one month's any more, so it must not
+                  carry a month over it — a list showing August plots under
+                  the word "Sep 2026" is the header contradicting the rows.
+                  Inside a plot the month is back, because that IS the month a
+                  record saved here is paid in. */}
+              {(plot
+                ? [nursery, month, row ? t('tp.nPlanted', { n: num(row.qty) }) : null]
+                : [nursery, t('tp.since', { d: plantedOn(TRANSPLANT_FLOW_FROM) })]
+              ).filter(Boolean).join(' · ')}
             </div>
           </div>
           <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 text-xl shrink-0">×</button>
@@ -156,7 +183,7 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
           ) : row ? (
             <JobList row={row} recordOf={recordOf} onPick={setJob} t={t} lang={lang} />
           ) : (
-            <PlotList rows={rows} recordOf={recordOf} onPick={setPlot} t={t} month={month} />
+            <PlotList rows={rows} recordOf={recordOf} onPick={setPlot} t={t} />
           )}
         </div>
       </div>
@@ -172,15 +199,37 @@ function Notice({ text }) {
 }
 
 /** Every plot the report says was transplanted this month. */
-function PlotList({ rows, recordOf, onPick, t, month }) {
+function PlotList({ rows, recordOf, onPick, t }) {
   if (!rows.length) {
-    return <Notice text={t('tp.nothingThisMonth', { month })} />;
+    return <Notice text={t('tp.nothingSince', { d: plantedOn(TRANSPLANT_FLOW_FROM) })} />;
   }
+  /* Unfinished first, newest of those at the top; everything finished below.
+     The list no longer empties at the end of a month, so without this a plot
+     still waiting on a job would sink under every plot already done as the
+     months went by — which is the one thing this screen exists to surface. */
+  const doneOf = (r) => TRANSPLANT_JOBS.filter((j) => recordOf.has(`${r.plot}|${j.key}`)).length;
+  const ordered = [...rows].sort((a, b) => {
+    const fa = doneOf(a) === TRANSPLANT_JOBS.length, fb = doneOf(b) === TRANSPLANT_JOBS.length;
+    if (fa !== fb) return fa ? 1 : -1;
+    return String(b.last).localeCompare(String(a.last))
+        || a.plot.localeCompare(b.plot, undefined, { numeric: true });
+  });
+  const firstDone = ordered.findIndex((r) => doneOf(r) === TRANSPLANT_JOBS.length);
+  const heading = (i) =>
+    i === 0 && firstDone !== 0 ? t('tp.stillToDo')
+    : i === firstDone ? t('tp.finished') : null;
+
   return (
     <div className="space-y-2.5">
-      {rows.map((r) => {
-        const n = TRANSPLANT_JOBS.filter((j) => recordOf.has(`${r.plot}|${j.key}`)).length;
+      {ordered.map((r, i) => {
+        const n = doneOf(r);
+        const head = heading(i);
         return (
+          <div key={`g-${r.plot}`} className="space-y-2.5">
+          {head && (
+            <div className={`text-[10px] font-black text-slate-400 uppercase tracking-widest px-1${
+              i === 0 ? '' : ' pt-2'}`}>{head}</div>
+          )}
           <button key={r.plot} type="button" onClick={() => onPick(r.plot)}
             className="w-full bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)]
                        p-3.5 text-left hover:border-emerald-400 active:scale-[.99] transition">
@@ -191,6 +240,15 @@ function PlotList({ rows, recordOf, onPick, t, month }) {
                   {[r.batch && t('tp.batchN', { b: r.batch }), t('tp.nPlanted', { n: num(r.qty) })]
                     .filter(Boolean).join(' · ')}
                 </div>
+                {/* WHEN it was transplanted. The list is no longer one month's,
+                    so the date is no longer implied by the board above it —
+                    and it is what tells a plot still waiting on a job from
+                    last month apart from one filled this morning. */}
+                {r.last && (
+                  <div className="text-[10.5px] font-bold text-slate-400 mt-0.5">
+                    {t('tp.plantedOn', { d: plantedOn(r.last) })}
+                  </div>
+                )}
               </div>
               {/* How far through the four jobs this plot is — the question
                   the list is scanned for. */}
@@ -204,6 +262,7 @@ function PlotList({ rows, recordOf, onPick, t, month }) {
               <span className="text-slate-300 text-[18px] shrink-0">›</span>
             </div>
           </button>
+          </div>
         );
       })}
     </div>
@@ -240,6 +299,17 @@ function JobList({ row, recordOf, onPick, t, lang }) {
                     🔒 {t('tp.savedOn', { d: savedOn(rec) })}
                     {correctedOn(rec) ? ` · ${t('tp.correctedOn', { d: correctedOn(rec) })}` : ''}
                     {rec.reported_by ? ` · ${rec.reported_by}` : ''}
+                  </div>
+                )}
+                {/* The record stored the plot's quantity as it stood when it
+                    was saved, and the payroll prices from THAT, not from the
+                    report. So a plot whose report figure has since moved —
+                    a delivery keyed in late, a row that was undated until
+                    now — has records that quietly pay the old number. Said
+                    here, on the job, because that is where it is fixed. */}
+                {rec && staleQty(rec, row) && (
+                  <div className="text-[10.5px] font-black text-amber-700 mt-1 leading-snug">
+                    ⚠ {t('tp.qtyMoved', { was: num(rec.source_qty), now: num(row.qty) })}
                   </div>
                 )}
                 {/* The split, where there is one. Seeing it on the list is
@@ -433,6 +503,13 @@ function JobForm({ job, row, workers, existing, mayEdit, onSave, t, lang }) {
             locked ? 'bg-slate-50 border-slate-200 text-slate-500'
                    : 'bg-white border-slate-300 focus:border-emerald-500'}`} />
       </div>
+      )}
+
+      {existing && staleQty(existing, row) && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3
+                        text-[11.5px] font-bold leading-snug">
+          {t('tp.qtyMovedLong', { was: num(existing.source_qty), now: num(row.qty) })}
+        </div>
       )}
 
       {existing && mayEdit && (
