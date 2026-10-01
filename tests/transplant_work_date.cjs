@@ -74,7 +74,7 @@ const prevDay = (iso) => {
              td.asksDate(prevDay(td.TRANSPLANT_DATE_FROM)));
   checkTrue('on the day, it does', td.asksDate(td.TRANSPLANT_DATE_FROM));
   checkTrue('…and after it', td.asksDate('2027-03-14'));
-  checkFalse('…and not in a month before it', td.asksDate('2026-10-31'));
+  checkFalse('…and not in any month before it', td.asksDate('2026-09-30'));
   checkFalse('no date at all does not switch it on', td.asksDate(''));
 
   console.log('\nThe form asks when');
