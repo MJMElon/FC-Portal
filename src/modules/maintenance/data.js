@@ -417,7 +417,16 @@ export async function loadSchedules(nurseryKeys, monthLabel) {
     .in('nursery', keys);
   if (error) {
     if (looksOffline(error)) return fallback();
-    if (isMissingTable(error)) return [];
+    // Same treatment as a missing table: a database that has not run
+    // RUN_ME_maint_published_payload.sql yet has nops_maint_published
+    // without its payload column, and this query would otherwise throw,
+    // fall into the catch below in MaintenanceBoard.jsx, and silently show
+    // whatever was cached from BEFORE that migration — stale live-tick
+    // counts from the old (unsynced-but-visible) behaviour, which reads as
+    // "the fix did nothing" when the real story is "the SQL hasn't run
+    // yet". Answering "nothing scheduled" instead is honest and matches
+    // what a genuinely unsynced month already looks like.
+    if (isMissingTable(error) || isMissingColumn(error)) return [];
     throw error;
   }
   /* applicableSchedules picks the plan that applies and migrates the older
