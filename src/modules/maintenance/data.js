@@ -384,6 +384,17 @@ export function hasRejectColumns(rows) {
  *
  * A missing schedule is not an error — the office simply has not planned that
  * month yet — so it comes back as null and the timeline says as much.
+ *
+ * Reads nops_maint_published, not nops_maint_state — on purpose. The office
+ * writes nops_maint_state on every tick, live, the moment it is made; a
+ * board reading that table shows a tick the second it happens, which is not
+ * "published", it is "typed". nops_maint_published only gets a row (or a
+ * fresher one) when the office presses Sync — see saveSchedule()/
+ * publishSchedule() in nursery_ops/plot_maintenance_script.js — so this is
+ * the one query that actually honours Sync as a gate rather than a
+ * formality. Same (nursery, month, payload) shape as nops_maint_state, so
+ * nothing downstream of this query (applicableSchedules, weekTasks, the
+ * offline cache) needed to change.
  */
 export async function loadSchedules(nurseryKeys, monthLabel) {
   const keys = (nurseryKeys || []).filter(Boolean);
@@ -397,11 +408,11 @@ export async function loadSchedules(nurseryKeys, monthLabel) {
   if (!isOnline()) return fallback();
 
   // Every month this nursery has ever had a plan for, not just this one: the
-  // office carries a plan forward without writing a row until it is saved, so
-  // the applicable month has to be worked out here. There is at most one row
-  // per nursery per month, so this stays small.
+  // office carries a plan forward without writing a row until it is Synced,
+  // so the applicable month has to be worked out here. There is at most one
+  // row per nursery per month, so this stays small.
   const { data, error } = await supabase
-    .from('nops_maint_state')
+    .from('nops_maint_published')
     .select('nursery, month, payload')
     .in('nursery', keys);
   if (error) {

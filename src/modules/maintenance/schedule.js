@@ -2,9 +2,11 @@
  * Reading the office's maintenance schedule.
  *
  * Nursery Operation Management keeps one row per (nursery, month) in
- * nops_maint_state, with the whole month's plan in a JSON payload. This file
- * turns that payload into "for week N, this job is due on these plots, with
- * this chemical" — which is all a Field Conductor needs on a phone.
+ * nops_maint_published — a copy of nops_maint_state's own payload, written
+ * only when the office presses Sync, so a tick is never visible here before
+ * somebody has actually published it (see loadSchedules() in data.js). This
+ * file turns that payload into "for week N, this job is due on these plots,
+ * with this chemical" — which is all a Field Conductor needs on a phone.
  *
  * The payload, as the office page writes it:
  *   pdConfig       { W1..W4: { P, P_dose, P_unit, P_sticker…, D, D_dose, … } }
