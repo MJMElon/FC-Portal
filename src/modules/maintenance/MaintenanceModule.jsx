@@ -164,6 +164,12 @@ export default function MaintenanceModule({
      the screen lying in the expensive direction. See canMaintCorrect. */
   const mayEdit   = canMaintCorrect(permissions, 'edit');
   const mayDelete = canMaintCorrect(permissions, 'delete');
+  /* And the Transplanting Job sheet's own, which is NOT `edit`. A
+     transplanting record is the crew for a plot, and the payroll divides that
+     plot's quantity among exactly those names — so reopening one moves a
+     day's pay. Somebody trusted to fix a quantity on a spraying record is not
+     automatically trusted with that. Fails closed, like the other two. */
+  const mayEditTransplant = canMaintCorrect(permissions, 'transplant_edit');
   const mayExport = canMaintain(permissions, 'export');
   /* Not a permission — what the work sheet uses to decide whether a job
      already ticked off can be opened again. Nothing is changed or removed by
@@ -299,14 +305,22 @@ export default function MaintenanceModule({
 
      Compared through nurseryKey because shared_plots says "UNN 1" where the
      office files "UNN1", and a screen that matched on the raw string would
-     show an empty list for half the nurseries. */
-  const transplantPlots = useMemo(() => {
+     show an empty list for half the nurseries.
+
+     THE RECORD FORM'S PLOT PICKER READS THIS TOO. It was handed
+     visiblePlots, so a conductor standing in UNN 2 opened the picker onto
+     B1, B1-R, B10, B11 — every plot of every nursery he may open, in one
+     alphabetical run, with his own nursery's plots somewhere below the
+     fold. The plot he wants is one of a dozen, not one of sixty. */
+  const nurseryPlots = useMemo(() => {
     const want = nursery ? nurseryKey(nursery) : null;
-    const mine = want
+    return want
       ? visiblePlots.filter((p) => nurseryKey(p.nursery_name) === want)
       : visiblePlots;
-    return mine.map((p) => p.plot_name);
   }, [visiblePlots, nursery]);
+
+  const transplantPlots = useMemo(
+    () => nurseryPlots.map((p) => p.plot_name), [nurseryPlots]);
 
   const nurseryOptions = useMemo(
     () => [...new Set(visiblePlots.map((p) => p.nursery_name).filter(Boolean))].sort(),
@@ -835,6 +849,7 @@ export default function MaintenanceModule({
              cannot be filled in. */
           workers={nurseryWorkers.length ? nurseryWorkers : workers}
           staffName={staffName}
+          mayEdit={mayEditTransplant}
           onClose={() => setTransplant(false)}
         />
       )}
@@ -856,7 +871,7 @@ export default function MaintenanceModule({
       {editing && (
         <EntrySheet
           record={editing.record}
-          plots={visiblePlots}
+          plots={nurseryPlots}
           batchMap={batchMap}
           onClose={() => setEditing(null)}
           onSave={handleSave}
@@ -932,6 +947,17 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
   // What is standing in the chosen plot, and what the ticked ones come to.
   // The quantity is that sum, not a number anyone types: the seedlings worked
   // on ARE the batches worked on, and two figures that should agree will not.
+  /* The nursery's own plots — but never without the one already chosen.
+     `plots` is scoped to the nursery on screen, and a record being edited
+     can carry a plot from another one (a conductor who has since switched
+     nurseries, a task opened from elsewhere). Dropping it from the list
+     would blank the field on open and lose the plot on the next save, which
+     is a silent edit nobody asked for. */
+  const plotOptions = useMemo(() => {
+    if (!plotName || plots.some((p) => p.plot_name === plotName)) return plots;
+    return [{ plot_name: plotName, nursery_name: '' }, ...plots];
+  }, [plots, plotName]);
+
   const plotBatches = useMemo(() => batchesIn(batchMap, plotName), [batchMap, plotName]);
   const qty = useMemo(
     () => plotBatches.filter((b) => batches.includes(b.batch))
@@ -987,7 +1013,7 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
         <div className="mb-3">
           <CfSelect value={plotName} onChange={(e) => setPlotName(e.target.value)}>
             <option value="">{t('mt.pickPlot')}</option>
-            {plots.map((p) => (
+            {plotOptions.map((p) => (
               <option key={p.plot_name} value={p.plot_name}>
                 {p.plot_name}
                 {p.nursery_name ? ` — ${p.nursery_name}` : ''}

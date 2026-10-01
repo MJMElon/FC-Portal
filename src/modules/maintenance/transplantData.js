@@ -47,6 +47,32 @@ const TABLE = 'nops_transplant_field_records';
 const TRANSPLANT_TYPES = ['Transplanted'];
 
 /**
+ * WHEN a ledger row happened, asked the way the Transplanting Report asks it.
+ *
+ * SHARED RULE — this is _logDate() and _RE_LOG_DATE in the office repository,
+ * operation/operation_reports.html. Change one, change the other.
+ *
+ * Not every row carries a transaction_date. Some were keyed with the date in
+ * the remark ("Date: 2026-09-23"), some have only the created_at they were
+ * written with. The report has always fallen through those three in order, so
+ * a row with no transaction_date still lands on its proper day.
+ *
+ * This screen used to ask PostgREST for transaction_date >= x, and PostgREST
+ * answers a comparison against NULL by dropping the row. So a plot with two
+ * deliveries — one dated, one not — arrived here carrying only one of them:
+ * B4 read 2,309 where the report said 2,309 + 96, and the 96 was neither
+ * shown nor recordable nor payable. Nothing said anything was missing, which
+ * is the worst part of it; the plot simply looked smaller than it was.
+ */
+const _RE_LOG_DATE = /(?:Cull)?Date:\s*(\d{4}-\d{2}-\d{2})/i;
+export function logDate(l) {
+  if (l && l.transaction_date) return String(l.transaction_date).slice(0, 10);
+  const m = l && l.remark ? String(l.remark).match(_RE_LOG_DATE) : null;
+  if (m) return m[1];
+  return l && l.created_at ? String(l.created_at).slice(0, 10) : null;
+}
+
+/**
  * The four jobs, in the order they happen in the nursery.
  *
  * `jenis` is the office's own wording — the nursery's names for these jobs,
@@ -100,27 +126,51 @@ export function monthRange(label) {
 const plotKey = (v) => String(v == null ? '' : v).trim().toUpperCase().replace(/[^0-9A-Z]/g, '');
 
 /**
- * What the operation report says went into this nursery's plots this month.
+ * The day this screen starts counting from.
+ *
+ * A plot is transplanted once, and the four jobs it then needs are spread
+ * over the weeks after — the lining on the day, the filling over a week, the
+ * blanket spray whenever the grass comes. Drawing the list from the month on
+ * the board meant a plot transplanted on 28 August had until the 31st to
+ * have all four recorded, and on 1 September it was simply gone: not done,
+ * not late, not anywhere. The work still happened and the people still had to
+ * be paid, so it was keyed into the payroll by hand or lost.
+ *
+ * So the list is everything transplanted SINCE this date, and it carries
+ * forward until its four jobs are recorded. Fixed rather than rolling,
+ * because a rolling window has the same hole in it further back, and fixed
+ * rather than open-ended so the ledger read stays small and the list does not
+ * fill with plots finished long before this screen existed.
+ */
+export const TRANSPLANT_FLOW_FROM = '2026-08-25';
+
+/**
+ * What the operation report says has gone into this nursery's plots since
+ * TRANSPLANT_FLOW_FROM.
  *
  * Asked of the ledger by DATE, then narrowed to the plots this nursery
  * holds — the ledger has no nursery column, the plot list is what knows.
- * A plot transplanted twice in the month is one row with the total: it is
- * one plot to line, to fill and to plant, however many deliveries it took.
+ * A plot transplanted twice is one row with the total: it is one plot to
+ * line, to fill and to plant, however many deliveries it took.
+ *
+ * `from` is here so a caller can ask for a narrower window; nothing does
+ * today, and the default is the one date this screen counts from.
  *
  * @returns {Promise<Array<{plot, batches:string[], batch:string, qty:number, last:string}>>}
  */
-export async function loadMonthTransplanting(plotNames, monthLabel) {
-  const range = monthRange(monthLabel);
-  if (!range) return [];
+export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_FROM) {
   const allowed = new Set((plotNames || []).map(plotKey));
   if (!allowed.size) return [];
 
+  /* A row with no transaction_date is kept and dated below, by the report's
+     own rule. Narrowing in the query alone would drop exactly those rows —
+     see logDate. The date is then applied in JS, so the window is the same
+     one either way. */
   const res = await fetchAllRows(() => supabase
     .from('shared_inventory_logs')
-    .select('plot_name, batch_name, quantity_change, transaction_date')
+    .select('plot_name, batch_name, quantity_change, transaction_date, created_at, remark')
     .in('transaction_type', TRANSPLANT_TYPES)
-    .gte('transaction_date', range.from)
-    .lte('transaction_date', range.to)
+    .or(`transaction_date.gte.${from},transaction_date.is.null`)
     .order('id', { ascending: true }));
   if (res.error) throw res.error;
 
@@ -128,19 +178,26 @@ export async function loadMonthTransplanting(plotNames, monthLabel) {
   (res.data || []).forEach((r) => {
     const k = plotKey(r.plot_name);
     if (!allowed.has(k)) return;
+    const when = logDate(r);
+    // Undated by every rule: it cannot be placed, so it is not placed.
+    if (!when || when < from) return;
     const qty = Math.abs(Number(r.quantity_change || 0));
     if (!qty) return;
     const cur = byPlot.get(k) || { plot: String(r.plot_name || '').trim(), batches: [], qty: 0, last: '' };
     cur.qty += qty;
     const b = String(r.batch_name || '').trim();
     if (b && !cur.batches.includes(b)) cur.batches.push(b);
-    if (!cur.last || String(r.transaction_date) > cur.last) cur.last = String(r.transaction_date || '');
+    if (!cur.last || when > cur.last) cur.last = when;
     byPlot.set(k, cur);
   });
 
+  /* Newest first. The plot somebody is standing in front of is the one
+     transplanted most recently, and the older ones below it are the ones
+     still waiting for a job — which is the order this list is read in. */
   return [...byPlot.values()]
     .map((p) => ({ ...p, batch: p.batches.join(', ') }))
-    .sort((a, b) => a.plot.localeCompare(b.plot, undefined, { numeric: true }));
+    .sort((a, b) => String(b.last).localeCompare(String(a.last))
+                 || a.plot.localeCompare(b.plot, undefined, { numeric: true }));
 }
 
 function missingTable(error) {
@@ -149,11 +206,26 @@ function missingTable(error) {
 }
 
 /** Every transplanting job already recorded for this nursery and month. */
-export async function loadTransplantRecords(nursery, monthLabel) {
+/**
+ * Every transplanting record for this nursery's plots, WHATEVER MONTH it was
+ * saved under.
+ *
+ * It used to ask for one month's, which was right while the plot list was one
+ * month's too. Now that a plot carries forward from TRANSPLANT_FLOW_FROM
+ * until its jobs are done, asking by month would show an August plot's
+ * blanket spray as "not recorded yet" on a September board — and the unique
+ * key is (plot, work_type, schedule_month), so it would have accepted a
+ * second record and the payroll would have paid the same plot's spray twice,
+ * in two different months, with both sheets looking perfectly normal.
+ *
+ * So a job is done or it is not, and the month it was saved under is what it
+ * gets PAID in, not what makes it count.
+ */
+export async function loadTransplantRecords(nursery) {
   const { data, error } = await supabase
     .from(TABLE)
     .select('*')
-    .eq('schedule_month', monthLabel)
+    .gte('work_date', TRANSPLANT_FLOW_FROM)
     .order('plot_name');
   if (error) {
     if (missingTable(error)) throw new Error(TRANSPLANT_SETUP_NEEDED);
