@@ -5,9 +5,9 @@
  * same shapes, so the FC Portal's Maintenance module renders unchanged for a
  * worker — the same week card, the same month timeline, the same ticks. What
  * differs is underneath: a worker is `anon` and cannot read shared_plots,
- * nops_maint_field_records or nops_maint_state at all, so every question goes
- * to a worker_* database function which checks the token and the boundary
- * before it answers.
+ * nops_maint_field_records, nops_maint_state or nops_maint_published at
+ * all, so every question goes to a worker_* database function which checks
+ * the token and the boundary before it answers.
  *
  * Two things are deliberately NOT the same:
  *

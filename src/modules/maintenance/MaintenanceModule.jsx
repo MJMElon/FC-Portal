@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAutoSync, useOnline } from '../../hooks/useOnline.js';
 import { agoText } from '../../lib/ago.js';
 import TopNav from '../../components/TopNav.jsx';
+import CfSelect from '../../components/CfSelect.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useLang } from '../../context/LanguageContext.jsx';
 import {
@@ -42,6 +43,7 @@ import { formatDistance, mapsUrl } from './track/track.js';
 import GpsTrack from './GpsTrack.jsx';
 import HistoryDialog from './HistoryDialog.jsx';
 import PhotoSlots from './PhotoSlots.jsx';
+import TransplantSheet from './TransplantSheet.jsx';
 import VerifyHub from './VerifyHub.jsx';
 import WeekBoard from './WeekBoard.jsx';
 import WorkIcon from './WorkIcons.jsx';
@@ -138,6 +140,7 @@ export default function MaintenanceModule({
   const [cap, setCap] = useState(null);
   const [sheet, setSheet] = useState(null);         // { week, workType }
   const [history, setHistory] = useState(false);
+  const [transplant, setTransplant] = useState(false);
   const [saving, setSaving] = useState(false);
   const [workers, setWorkers] = useState([]);   // the roster a conductor may credit work to
   const [pending, setPending] = useState([]);   // records the queue is holding
@@ -161,6 +164,12 @@ export default function MaintenanceModule({
      the screen lying in the expensive direction. See canMaintCorrect. */
   const mayEdit   = canMaintCorrect(permissions, 'edit');
   const mayDelete = canMaintCorrect(permissions, 'delete');
+  /* And the Transplanting Job sheet's own, which is NOT `edit`. A
+     transplanting record is the crew for a plot, and the payroll divides that
+     plot's quantity among exactly those names — so reopening one moves a
+     day's pay. Somebody trusted to fix a quantity on a spraying record is not
+     automatically trusted with that. Fails closed, like the other two. */
+  const mayEditTransplant = canMaintCorrect(permissions, 'transplant_edit');
   const mayExport = canMaintain(permissions, 'export');
   /* Not a permission — what the work sheet uses to decide whether a job
      already ticked off can be opened again. Nothing is changed or removed by
@@ -287,6 +296,31 @@ export default function MaintenanceModule({
        the rule asks whether anybody HERE has been labelled. */
     return generalWorkers(mine);
   }, [workers, nursery]);
+
+  /* The plots of the nursery CHOSEN at the top, which is not the same list
+     as visiblePlots. That one is scoped by permission — every nursery this
+     conductor may open — and permission is the wrong question here: with BNN
+     chosen he was being offered UNN 1's and UNN 2's transplanting as well,
+     on one undifferentiated list.
+
+     Compared through nurseryKey because shared_plots says "UNN 1" where the
+     office files "UNN1", and a screen that matched on the raw string would
+     show an empty list for half the nurseries.
+
+     THE RECORD FORM'S PLOT PICKER READS THIS TOO. It was handed
+     visiblePlots, so a conductor standing in UNN 2 opened the picker onto
+     B1, B1-R, B10, B11 — every plot of every nursery he may open, in one
+     alphabetical run, with his own nursery's plots somewhere below the
+     fold. The plot he wants is one of a dozen, not one of sixty. */
+  const nurseryPlots = useMemo(() => {
+    const want = nursery ? nurseryKey(nursery) : null;
+    return want
+      ? visiblePlots.filter((p) => nurseryKey(p.nursery_name) === want)
+      : visiblePlots;
+  }, [visiblePlots, nursery]);
+
+  const transplantPlots = useMemo(
+    () => nurseryPlots.map((p) => p.plot_name), [nurseryPlots]);
 
   const nurseryOptions = useMemo(
     () => [...new Set(visiblePlots.map((p) => p.nursery_name).filter(Boolean))].sort(),
@@ -581,15 +615,13 @@ export default function MaintenanceModule({
           {/* One nursery at a time. "All" only ever produced a schedule the
               Field Conductor could not work through as one list. */}
           {nurseryOptions.length > 0 && (
-            <select
-              value={nursery}
-              onChange={(e) => setNursery(e.target.value)}
-              className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-emerald-500"
-            >
-              {nurseryOptions.map((n) => (
-                <option key={n}>{n}</option>
-              ))}
-            </select>
+            <div className="w-[160px]">
+              <CfSelect value={nursery} onChange={(e) => setNursery(e.target.value)}>
+                {nurseryOptions.map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </CfSelect>
+            </div>
           )}
           <button
             onClick={() => setHistory(true)}
@@ -739,6 +771,21 @@ export default function MaintenanceModule({
           </button>
         )}
 
+        {/* The jobs a plot needs when seedlings go INTO it. Its own button
+            rather than a fifth work type on the week board: these four are
+            not planned by the month's schedule at all — the operation report
+            decides which plots they apply to, by having transplanted into
+            them. */}
+        {mayRecord && (
+          <button
+            onClick={() => setTransplant(true)}
+            disabled={setup || !visiblePlots.length}
+            className="w-full bg-white hover:bg-slate-50 border-2 border-emerald-600 disabled:opacity-40 text-emerald-700 font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors"
+          >
+            🌱 {t('tp.button')}
+          </button>
+        )}
+
         {setup && (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm font-bold">
             {t('mt.setupNeeded')}
@@ -790,6 +837,23 @@ export default function MaintenanceModule({
         )}
       </div>
 
+      {transplant && (
+        <TransplantSheet
+          nursery={nursery}
+          month={month}
+          plotNames={transplantPlots}
+          /* The nursery's general workers, and the whole register only if
+             that narrowing leaves nobody. Not gated on the `workers`
+             function switch the way the maintenance form is: crediting the
+             work IS this screen, so turning it off would leave a form that
+             cannot be filled in. */
+          workers={nurseryWorkers.length ? nurseryWorkers : workers}
+          staffName={staffName}
+          mayEdit={mayEditTransplant}
+          onClose={() => setTransplant(false)}
+        />
+      )}
+
       {history && (
         <HistoryDialog
           records={visible}
@@ -807,7 +871,7 @@ export default function MaintenanceModule({
       {editing && (
         <EntrySheet
           record={editing.record}
-          plots={visiblePlots}
+          plots={nurseryPlots}
           batchMap={batchMap}
           onClose={() => setEditing(null)}
           onSave={handleSave}
@@ -883,6 +947,17 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
   // What is standing in the chosen plot, and what the ticked ones come to.
   // The quantity is that sum, not a number anyone types: the seedlings worked
   // on ARE the batches worked on, and two figures that should agree will not.
+  /* The nursery's own plots — but never without the one already chosen.
+     `plots` is scoped to the nursery on screen, and a record being edited
+     can carry a plot from another one (a conductor who has since switched
+     nurseries, a task opened from elsewhere). Dropping it from the list
+     would blank the field on open and lose the plot on the next save, which
+     is a silent edit nobody asked for. */
+  const plotOptions = useMemo(() => {
+    if (!plotName || plots.some((p) => p.plot_name === plotName)) return plots;
+    return [{ plot_name: plotName, nursery_name: '' }, ...plots];
+  }, [plots, plotName]);
+
   const plotBatches = useMemo(() => batchesIn(batchMap, plotName), [batchMap, plotName]);
   const qty = useMemo(
     () => plotBatches.filter((b) => batches.includes(b.batch))
@@ -935,19 +1010,17 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
           {t('mt.plot')}
         </label>
-        <select
-          value={plotName}
-          onChange={(e) => setPlotName(e.target.value)}
-          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-3 text-sm font-bold text-slate-800 outline-none focus:border-emerald-500 mb-3"
-        >
-          <option value="">{t('mt.pickPlot')}</option>
-          {plots.map((p) => (
-            <option key={p.plot_name} value={p.plot_name}>
-              {p.plot_name}
-              {p.nursery_name ? ` — ${p.nursery_name}` : ''}
-            </option>
-          ))}
-        </select>
+        <div className="mb-3">
+          <CfSelect value={plotName} onChange={(e) => setPlotName(e.target.value)}>
+            <option value="">{t('mt.pickPlot')}</option>
+            {plotOptions.map((p) => (
+              <option key={p.plot_name} value={p.plot_name}>
+                {p.plot_name}
+                {p.nursery_name ? ` — ${p.nursery_name}` : ''}
+              </option>
+            ))}
+          </CfSelect>
+        </div>
 
         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
           {t('mt.date')}

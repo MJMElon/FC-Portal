@@ -40,6 +40,25 @@ export async function loadDOsForAL(alNumber) {
   return data || [];
 }
 
+// Same figure loadDOsForAL's caller derives (sum of total_qty) but for every
+// AL in one request instead of one request per AL — the Signed Consents list
+// needs this for every consent up front to know which are fully collected,
+// not just the one consent someone has opened.
+export async function loadIssuedQtyByALs(alNumbers) {
+  if (!alNumbers || !alNumbers.length) return {};
+  const { data, error } = await supabase
+    .from('shared_do_records')
+    .select('al_number, total_qty')
+    .in('al_number', alNumbers);
+  if (error) throw error;
+  const map = {};
+  (data || []).forEach((d) => {
+    if (!d.al_number) return;
+    map[d.al_number] = (map[d.al_number] || 0) + (Number(d.total_qty) || 0);
+  });
+  return map;
+}
+
 export async function loadConsentsForAL(alNumber) {
   const { data, error } = await supabase
     .from('mobile_consent_records')

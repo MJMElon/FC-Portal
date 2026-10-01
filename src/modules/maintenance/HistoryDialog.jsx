@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import CfSelect from '../../components/CfSelect.jsx';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { WORK_TYPES, workTypeLabel } from './data.js';
 import { monthLabelOf, monthRank } from './schedule.js';
@@ -44,9 +45,6 @@ export default function HistoryDialog({
     [records, month, work]
   );
 
-  const select = 'bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold '
-               + 'text-slate-700 outline-none focus:border-emerald-500';
-
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
@@ -62,16 +60,20 @@ export default function HistoryDialog({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <select value={month} onChange={(e) => setMonth(e.target.value)} className={select}>
-              <option value="">{t('mt.allMonths')}</option>
-              {months.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <select value={work} onChange={(e) => setWork(e.target.value)} className={select}>
-              <option value="">{t('mt.allWork')}</option>
-              {WORK_TYPES.map((w) => (
-                <option key={w.key} value={w.key}>{workTypeLabel(w, lang)}</option>
-              ))}
-            </select>
+            <div className="w-[150px]">
+              <CfSelect value={month} onChange={(e) => setMonth(e.target.value)}>
+                <option value="">{t('mt.allMonths')}</option>
+                {months.map((m) => <option key={m} value={m}>{m}</option>)}
+              </CfSelect>
+            </div>
+            <div className="w-[170px]">
+              <CfSelect value={work} onChange={(e) => setWork(e.target.value)}>
+                <option value="">{t('mt.allWork')}</option>
+                {WORK_TYPES.map((w) => (
+                  <option key={w.key} value={w.key}>{workTypeLabel(w, lang)}</option>
+                ))}
+              </CfSelect>
+            </div>
             <span className="ml-auto self-center text-[11px] font-black text-slate-400 uppercase tracking-widest">
               {t('mt.nRecords', { n: shown.length })}
             </span>
