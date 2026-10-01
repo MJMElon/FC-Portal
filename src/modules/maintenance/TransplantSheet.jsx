@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
+import { monthLabelOf } from './schedule.js';
 import {
   TRANSPLANT_FLOW_FROM,
   TRANSPLANT_JOBS,
@@ -115,10 +116,18 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
 
   const row = plot ? rows.find((r) => r.plot === plot) : null;
 
+  /* THE MONTH FOLLOWS THE DATE THE WORK WAS DONE, not the board.
+     It used to be the board's month with `today` as the date, which is right
+     only while a conductor records a job the same month he does it. He does
+     not always: a September job keyed in October filed itself under October,
+     so September's salary claim was short by it and October's carried work
+     nobody did in October — and neither screen could say so, because the
+     record held no date but the day it was keyed. */
   async function save(payload) {
+    const when = payload.date || today;
     await saveTransplantRecord({
       ...payload,
-      nursery, month, date: today,
+      nursery, month: monthLabelOf(when), date: when,
       plot: row.plot, batch: row.batch, sourceQty: row.qty,
       reportedBy: staffName,
     });
@@ -177,7 +186,7 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
             <JobForm
               job={jobByKey(job)} row={row} workers={workers}
               existing={recordOf.get(`${row.plot}|${job}`)}
-              mayEdit={mayEdit}
+              mayEdit={mayEdit} today={today}
               onSave={save} t={t} lang={lang}
             />
           ) : row ? (
@@ -351,7 +360,7 @@ function JobList({ row, recordOf, onPick, t, lang }) {
  * Setting → a person → Maintenance → Edit transplanting record. The tick
  * fails closed, like the other two corrections — see canMaintCorrect.
  */
-function JobForm({ job, row, workers, existing, mayEdit, onSave, t, lang }) {
+function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang }) {
   const split = !!job.split;
   /* Saved, and this person may not reopen it. Not the same as "no existing
      record": the form still shows everything, it just cannot be changed. */
@@ -362,6 +371,12 @@ function JobForm({ job, row, workers, existing, mayEdit, onSave, t, lang }) {
     return m;
   });
   const [remark, setRemark] = useState((existing && existing.remark) || '');
+  /* The day the work was DONE. It decides which month's salary claim this
+     record is paid in, so it is keyed rather than assumed — a conductor
+     catching up on last month's jobs would otherwise file them all under
+     this month and nothing would say so. Today is only the default. */
+  const [date, setDate] = useState(() =>
+    String((existing && existing.work_date) || today || '').slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -369,7 +384,10 @@ function JobForm({ job, row, workers, existing, mayEdit, onSave, t, lang }) {
   const total = names.reduce((n, k) => n + (Number(picked[k]) || 0), 0);
   const left  = Number(row.qty || 0) - total;
   // Only the split job has a sum to get right. The others just need a name.
-  const balanced = split ? names.length > 0 && left === 0 : names.length > 0;
+  // A date as well as a crew: without one the record has no month to be paid
+  // in, and the field is pre-filled, so an empty one is somebody clearing it.
+  const balanced = !!date
+    && (split ? names.length > 0 && left === 0 : names.length > 0);
 
   const toggle = (name) =>
     setPicked((p) => {
@@ -385,6 +403,12 @@ function JobForm({ job, row, workers, existing, mayEdit, onSave, t, lang }) {
         workTypeKey: job.key,
         workers: names.map((n) => ({ name: n, qty: split ? Number(picked[n]) : null })),
         remark: remark.trim(),
+        date,
+        /* Which row this is, so a correction that moves the month updates it
+           in place. The conflict key carries the month, so an upsert would
+           leave the old month's row standing and pay the job twice —
+           see saveTransplantRecord. */
+        id: existing && existing.id,
       });
     } catch (e) {
       setErr((e && e.message) || String(e));
@@ -402,6 +426,35 @@ function JobForm({ job, row, workers, existing, mayEdit, onSave, t, lang }) {
         <Row label={t('mt.plot')}    value={row.plot} />
         {row.batch && <Row label={t('tp.batch')} value={row.batch} />}
         <Row label={t('tp.planted')} value={num(row.qty)} />
+      </div>
+
+      {/* WHEN. The one field on this form that is not the report's and not a
+          name, and the one that decides which month's claim pays it. It sits
+          above the crew because it is read first: a conductor catching up on
+          last month's work has to change it before he starts ticking.
+
+          The month it lands in is printed under the box rather than left to
+          be worked out, because getting it wrong is silent — the claim it
+          should have been on simply stays short. The range is the window the
+          sheet itself can read back (TRANSPLANT_FLOW_FROM to today), so a
+          date that would hide the record cannot be keyed. */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4">
+        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+          {t('tp.whenDone')}
+        </label>
+        <input
+          type="date" value={date} readOnly={locked} disabled={locked}
+          min={TRANSPLANT_FLOW_FROM} max={today}
+          onChange={(e) => setDate(e.target.value)}
+          className={`w-full border rounded-xl px-3 py-2.5 text-sm font-black outline-none ${
+            locked ? 'bg-slate-50 border-slate-200 text-slate-500'
+                   : 'bg-white border-slate-300 focus:border-emerald-500'}`}
+        />
+        <div className={`mt-2 text-[11.5px] font-bold leading-snug ${
+          date && today && date.slice(0, 7) !== today.slice(0, 7)
+            ? 'text-amber-700' : 'text-slate-400'}`}>
+          {date ? t('tp.paidIn', { m: monthLabelOf(date) }) : t('tp.whenHint')}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4">

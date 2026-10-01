@@ -249,6 +249,14 @@ export async function loadTransplantRecords(nursery) {
  * Upserted on (plot, job, month), because recording the same job twice on
  * the same plot is a correction rather than a second crew — the unique index
  * says so and this matches it. Anything already there is replaced whole.
+ *
+ * EXCEPT WHEN THE RECORD IS ALREADY THERE AND ITS MONTH IS CHANGING. The
+ * conflict key has the month in it, so an upsert of a September date onto a
+ * record saved under October does not move it — it writes a SECOND row and
+ * leaves the October one standing, and the payroll then pays the same plot's
+ * job twice, in two months, with both sheets looking perfectly normal. So a
+ * caller that knows which record it is editing passes `id`, and that row is
+ * updated in place whatever the month says.
  */
 export async function saveTransplantRecord(rec) {
   const workers = (rec.workers || [])
@@ -273,9 +281,9 @@ export async function saveTransplantRecord(rec) {
     updated_at:     new Date().toISOString(),
   };
 
-  const { error } = await supabase
-    .from(TABLE)
-    .upsert(row, { onConflict: 'plot_name,work_type,schedule_month' });
+  const { error } = rec.id
+    ? await supabase.from(TABLE).update(row).eq('id', rec.id)
+    : await supabase.from(TABLE).upsert(row, { onConflict: 'plot_name,work_type,schedule_month' });
   if (error) {
     if (missingTable(error)) throw new Error(TRANSPLANT_SETUP_NEEDED);
     throw error;
