@@ -162,26 +162,32 @@ function alignRoundsToWeeks(s) {
 }
 
 /**
- * The schedule that applies to a month, per nursery.
+ * The schedule that applies to a month, per nursery — THIS month's own
+ * published plan, and nothing else.
  *
- * The office page carries the previous month's plan forward on screen and
- * only writes a row once someone ticks or saves — so a month can look fully
- * planned in the office and have no row of its own. The field has to see the
- * same plan the office is looking at, so where this month has no row the most
- * recent earlier one is used, and said to be carried forward.
+ * This used to carry an earlier month's plan forward when the requested
+ * month had no row of its own nops_maint_state, read live: a month the
+ * office had not re-saved yet still looked planned on screen (last month's
+ * ticks were still there), so showing the field last month's plan matched
+ * what the office itself was looking at.
+ *
+ * nops_maint_published only gets a row when Sync is actually pressed for
+ * THAT month (see loadSchedules() in data.js), so the same carry-forward
+ * now means something different and wrong: a month nobody has Synced yet
+ * — including one the office is actively mid-edit on, un-Synced on
+ * purpose — would quietly show the field an earlier month's plan instead
+ * of nothing, which is exactly the "the field sees it before Sync is
+ * pressed" bug Sync exists to prevent. A row only counts for its own
+ * month now; no row means no plan, full stop, until that month is Synced.
  */
 export function applicableSchedules(rows, monthLbl) {
   const want = monthRank(monthLbl);
   const best = new Map();     // nursery → { nursery, payload, month, carried }
   (rows || []).forEach((r) => {
     if (!r || !r.payload) return;
-    const rank = monthRank(r.month);
-    if (rank < 0 || rank > want) return;         // never a future month's plan
-    const cur = best.get(r.nursery);
-    if (!cur || monthRank(cur.month) < rank) {
-      best.set(r.nursery, { nursery: r.nursery, payload: normalisePayload(r.payload),
-                            month: r.month, carried: rank !== want });
-    }
+    if (monthRank(r.month) !== want) return;     // only this month's own row
+    best.set(r.nursery, { nursery: r.nursery, payload: normalisePayload(r.payload),
+                          month: r.month, carried: false });
   });
   return [...best.values()];
 }
