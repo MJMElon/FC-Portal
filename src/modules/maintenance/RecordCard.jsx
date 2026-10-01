@@ -105,18 +105,21 @@ export default function RecordCard({
             ].filter(Boolean).join(' · ')}
           </div>
 
-          {/* Who did the work. worked_by is set only when the
-              conductor keyed it for somebody else, so when it is
-              there it is the answer and reported_by is merely who
-              held the phone — said quietly underneath. */}
+          {/* WHO DID THE WORK, and only that.
+
+              worked_by is set when the conductor says somebody else did it —
+              keying it for a worker whose phone was broken, or correcting a
+              record the office sent back — so where it is there it IS the
+              answer, and reported_by is merely who held the phone.
+
+              That second name used to sit under this one as "keyed by Amri".
+              It is answering a question nobody asked of this card: the card
+              is read to find out who the morning belongs to, and two names
+              where there is one worker reads as a disagreement. Who keyed it
+              is still on the record, and the office's own form shows both. */}
           <div className="text-[12.5px] font-black text-slate-600 mt-1">
             {r.worked_by || r.reported_by || t('mt.byNobody')}
           </div>
-          {r.worked_by && r.reported_by && r.worked_by !== r.reported_by && (
-            <div className="text-[11px] font-semibold text-slate-400">
-              {t('mt.keyedBy', { name: r.reported_by })}
-            </div>
-          )}
 
           {r.batch_name && (
             <div className="mt-2 flex flex-wrap gap-1.5">
