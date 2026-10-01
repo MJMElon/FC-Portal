@@ -285,6 +285,10 @@ const en = {
   'mt.verifyAllDone': 'Nothing left to check — every record has been looked at.',
   'mt.approve': 'Approve',
   'mt.reject': 'Send back',
+  /* Skip decides nothing — it moves the card to the back of the deck so the
+     rest can be got through and it comes round again in the same pass. */
+  'mt.skip': 'Later',
+  'mt.skipOnlyOne': 'This is the only one left to check.',
   'mt.rejectWhy': 'Why is it going back?',
   'mt.rejectHint': 'The worker sees this reason and the plot goes back on their list.',
   'mt.reason.not_finished': 'Work not finished',
@@ -1063,6 +1067,8 @@ const ms = {
   'mt.verifyAllDone': 'Tiada lagi untuk disemak — semua rekod telah dilihat.',
   'mt.approve': 'Sahkan',
   'mt.reject': 'Hantar balik',
+  'mt.skip': 'Nanti',
+  'mt.skipOnlyOne': 'Ini sahaja yang tinggal untuk disemak.',
   'mt.rejectWhy': 'Kenapa dihantar balik?',
   'mt.rejectHint': 'Pekerja melihat sebab ini dan plot itu kembali ke senarai mereka.',
   'mt.reason.not_finished': 'Kerja belum siap',

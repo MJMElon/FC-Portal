@@ -195,6 +195,24 @@ export default function VerifyHub({
     settle(record, 'rejected', () => onReject(record, reason));
   };
 
+  /* SKIP: this one later, not this one never.
+
+     A card that cannot be answered yet — the worker is standing right there
+     and will know in a minute, the track needs looking at properly — used to
+     leave only two ways out, and both of them are a verdict. Skipping moves
+     it to the BACK of the deck, so the rest can be got through and it comes
+     round again before this pass is over. Nothing is written: the record is
+     still waiting, exactly as it was.
+
+     Not a filter and not a dismissal. A conductor who skips everything ends
+     up where they started, which is the honest outcome. */
+  function skip() {
+    if (!top || flying || asking) return;
+    setDrag(null);
+    setError(null);
+    setQueue((q) => (q.length < 2 ? q : [...q.slice(1), q[0]]));
+  }
+
   /* Taking it back puts the record where it was — waiting — and returns it to
      the front of the deck, so a mis-swipe is corrected by answering again
      rather than by hunting for the record afterwards. */
@@ -320,7 +338,9 @@ export default function VerifyHub({
             })}
           </div>
 
-          {/* The same two answers, for a mouse. */}
+          {/* The same two answers, for a mouse — and the one that is not an
+              answer at all. Skip sits between them, smaller and quieter: it
+              decides nothing, so it should not look like the other two. */}
           <div className="flex items-center justify-center gap-5 py-4">
             <button onClick={() => top && askWhy(top)} aria-label={t('mt.reject')}
               className="w-[56px] h-[56px] rounded-full bg-white border border-slate-200 shadow-lg
@@ -336,6 +356,16 @@ export default function VerifyHub({
                          disabled:opacity-40 disabled:cursor-not-allowed
                          hover:bg-emerald-50 active:scale-95 transition cursor-pointer">
               ✓
+            </button>
+            <button onClick={skip} aria-label={t('mt.skip')}
+              disabled={!top || queue.length < 2}
+              title={top && queue.length < 2 ? t('mt.skipOnlyOne') : undefined}
+              className="h-[44px] px-4 rounded-full bg-white border border-slate-200 shadow
+                         text-slate-500 text-[11px] font-black uppercase tracking-widest
+                         grid place-items-center
+                         disabled:opacity-40 disabled:cursor-not-allowed
+                         hover:bg-slate-50 active:scale-95 transition cursor-pointer">
+              {t('mt.skip')} ›
             </button>
           </div>
 
