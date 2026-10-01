@@ -18,7 +18,9 @@
    Run: NODE_PATH=/opt/node22/lib/node_modules node tests/transplant_work_date.cjs
    No build, no browser and no server needed.                               */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 let pass = 0, fail = 0;
 function check(name, got, want) {
@@ -30,6 +32,13 @@ function checkTrue(name, got) { check(name, !!got, true); }
 function checkFalse(name, got) { check(name, !!got, false); }
 
 const read = (...p) => fs.readFileSync(path.join(__dirname, '..', 'src', ...p), 'utf8');
+
+/* The day before a YYYY-MM-DD, without pulling in a date library. */
+const prevDay = (iso) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+};
 
 (async () => {
   console.log('\nThe month a date is paid in');
@@ -44,8 +53,39 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, '..', 'src', ...p), 
   check('nothing answers nothing, rather than guessing this month',
         monthLabelOf(''), '');
 
+  console.log('\nWhen the form starts asking');
+  /* transplantData.js reaches the supabase client and `import.meta.env`, so
+     it cannot be required straight into Node. Bundled through the esbuild
+     that ships with Vite, with the environment defined, so the real switch
+     is run rather than a copy of it rewritten here. */
+  const bundle = path.join(os.tmpdir(), 'mjm-transplant-data.mjs');
+  execFileSync('npx', ['esbuild',
+    path.join(__dirname, '..', 'src', 'modules', 'maintenance', 'transplantData.js'),
+    '--bundle', '--format=esm', '--platform=node',
+    '--define:import.meta.env={"VITE_SUPABASE_URL":"https://stub.supabase.co",'
+      + '"VITE_SUPABASE_ANON_KEY":"stub","VITE_GEMINI_KEY":"","MODE":"test","DEV":false,"PROD":true}',
+    '--outfile=' + bundle],
+    { cwd: path.join(__dirname, '..'), stdio: 'pipe' });
+  const td = await import('file://' + bundle);
+
+  check('it starts on the 1st of a month, not part way through one',
+        td.TRANSPLANT_DATE_FROM.slice(8), '01');
+  checkFalse('the day before, the form does not ask',
+             td.asksDate(prevDay(td.TRANSPLANT_DATE_FROM)));
+  checkTrue('on the day, it does', td.asksDate(td.TRANSPLANT_DATE_FROM));
+  checkTrue('…and after it', td.asksDate('2027-03-14'));
+  checkFalse('…and not in a month before it', td.asksDate('2026-10-31'));
+  checkFalse('no date at all does not switch it on', td.asksDate(''));
+
   console.log('\nThe form asks when');
   const sheet = read('modules', 'maintenance', 'TransplantSheet.jsx');
+  checkTrue('the field is behind that switch', /\{asksDate\(today\) && \(/.test(sheet));
+  checkTrue('…and so is the month the save derives',
+            /month: asking \? monthLabelOf\(when\) : month/.test(sheet));
+  checkTrue('before it, the record is dated today and paid in the board’s '
+          + 'month, exactly as it always was',
+            /const asking = asksDate\(today\);/.test(sheet)
+            && /const when = \(asking && payload\.date\) \|\| today;/.test(sheet));
   checkTrue('there is a date field', /const \[date, setDate\] = useState/.test(sheet));
   checkTrue('…defaulting to the record’s own date where there is one',
             /existing && existing\.work_date/.test(sheet));
@@ -64,7 +104,7 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, '..', 'src', ...p), 
 
   console.log('\nThe save follows the date, not the board');
   checkTrue('the month is derived from the keyed date',
-            /month: monthLabelOf\(when\)/.test(sheet));
+            /monthLabelOf\(when\)/.test(sheet));
   checkTrue('…and the date saved is that date', /date: when/.test(sheet));
   checkFalse('the board’s month is no longer what gets saved',
              /nursery, month, date: today/.test(sheet));

@@ -3,6 +3,7 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import { monthLabelOf } from './schedule.js';
 import {
   TRANSPLANT_FLOW_FROM,
+  asksDate,
   TRANSPLANT_JOBS,
   TRANSPLANT_SETUP_NEEDED,
   jobByKey,
@@ -122,12 +123,18 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
      not always: a September job keyed in October filed itself under October,
      so September's salary claim was short by it and October's carried work
      nobody did in October — and neither screen could say so, because the
-     record held no date but the day it was keyed. */
+     record held no date but the day it was keyed.
+
+     UNTIL TRANSPLANT_DATE_FROM the form does not ask, and this falls back to
+     exactly what it did before — the board's month, dated today. The office
+     asked for the change to start at a month boundary rather than part way
+     through a claim that is half made. */
   async function save(payload) {
-    const when = payload.date || today;
+    const asking = asksDate(today);
+    const when = (asking && payload.date) || today;
     await saveTransplantRecord({
       ...payload,
-      nursery, month: monthLabelOf(when), date: when,
+      nursery, month: asking ? monthLabelOf(when) : month, date: when,
       plot: row.plot, batch: row.batch, sourceQty: row.qty,
       reportedBy: staffName,
     });
@@ -437,7 +444,13 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
           be worked out, because getting it wrong is silent — the claim it
           should have been on simply stays short. The range is the window the
           sheet itself can read back (TRANSPLANT_FLOW_FROM to today), so a
-          date that would hide the record cannot be keyed. */}
+          date that would hide the record cannot be keyed.
+
+          Not shown before TRANSPLANT_DATE_FROM: until then the record is
+          dated today and paid in the board's month, exactly as it always
+          was. One habit changing at a month boundary rather than half way
+          through a claim. */}
+      {asksDate(today) && (
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
           {t('tp.whenDone')}
@@ -456,6 +469,7 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
           {date ? t('tp.paidIn', { m: monthLabelOf(date) }) : t('tp.whenHint')}
         </div>
       </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
