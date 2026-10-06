@@ -52,11 +52,32 @@ export function relativeDay(iso, today, t) {
  */
 export default function RecordCard({
   record: r, today, mayVerify, mayEdit, mayDelete, onVerify, onEdit, onDelete,
+  /* How to fetch one record's walk. Both doors supply it (FC_SOURCE and the
+     Worker Portal's own source), and a caller that supplies none simply has
+     no map button on a record whose track is not already in hand. */
+  loadTrack,
 }) {
   const { t, lang } = useLang();
   const wt = workTypeByKey(r.work_type);
   const [mapOpen, setMapOpen] = useState(false);
-  const hasTrack = !!(r.gps_track && r.gps_track.length);
+  /* THE WALK IS NOT IN THE LIST'S READ any more — see loadMaintenanceData,
+     which carries the summary columns and leaves gps_track behind so it can
+     load three months instead of five days. So whether there IS a track is
+     asked of gps_points, which is stored beside it for exactly this, and the
+     line itself is fetched when somebody taps the button.
+
+     A record still sitting in the outbox carries its own track and has no id
+     to fetch by, so that one is used as it stands. */
+  const [track, setTrack] = useState(null);
+  const own = r.gps_track && r.gps_track.length ? r.gps_track : null;
+  const hasTrack = !!own || (Number(r.gps_points) > 0 && !!loadTrack);
+
+  async function openMap() {
+    setMapOpen(true);
+    if (own || track || !loadTrack) return;
+    const got = await loadTrack(r.id);
+    if (got && got.track) setTrack(got.track);
+  }
 
   return (
     <div
@@ -164,7 +185,7 @@ export default function RecordCard({
           {hasTrack ? (
             <button
               type="button"
-              onClick={() => setMapOpen(true)}
+              onClick={openMap}
               className="inline-flex items-center gap-1.5 mt-1.5 text-[11px] font-bold text-slate-500 tabular-nums cursor-pointer hover:text-emerald-700"
             >
               <span aria-hidden="true">🛰️</span>
@@ -291,21 +312,35 @@ export default function RecordCard({
           was opened from — a full-screen map nobody can see or close. */}
       {mapOpen && (
         <div className="fixed inset-0 z-[80]">
-          <Suspense fallback={
-            <div className="fixed inset-0 bg-slate-900 grid place-items-center">
+          {/* The line is fetched when this opens, so for a moment there is
+              nothing to draw. The same full-screen "loading" the lazy import
+              already shows, rather than a map that flashes up empty and then
+              jumps — and it is TAPPABLE, so somebody on a bad signal can get
+              out instead of waiting on a black screen. */}
+          {(own || track) ? (
+            <Suspense fallback={
+              <div className="fixed inset-0 bg-slate-900 grid place-items-center">
+                <div className="text-emerald-400 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">
+                  {t('common.loading')}
+                </div>
+              </div>
+            }>
+              <TrackMap
+                viewOnly
+                initial={{ track: own || track, distance_m: r.gps_distance_m,
+                           started_at: r.gps_started_at, ended_at: r.gps_ended_at }}
+                onClose={() => setMapOpen(false)}
+                onDone={() => setMapOpen(false)}
+              />
+            </Suspense>
+          ) : (
+            <button type="button" onClick={() => setMapOpen(false)}
+              className="fixed inset-0 bg-slate-900 grid place-items-center w-full">
               <div className="text-emerald-400 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">
                 {t('common.loading')}
               </div>
-            </div>
-          }>
-            <TrackMap
-              viewOnly
-              initial={{ track: r.gps_track, distance_m: r.gps_distance_m,
-                         started_at: r.gps_started_at, ended_at: r.gps_ended_at }}
-              onClose={() => setMapOpen(false)}
-              onDone={() => setMapOpen(false)}
-            />
-          </Suspense>
+            </button>
+          )}
         </div>
       )}
     </div>
