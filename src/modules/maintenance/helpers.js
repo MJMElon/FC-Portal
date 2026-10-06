@@ -103,6 +103,41 @@ export function isGeneralWorker(r, nurseryNamesTheRole) {
   return !NON_GENERAL_ROLE.test(role);
 }
 
+/* ── WHO DID THE WORK, for the screen ──────────────────────────────────
+ *
+ * `worked_by` is the tick list: the conductor opened Who did this job and
+ * named the crew. When it is there it IS the answer, and reported_by is
+ * merely who held the phone.
+ *
+ * When it is empty there are two quite different situations wearing the same
+ * shape, and the card used to show reported_by for both:
+ *
+ *   a WORKER saved the job from their own phone, so the reporter did it
+ *   a CONDUCTOR saved it and ticked nobody, so the reporter did NOT do it
+ *
+ * Showing the conductor's name as the worker in the second case is the
+ * screen naming the wrong person for a morning's work — and it is his name
+ * that then reads back as the one who did it. The register tells them apart:
+ * a reporter who is a general worker of this nursery did the job, and one
+ * who is not was keying it for somebody he forgot to tick.
+ *
+ * Returns the names to show and, separately, who keyed it.
+ */
+const sameName = (a, b) =>
+  String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+export function didTheWork(record, workerNames) {
+  const ticked = String((record && record.worked_by) || '')
+    .split(',').map((n) => n.trim()).filter(Boolean);
+  const reporter = String((record && record.reported_by) || '').trim();
+  if (ticked.length) return { names: ticked, keyedBy: reporter, nobodyTicked: false };
+  if (!reporter) return { names: [], keyedBy: '', nobodyTicked: true };
+  const isWorker = (workerNames || []).some((n) => sameName(n, reporter));
+  return isWorker
+    ? { names: [reporter], keyedBy: '', nobodyTicked: false }
+    : { names: [], keyedBy: reporter, nobodyTicked: true };
+}
+
 /** The general workers among one nursery's register rows. */
 export function generalWorkers(rows) {
   const list = rows || [];

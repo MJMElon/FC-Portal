@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { localeOf, shortDate } from '../../lib/day.js';
+import { didTheWork } from './helpers.js';
 import { workTypeByKey, workTypeLabel } from './data.js';
 import { formatDistance, mapsUrl } from './track/track.js';
 import { tintOf } from './tints.js';
@@ -52,8 +53,13 @@ export function relativeDay(iso, today, t) {
  */
 export default function RecordCard({
   record: r, today, mayVerify, mayEdit, mayDelete, onVerify, onEdit, onDelete,
+  /* The nursery's general workers, so a reporter can be told apart from a
+     conductor — see didTheWork. Absent, nothing is assumed about the
+     reporter and the old reading stands. */
+  workerNames = null,
 }) {
   const { t, lang } = useLang();
+  const who = didTheWork(r, workerNames);
   const wt = workTypeByKey(r.work_type);
   const [mapOpen, setMapOpen] = useState(false);
   const hasTrack = !!(r.gps_track && r.gps_track.length);
@@ -105,16 +111,17 @@ export default function RecordCard({
             ].filter(Boolean).join(' · ')}
           </div>
 
-          {/* Who did the work. worked_by is set only when the
-              conductor keyed it for somebody else, so when it is
-              there it is the answer and reported_by is merely who
-              held the phone — said quietly underneath. */}
-          <div className="text-[12.5px] font-black text-slate-600 mt-1">
-            {r.worked_by || r.reported_by || t('mt.byNobody')}
+          {/* Who did the work — the names TICKED, never the conductor who
+              keyed it. See didTheWork: a reporter who is a general worker of
+              this nursery saved the job from their own phone and did it, and
+              one who is not was keying it for somebody he did not tick. */}
+          <div className={`text-[12.5px] font-black mt-1 ${
+            who.nobodyTicked ? 'text-amber-700' : 'text-slate-600'}`}>
+            {who.names.length ? who.names.join(', ') : t('mt.nobodyTicked')}
           </div>
-          {r.worked_by && r.reported_by && r.worked_by !== r.reported_by && (
+          {who.keyedBy && (
             <div className="text-[11px] font-semibold text-slate-400">
-              {t('mt.keyedBy', { name: r.reported_by })}
+              {t('mt.keyedBy', { name: who.keyedBy })}
             </div>
           )}
 

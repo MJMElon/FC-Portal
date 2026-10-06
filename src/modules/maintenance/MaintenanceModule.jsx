@@ -850,6 +850,9 @@ export default function MaintenanceModule({
         <HistoryDialog
           records={visible}
           today={today}
+          /* So a record's reporter can be told apart from a conductor who
+             keyed it — see didTheWork in helpers.js. */
+          workerNames={nurseryWorkers.map((w) => w.full_name).filter(Boolean)}
           mayVerify={mayVerify}
           mayEdit={mayEdit}
           mayDelete={mayDelete}
