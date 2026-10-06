@@ -219,7 +219,14 @@ export function makeWorkerMaintSource(token, workerId = null) {
       try {
         const [plots, records] = await Promise.all([
           api.plots(token),
-          api.maintRecords(token, 500),
+          /* As many as the function will give. Five hundred was the same
+             fault the FC portal's own read had: at a hundred records a day
+             it is five days, and a worker looking for last week's job was
+             told it had never happened. worker_maint_records carries the
+             summary and not the track precisely so it can afford this — see
+             shared/create_worker_portal.sql, and the date window
+             shared/RUN_ME_worker_records_window.sql puts on it. */
+          api.maintRecords(token, 2000),
         ]);
         const out = { plots: plots || [], records: asRecords(records) };
         cacheData(workerId, out);

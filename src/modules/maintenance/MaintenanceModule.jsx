@@ -20,6 +20,7 @@ import {
   isModuleAdmin,
   loadCapacity,
   loadMaintenanceData,
+  loadTrack,
   loadPlotBatches,
   loadWorkers,
   loadSchedules,
@@ -80,6 +81,10 @@ const MAX_PHOTOS = 3;
  */
 const FC_SOURCE = {
   loadData:       loadMaintenanceData,
+  /* One record's walked line. Both doors have one now and the cards go
+     through it, because the list read on neither of them carries the track —
+     see loadMaintenanceData and worker_maint_track. */
+  loadTrack,
   /* Only the FC portal. The store figures come from four tables a worker,
      who is `anon`, cannot read — and does not need: a worker is told which
      plots to do, not how much to sign out of the store. The board simply
@@ -796,6 +801,7 @@ export default function MaintenanceModule({
         {!setup && mayVerify && (
           <VerifyHub
             records={deck}
+            loadTrack={source.loadTrack}
             columnsReady={verifyReady}
             canReject={rejectReady}
             staffName={staffName}
@@ -920,6 +926,7 @@ export default function MaintenanceModule({
           onEdit={(r) => setEditing({ record: r })}
           onDelete={handleDelete}
           onClose={() => setHistory(false)}
+          loadTrack={source.loadTrack}
         />
       )}
 
