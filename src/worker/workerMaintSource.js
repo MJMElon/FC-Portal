@@ -5,9 +5,9 @@
  * same shapes, so the FC Portal's Maintenance module renders unchanged for a
  * worker — the same week card, the same month timeline, the same ticks. What
  * differs is underneath: a worker is `anon` and cannot read shared_plots,
- * nops_maint_field_records or nops_maint_state at all, so every question goes
- * to a worker_* database function which checks the token and the boundary
- * before it answers.
+ * nops_maint_field_records, nops_maint_state or nops_maint_published at
+ * all, so every question goes to a worker_* database function which checks
+ * the token and the boundary before it answers.
  *
  * Two things are deliberately NOT the same:
  *
@@ -219,7 +219,14 @@ export function makeWorkerMaintSource(token, workerId = null) {
       try {
         const [plots, records] = await Promise.all([
           api.plots(token),
-          api.maintRecords(token, 500),
+          /* As many as the function will give. Five hundred was the same
+             fault the FC portal's own read had: at a hundred records a day
+             it is five days, and a worker looking for last week's job was
+             told it had never happened. worker_maint_records carries the
+             summary and not the track precisely so it can afford this — see
+             shared/create_worker_portal.sql, and the date window
+             shared/RUN_ME_worker_records_window.sql puts on it. */
+          api.maintRecords(token, 2000),
         ]);
         const out = { plots: plots || [], records: asRecords(records) };
         cacheData(workerId, out);

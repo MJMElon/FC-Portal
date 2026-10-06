@@ -58,6 +58,11 @@ export default function VerifyHub({
      functions, and a component that reaches for the table directly would work
      on one door and fail silently on the other. */
   onApprove, onReject, onUndo, onChanged,
+  /* One record's walked line, fetched when the conductor opens it. The list
+     read carries the summary and not the track on either door — see
+     loadMaintenanceData and worker_maint_track — so the line comes from here
+     and not off the record. */
+  loadTrack,
 }) {
   const { t, lang } = useLang();
 
@@ -88,6 +93,22 @@ export default function VerifyHub({
      the conductor is confirming rather than starting again. */
   const [picked, setPicked] = useState({});
   const [map, setMap] = useState(null);        // the record whose track is open
+  const [mapTrack, setMapTrack] = useState(null); // its line, once fetched
+
+  /* Opened, then fetched. The card knows a walk EXISTS from gps_points, which
+     is stored beside the track for exactly this; the line itself is one row
+     and is asked for when somebody wants to look at it. */
+  async function openTrack(r) {
+    setMap(r);
+    const own = r.gps_track && r.gps_track.length ? r.gps_track : null;
+    setMapTrack(own);
+    if (own || !loadTrack) return;
+    const got = await loadTrack(r.id);
+    /* Still the same card? A conductor who swiped on through while the line
+       was coming down must not have it painted over the next one. */
+    setMapTrack((cur) => (cur ? cur : (got && got.track) || null));
+  }
+  const closeMap = () => { setMap(null); setMapTrack(null); };
 
   const batchesFor = (r) => (r && batchMap ? batchesIn(batchMap, r.plot_name) : []);
   const pickedOn = (r) => (r && picked[r.id] !== undefined ? picked[r.id] : batchList(r && r.batch_name));
@@ -194,6 +215,24 @@ export default function VerifyHub({
     setTyped('');
     settle(record, 'rejected', () => onReject(record, reason));
   };
+
+  /* SKIP: this one later, not this one never.
+
+     A card that cannot be answered yet — the worker is standing right there
+     and will know in a minute, the track needs looking at properly — used to
+     leave only two ways out, and both of them are a verdict. Skipping moves
+     it to the BACK of the deck, so the rest can be got through and it comes
+     round again before this pass is over. Nothing is written: the record is
+     still waiting, exactly as it was.
+
+     Not a filter and not a dismissal. A conductor who skips everything ends
+     up where they started, which is the honest outcome. */
+  function skip() {
+    if (!top || flying || asking) return;
+    setDrag(null);
+    setError(null);
+    setQueue((q) => (q.length < 2 ? q : [...q.slice(1), q[0]]));
+  }
 
   /* Taking it back puts the record where it was — waiting — and returns it to
      the front of the deck, so a mis-swipe is corrected by answering again
@@ -313,14 +352,17 @@ export default function VerifyHub({
                     batches={batchesFor(r)}
                     picked={pickedOn(r)}
                     onToggleBatch={(name) => toggleBatch(r, name)}
-                    onOpenTrack={() => setMap(r)}
+                    onOpenTrack={() => openTrack(r)}
+                    canOpenTrack={!!loadTrack}
                   />
                 </div>
               );
             })}
           </div>
 
-          {/* The same two answers, for a mouse. */}
+          {/* The same two answers, for a mouse — and the one that is not an
+              answer at all. Skip sits between them, smaller and quieter: it
+              decides nothing, so it should not look like the other two. */}
           <div className="flex items-center justify-center gap-5 py-4">
             <button onClick={() => top && askWhy(top)} aria-label={t('mt.reject')}
               className="w-[56px] h-[56px] rounded-full bg-white border border-slate-200 shadow-lg
@@ -336,6 +378,16 @@ export default function VerifyHub({
                          disabled:opacity-40 disabled:cursor-not-allowed
                          hover:bg-emerald-50 active:scale-95 transition cursor-pointer">
               ✓
+            </button>
+            <button onClick={skip} aria-label={t('mt.skip')}
+              disabled={!top || queue.length < 2}
+              title={top && queue.length < 2 ? t('mt.skipOnlyOne') : undefined}
+              className="h-[44px] px-4 rounded-full bg-white border border-slate-200 shadow
+                         text-slate-500 text-[11px] font-black uppercase tracking-widest
+                         grid place-items-center
+                         disabled:opacity-40 disabled:cursor-not-allowed
+                         hover:bg-slate-50 active:scale-95 transition cursor-pointer">
+              {t('mt.skip')} ›
             </button>
           </div>
 
@@ -356,21 +408,32 @@ export default function VerifyHub({
           a map nobody can use. */}
       {map && (
         <div className="fixed inset-0 z-[70]">
-          <Suspense fallback={
-            <div className="fixed inset-0 bg-slate-900 grid place-items-center">
+          {mapTrack ? (
+            <Suspense fallback={
+              <div className="fixed inset-0 bg-slate-900 grid place-items-center">
+                <div className="text-emerald-400 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">
+                  {t('common.loading')}
+                </div>
+              </div>
+            }>
+              <TrackMap
+                viewOnly
+                initial={{ track: mapTrack, distance_m: map.gps_distance_m,
+                           started_at: map.gps_started_at, ended_at: map.gps_ended_at }}
+                onClose={closeMap}
+                onDone={closeMap}
+              />
+            </Suspense>
+          ) : (
+            /* While the line is coming down. Tappable, so a conductor on a
+               bad signal can get out instead of waiting on a black screen. */
+            <button type="button" onClick={closeMap}
+              className="fixed inset-0 bg-slate-900 grid place-items-center w-full">
               <div className="text-emerald-400 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">
                 {t('common.loading')}
               </div>
-            </div>
-          }>
-            <TrackMap
-              viewOnly
-              initial={{ track: map.gps_track, distance_m: map.gps_distance_m,
-                         started_at: map.gps_started_at, ended_at: map.gps_ended_at }}
-              onClose={() => setMap(null)}
-              onDone={() => setMap(null)}
-            />
-          </Suspense>
+            </button>
+          )}
         </div>
       )}
 
@@ -475,7 +538,7 @@ function sig(rows) {
 }
 
 /** The record itself, filling the card. */
-function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatch, onOpenTrack }) {
+function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatch, onOpenTrack, canOpenTrack }) {
   const wt = workTypeByKey(r.work_type);
   const tint = tintOf(r.work_type);
   const hasMap = r.gps_lat != null && r.gps_lng != null;
@@ -484,7 +547,8 @@ function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatc
      round was actually walked needs the LINE — "2946 m" is a number anybody
      could have, and the shape of it on the plot is the thing that answers the
      question. Drawn on the same satellite map the worker recorded it on. */
-  const hasTrack = !!(r.gps_track && r.gps_track.length);
+  const hasTrack = !!(r.gps_track && r.gps_track.length)
+                || (Number(r.gps_points) > 0 && canOpenTrack);
   const photos = String(r.photo_urls || '').split(',').map((u) => u.trim()).filter(Boolean);
 
   return (

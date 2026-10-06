@@ -68,20 +68,81 @@ function offlineData() {
   };
 }
 
+/* WHAT THE BOARD DRAWS, AND NOT THE WALK.
+
+   This read used to be `select('*')`, which carries gps_track — every point
+   walked, hundreds to a record. That is why it could only ever ask for 500
+   of them, and 500 was the whole fault behind "the office can see this job
+   and my History cannot": at a hundred records a day, five hundred rows is
+   FIVE DAYS. Everything before that was simply not on the phone, and the
+   number moved every time somebody saved a job, so the day it cut off in the
+   middle of was a different day every morning.
+
+   The worker portal's own read had already worked this out — see
+   worker_maint_records in shared/create_worker_portal.sql, which lists its
+   columns and says in as many words that the track is deliberately not among
+   them. This is the same rule for the FC portal's read. Change one, change
+   the other.
+
+   The summary columns (distance, points, start and end) are stored BESIDE the
+   track exactly so a list can show "820 m" without carrying the walk. The
+   track itself is fetched for the one record somebody opens — see loadTrack.
+
+   Listed explicitly rather than excluded, because PostgREST has no way to say
+   "everything but this one". CORE is what every copy of the table has; the
+   rest arrive with the migrations, so a database part-way through them falls
+   back to CORE rather than answering 400 and showing an empty board. */
+const REC_CORE = 'id, work_date, nursery_name, plot_name, work_type, jenis, '
+               + 'chemical, qty, remark, reported_by, created_at, updated_at';
+const REC_COLS = REC_CORE
+               + ', batch_name, week_no, schedule_month, photo_urls, client_uid'
+               + ', worked_by, verified_by, verified_at'
+               + ', rejected_at, rejected_by, reject_reason'
+               + ', gps_lat, gps_lng, gps_accuracy, gps_points, gps_distance_m'
+               + ', gps_started_at, gps_ended_at';
+
+/* How far back the phone carries. A COUNT of rows is the wrong unit: it is
+   five days in a busy month and two months in a quiet one, and nobody can
+   tell which they are looking at. A date can be said out loud — "the last
+   three months" — and does not move underneath somebody between one load and
+   the next.
+
+   The row cap that remains is a seatbelt, not the rule: it is there so a
+   pathological table cannot hang a phone on a nursery road, and it is far
+   above what three months of this nursery comes to. */
+const REC_DAYS = 92;
+const REC_CAP  = 20000;
+
+function recSince(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function loadMaintenanceData() {
   // No signal at all: do not even try. The failure takes seconds the person
   // standing in the plot does not have.
   if (!isOnline()) return offlineData();
 
+  const since = recSince(REC_DAYS);
+  // A record with no work date is kept whatever the window says: it is a row
+  // somebody has to look at, and hiding it behind a date it does not have is
+  // how it stays unlooked-at for ever.
+  const recsQuery = (cols) => () => supabase
+    .from('nops_maint_field_records')
+    .select(cols)
+    .or(`work_date.gte.${since},work_date.is.null`)
+    .order('work_date', { ascending: false })
+    .order('id', { ascending: false });
+
   const [plotsRes, recRes] = await Promise.all([
     supabase.from('shared_plots').select('nursery_name, plot_name').order('plot_name'),
-    // Recent work is all a Field Conductor needs on a phone; the office keeps
-    // the full history.
-    supabase
-      .from('nops_maint_field_records')
-      .select('*')
-      .order('work_date', { ascending: false })
-      .limit(500),
+    fetchAllRows(recsQuery(REC_COLS), 1000)
+      .then((r) => (r.error && isMissingColumn(r.error)
+        ? fetchAllRows(recsQuery(REC_CORE), 1000)
+        : r))
+      .then((r) => (r.data && r.data.length > REC_CAP
+        ? { ...r, data: r.data.slice(0, REC_CAP) } : r)),
   ]);
   /* A dropped connection falls back; a REFUSAL does not. "The table is not
      there" and "you are not allowed" are things the person has to be told,
@@ -102,6 +163,45 @@ export async function loadMaintenanceData() {
   };
   cacheData(out);
   return out;
+}
+
+/* THE WALK ITSELF, for the one record somebody has opened.
+
+   The list above deliberately leaves gps_track behind, so a card that wants
+   to draw the line asks for it here — one row, when a person taps it, which
+   needs a signal anyway. The office's list does exactly this (openTrack in
+   nursery_ops/plot_maintenance_script.js), and so has the Worker Portal all
+   along: worker_maint_track in shared/RUN_ME_worker_track_view.sql, whose
+   own comment says why the list must not carry the track.
+
+   Answers the SAME SHAPE that function does — { track, points, distance_m,
+   lat, lng, started_at, ended_at } — because both doors feed the same cards
+   through source.loadTrack, and two shapes would be two cards.
+
+   Answers null rather than throwing: a map that cannot be drawn is a map
+   that says so, not a screen that falls over. */
+export async function loadTrack(id) {
+  if (id == null) return null;
+  try {
+    const { data, error } = await supabase
+      .from('nops_maint_field_records')
+      .select('gps_track, gps_points, gps_distance_m, gps_lat, gps_lng, '
+            + 'gps_started_at, gps_ended_at')
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !data || !data.gps_track) return null;
+    return {
+      track:      data.gps_track,
+      points:     data.gps_points,
+      distance_m: data.gps_distance_m,
+      lat:        data.gps_lat,
+      lng:        data.gps_lng,
+      started_at: data.gps_started_at,
+      ended_at:   data.gps_ended_at,
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 /**
@@ -384,6 +484,17 @@ export function hasRejectColumns(rows) {
  *
  * A missing schedule is not an error — the office simply has not planned that
  * month yet — so it comes back as null and the timeline says as much.
+ *
+ * Reads nops_maint_published, not nops_maint_state — on purpose. The office
+ * writes nops_maint_state on every tick, live, the moment it is made; a
+ * board reading that table shows a tick the second it happens, which is not
+ * "published", it is "typed". nops_maint_published only gets a row (or a
+ * fresher one) when the office presses Sync — see saveSchedule()/
+ * publishSchedule() in nursery_ops/plot_maintenance_script.js — so this is
+ * the one query that actually honours Sync as a gate rather than a
+ * formality. Same (nursery, month, payload) shape as nops_maint_state, so
+ * nothing downstream of this query (applicableSchedules, weekTasks, the
+ * offline cache) needed to change.
  */
 export async function loadSchedules(nurseryKeys, monthLabel) {
   const keys = (nurseryKeys || []).filter(Boolean);
@@ -397,16 +508,25 @@ export async function loadSchedules(nurseryKeys, monthLabel) {
   if (!isOnline()) return fallback();
 
   // Every month this nursery has ever had a plan for, not just this one: the
-  // office carries a plan forward without writing a row until it is saved, so
-  // the applicable month has to be worked out here. There is at most one row
-  // per nursery per month, so this stays small.
+  // office carries a plan forward without writing a row until it is Synced,
+  // so the applicable month has to be worked out here. There is at most one
+  // row per nursery per month, so this stays small.
   const { data, error } = await supabase
-    .from('nops_maint_state')
+    .from('nops_maint_published')
     .select('nursery, month, payload')
     .in('nursery', keys);
   if (error) {
     if (looksOffline(error)) return fallback();
-    if (isMissingTable(error)) return [];
+    // Same treatment as a missing table: a database that has not run
+    // RUN_ME_maint_published_payload.sql yet has nops_maint_published
+    // without its payload column, and this query would otherwise throw,
+    // fall into the catch below in MaintenanceBoard.jsx, and silently show
+    // whatever was cached from BEFORE that migration — stale live-tick
+    // counts from the old (unsynced-but-visible) behaviour, which reads as
+    // "the fix did nothing" when the real story is "the SQL hasn't run
+    // yet". Answering "nothing scheduled" instead is honest and matches
+    // what a genuinely unsynced month already looks like.
+    if (isMissingTable(error) || isMissingColumn(error)) return [];
     throw error;
   }
   /* applicableSchedules picks the plan that applies and migrates the older

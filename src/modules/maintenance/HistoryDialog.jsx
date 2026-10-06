@@ -17,6 +17,7 @@ import RecordCard from './RecordCard.jsx';
 export default function HistoryDialog({
   records, today, mayVerify, mayEdit, mayDelete, onVerify, onEdit, onDelete, onClose,
   workerNames = null,
+  loadTrack,
 }) {
   const { t, lang } = useLang();
   const [month, setMonth] = useState('');       // '' = every month
@@ -87,7 +88,8 @@ export default function HistoryDialog({
               <RecordCard key={r.id} record={r} today={today}
                           workerNames={workerNames}
                           mayVerify={mayVerify} mayEdit={mayEdit} mayDelete={mayDelete}
-                          onVerify={onVerify} onEdit={onEdit} onDelete={onDelete} />
+                          onVerify={onVerify} onEdit={onEdit} onDelete={onDelete}
+                          loadTrack={loadTrack} />
             ))
           ) : (
             <div className="text-center text-slate-400 text-sm font-bold py-16">
