@@ -110,7 +110,14 @@ export default function MaintenanceBoard() {
         const nurseries = [
           ...new Set(
             plots
-              .filter((p) => allowed === null || allowed.includes(p.nursery_name))
+              /* Through nurseryKey, like every other nursery comparison in
+                 this repository: the tick list on the User Access screen is
+                 typed by hand and says "UNN1" where shared_plots says
+                 "UNN 1". Compared as spelt, a person ticked for a nursery
+                 is shown none of it. It cannot widen access — two names with
+                 different letters or digits give different keys. */
+              .filter((p) => allowed === null
+                || allowed.some((a) => nurseryKey(a) === nurseryKey(p.nursery_name)))
               .map((p) => p.nursery_name)
               .filter(Boolean)
           ),
