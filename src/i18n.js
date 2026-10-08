@@ -569,6 +569,18 @@ const en = {
   'do.signHere': 'Touch or click here to sign',
   'do.clearSig': '✕ Clear',
 
+  // ── Who loaded this DO ──
+  'do.whoLoadedTitle': 'Who Loaded This DO',
+  'do.whoLoadedHint': 'Tick who collected and loaded these seedlings, by nursery. You can skip this and come back to it later.',
+  'do.whoLoadedNoNurseries': 'Could not match this DO’s items to a nursery — nothing to tick.',
+  'do.whoLoadedLocked': 'Locked — saved by {by} on {date}. Only an admin can change this now.',
+  'do.skipForNow': 'Skip for now',
+  'do.saveWorkers': 'Save',
+  'do.savingWorkers': 'Saving…',
+  'do.workersButtonTitle': 'Who loaded this DO',
+  'do.workersNotTicked': 'Not ticked yet',
+  'do.workersTicked': 'Ticked',
+
   // ── 555 Worker Portal ──
   // The portal workers sign into with the PIN on their Payroll row. Most of
   // them read the Malay, so that is the version to get right.
@@ -1342,6 +1354,18 @@ const ms = {
   'do.doSavedToast': 'DO {do} disimpan!',
   'do.savedOffline': 'Disimpan luar talian — akan segerak bila dalam talian',
   'do.printedToast': '{do} dicetak!',
+
+  // ── Siapa memuatkan DO ini ──
+  'do.whoLoadedTitle': 'Siapa Memuatkan DO Ini',
+  'do.whoLoadedHint': 'Tandakan siapa yang mengutip dan memuatkan anak benih ini, mengikut nurseri. Anda boleh langkau dan kembali kemudian.',
+  'do.whoLoadedNoNurseries': 'Tidak dapat padankan item DO ini dengan mana-mana nurseri — tiada untuk ditanda.',
+  'do.whoLoadedLocked': 'Dikunci — disimpan oleh {by} pada {date}. Hanya admin boleh ubah sekarang.',
+  'do.skipForNow': 'Langkau Buat Masa Ini',
+  'do.saveWorkers': 'Simpan',
+  'do.savingWorkers': 'Menyimpan…',
+  'do.workersButtonTitle': 'Siapa memuatkan DO ini',
+  'do.workersNotTicked': 'Belum ditanda',
+  'do.workersTicked': 'Ditanda',
   'do.signHere': 'Sentuh atau klik di sini untuk menandatangani',
   'do.clearSig': '✕ Padam',
 
