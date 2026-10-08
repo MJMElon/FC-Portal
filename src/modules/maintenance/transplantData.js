@@ -145,6 +145,30 @@ const plotKey = (v) => String(v == null ? '' : v).trim().toUpperCase().replace(/
 export const TRANSPLANT_FLOW_FROM = '2026-08-25';
 
 /**
+ * When the job form starts asking for the date the work was done.
+ *
+ * It asks from this day on; before it, the form behaves exactly as it always
+ * has — the record is dated today and paid in the month the board is
+ * showing, which is how September's work keyed in October ended up on
+ * October's claim.
+ *
+ * Kept as a date rather than simply switching the field on, because the
+ * records of a month already half made were written under the old rule and
+ * the two have to meet somewhere. The 1st of a month is that somewhere: a
+ * claim is a month, so no claim is ever half under one rule and half under
+ * the other.
+ *
+ * Move this date, or delete it and the `asksDate` guard beside it, and the
+ * field is simply on.
+ */
+export const TRANSPLANT_DATE_FROM = '2026-10-01';
+
+/** Does the job form ask when the work was done yet? */
+export function asksDate(today) {
+  return String(today || '') >= TRANSPLANT_DATE_FROM;
+}
+
+/**
  * What the operation report says has gone into this nursery's plots since
  * TRANSPLANT_FLOW_FROM.
  *
@@ -249,6 +273,14 @@ export async function loadTransplantRecords(nursery) {
  * Upserted on (plot, job, month), because recording the same job twice on
  * the same plot is a correction rather than a second crew — the unique index
  * says so and this matches it. Anything already there is replaced whole.
+ *
+ * EXCEPT WHEN THE RECORD IS ALREADY THERE AND ITS MONTH IS CHANGING. The
+ * conflict key has the month in it, so an upsert of a September date onto a
+ * record saved under October does not move it — it writes a SECOND row and
+ * leaves the October one standing, and the payroll then pays the same plot's
+ * job twice, in two months, with both sheets looking perfectly normal. So a
+ * caller that knows which record it is editing passes `id`, and that row is
+ * updated in place whatever the month says.
  */
 export async function saveTransplantRecord(rec) {
   const workers = (rec.workers || [])
@@ -273,9 +305,9 @@ export async function saveTransplantRecord(rec) {
     updated_at:     new Date().toISOString(),
   };
 
-  const { error } = await supabase
-    .from(TABLE)
-    .upsert(row, { onConflict: 'plot_name,work_type,schedule_month' });
+  const { error } = rec.id
+    ? await supabase.from(TABLE).update(row).eq('id', rec.id)
+    : await supabase.from(TABLE).upsert(row, { onConflict: 'plot_name,work_type,schedule_month' });
   if (error) {
     if (missingTable(error)) throw new Error(TRANSPLANT_SETUP_NEEDED);
     throw error;

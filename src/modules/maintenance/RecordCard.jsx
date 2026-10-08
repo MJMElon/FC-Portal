@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { localeOf, shortDate } from '../../lib/day.js';
+import { didTheWork } from './helpers.js';
 import { workTypeByKey, workTypeLabel } from './data.js';
 import { formatDistance, mapsUrl } from './track/track.js';
 import { tintOf } from './tints.js';
@@ -52,11 +53,37 @@ export function relativeDay(iso, today, t) {
  */
 export default function RecordCard({
   record: r, today, mayVerify, mayEdit, mayDelete, onVerify, onEdit, onDelete,
+  /* The nursery's general workers, so a reporter can be told apart from a
+     conductor — see didTheWork. Absent, nothing is assumed about the
+     reporter and the old reading stands. */
+  workerNames = null,
+  /* How to fetch one record's walk. Both doors supply it (FC_SOURCE and the
+     Worker Portal's own source), and a caller that supplies none simply has
+     no map button on a record whose track is not already in hand. */
+  loadTrack,
 }) {
   const { t, lang } = useLang();
+  const who = didTheWork(r, workerNames);
   const wt = workTypeByKey(r.work_type);
   const [mapOpen, setMapOpen] = useState(false);
-  const hasTrack = !!(r.gps_track && r.gps_track.length);
+  /* THE WALK IS NOT IN THE LIST'S READ any more — see loadMaintenanceData,
+     which carries the summary columns and leaves gps_track behind so it can
+     load three months instead of five days. So whether there IS a track is
+     asked of gps_points, which is stored beside it for exactly this, and the
+     line itself is fetched when somebody taps the button.
+
+     A record still sitting in the outbox carries its own track and has no id
+     to fetch by, so that one is used as it stands. */
+  const [track, setTrack] = useState(null);
+  const own = r.gps_track && r.gps_track.length ? r.gps_track : null;
+  const hasTrack = !!own || (Number(r.gps_points) > 0 && !!loadTrack);
+
+  async function openMap() {
+    setMapOpen(true);
+    if (own || track || !loadTrack) return;
+    const got = await loadTrack(r.id);
+    if (got && got.track) setTrack(got.track);
+  }
 
   return (
     <div
@@ -105,18 +132,27 @@ export default function RecordCard({
             ].filter(Boolean).join(' · ')}
           </div>
 
-          {/* Who did the work. worked_by is set only when the
-              conductor keyed it for somebody else, so when it is
-              there it is the answer and reported_by is merely who
-              held the phone — said quietly underneath. */}
-          <div className="text-[12.5px] font-black text-slate-600 mt-1">
-            {r.worked_by || r.reported_by || t('mt.byNobody')}
+          {/* WHO DID THE WORK, and only that.
+
+              worked_by is the tick list — the conductor opened Who did this
+              job and named the crew — so where it is there it IS the answer.
+
+              Where it is EMPTY there are two situations wearing one shape: a
+              worker who saved the job from their own phone, who did do it,
+              and a conductor who saved it and ticked nobody, who did not.
+              Showing reported_by for both named the conductor as the worker
+              for somebody else's morning. The register tells them apart —
+              see didTheWork — and a job with nobody ticked says so, in amber,
+              because that is work nobody can be paid for.
+
+              Who keyed it is deliberately NOT a second line here: the card is
+              read to find out whose morning this was, and two names where
+              there is one worker reads as a disagreement. It is still on the
+              record, and the office's own form shows both. */}
+          <div className={`text-[12.5px] font-black mt-1 ${
+            who.nobodyTicked ? 'text-amber-700' : 'text-slate-600'}`}>
+            {who.names.length ? who.names.join(', ') : t('mt.nobodyTicked')}
           </div>
-          {r.worked_by && r.reported_by && r.worked_by !== r.reported_by && (
-            <div className="text-[11px] font-semibold text-slate-400">
-              {t('mt.keyedBy', { name: r.reported_by })}
-            </div>
-          )}
 
           {r.batch_name && (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -161,7 +197,7 @@ export default function RecordCard({
           {hasTrack ? (
             <button
               type="button"
-              onClick={() => setMapOpen(true)}
+              onClick={openMap}
               className="inline-flex items-center gap-1.5 mt-1.5 text-[11px] font-bold text-slate-500 tabular-nums cursor-pointer hover:text-emerald-700"
             >
               <span aria-hidden="true">🛰️</span>
@@ -288,21 +324,35 @@ export default function RecordCard({
           was opened from — a full-screen map nobody can see or close. */}
       {mapOpen && (
         <div className="fixed inset-0 z-[80]">
-          <Suspense fallback={
-            <div className="fixed inset-0 bg-slate-900 grid place-items-center">
+          {/* The line is fetched when this opens, so for a moment there is
+              nothing to draw. The same full-screen "loading" the lazy import
+              already shows, rather than a map that flashes up empty and then
+              jumps — and it is TAPPABLE, so somebody on a bad signal can get
+              out instead of waiting on a black screen. */}
+          {(own || track) ? (
+            <Suspense fallback={
+              <div className="fixed inset-0 bg-slate-900 grid place-items-center">
+                <div className="text-emerald-400 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">
+                  {t('common.loading')}
+                </div>
+              </div>
+            }>
+              <TrackMap
+                viewOnly
+                initial={{ track: own || track, distance_m: r.gps_distance_m,
+                           started_at: r.gps_started_at, ended_at: r.gps_ended_at }}
+                onClose={() => setMapOpen(false)}
+                onDone={() => setMapOpen(false)}
+              />
+            </Suspense>
+          ) : (
+            <button type="button" onClick={() => setMapOpen(false)}
+              className="fixed inset-0 bg-slate-900 grid place-items-center w-full">
               <div className="text-emerald-400 font-mono text-xs uppercase tracking-[0.3em] animate-pulse">
                 {t('common.loading')}
               </div>
-            </div>
-          }>
-            <TrackMap
-              viewOnly
-              initial={{ track: r.gps_track, distance_m: r.gps_distance_m,
-                         started_at: r.gps_started_at, ended_at: r.gps_ended_at }}
-              onClose={() => setMapOpen(false)}
-              onDone={() => setMapOpen(false)}
-            />
-          </Suspense>
+            </button>
+          )}
         </div>
       )}
     </div>

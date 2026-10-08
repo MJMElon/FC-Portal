@@ -114,6 +114,49 @@ export const PERMANENT = 'OUTBOX_PERMANENT';
  */
 let chain = Promise.resolve();
 
+/* ── A handler that never answers must not stop the queue ──────────────────
+ *
+ * SHARED RULE — the audit app has the same one in the office repository
+ * (mjm-ai-system, audit/audit_dexie_offline.js, UPLOAD_TIMEOUT_MS). Change
+ * one, change the other.
+ *
+ * It cost two rounds there. Seventy finished audits would not leave an
+ * auditor phone; the first round was a real refusal from the database, and
+ * when that was repaired and proved the phone still would not empty. The
+ * sweep sent every record with no timeout on anything, so one stalled upload
+ * on a nursery signal held it on item one for ever and the sixty-eight behind
+ * it were never tried.
+ *
+ * This queue is chained rather than dropped, which makes a hang WORSE and not
+ * better: every flush asked for afterwards — the online event, the Sync
+ * button, the next save — waits behind the stalled one, for ever, and there
+ * is nothing in the app that can let go of it.
+ *
+ * A timeout here is safe for exactly the reason given at the top of this
+ * file: the job's uid goes to the server with the row and hits a unique
+ * index, so a retry of a POST that did land is treated as already done. A
+ * timed-out send is the same case as a flush cut off by the phone sleeping,
+ * which this queue has always been built to survive.
+ *
+ * Generous, because a maintenance record carries its photographs and the
+ * signal is the bad one by assumption. It is a ceiling on a hang, not a
+ * guess at how long a send ought to take.
+ */
+const JOB_TIMEOUT_MS = 90000;
+
+function withTimeout(promise, ms, what) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('timeout after ' + Math.round(ms / 1000) + 's sending ' + what)),
+        ms,
+      );
+    }),
+  ]);
+}
+
 export function flushOutbox(handlers) {
   const run = () => doFlush(handlers);
   const next = chain.then(run, run);
@@ -130,7 +173,7 @@ async function doFlush(handlers) {
     const handler = handlers && handlers[job.kind];
     if (!handler) continue;               // a kind this build does not know
     try {
-      await handler(job.payload, job.uid);
+      await withTimeout(handler(job.payload, job.uid), JOB_TIMEOUT_MS, job.kind);
       await removeJob(job.uid);
       result.sent++;
     } catch (e) {

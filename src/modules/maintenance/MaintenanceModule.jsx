@@ -20,6 +20,7 @@ import {
   isModuleAdmin,
   loadCapacity,
   loadMaintenanceData,
+  loadTrack,
   loadPlotBatches,
   loadWorkers,
   loadSchedules,
@@ -49,7 +50,7 @@ import WeekBoard from './WeekBoard.jsx';
 import WorkIcon from './WorkIcons.jsx';
 import WhoDidIt from './WhoDidIt.jsx';
 import WorkSheet from './WorkSheet.jsx';
-import { batchesIn } from './plotBatches.js';
+import { batchesIn, plotKey } from './plotBatches.js';
 import { makeCapacity, makeCoverage, weekUsage } from './usage.js';
 import RecordCard from './RecordCard.jsx';
 import { tintOf } from './tints.js';
@@ -80,6 +81,10 @@ const MAX_PHOTOS = 3;
  */
 const FC_SOURCE = {
   loadData:       loadMaintenanceData,
+  /* One record's walked line. Both doors have one now and the cards go
+     through it, because the list read on neither of them carries the track —
+     see loadMaintenanceData and worker_maint_track. */
+  loadTrack,
   /* Only the FC portal. The store figures come from four tables a worker,
      who is `anon`, cannot read — and does not need: a worker is told which
      plots to do, not how much to sign out of the store. The board simply
@@ -264,11 +269,62 @@ export default function MaintenanceModule({
   }
   useAutoSync(sync, 60000);
 
+  /* Is this nursery one the person may open? Through nurseryKey, like every
+     other nursery comparison on this screen: the tick list on the User
+     Access screen is typed by hand and says "UNN1" where shared_plots says
+     "UNN 1", which is the whole reason nurseryKey exists (see lib/access.js).
+     Matching the two as they are spelt is how a person ticked for a nursery
+     is shown none of it.
+
+     It cannot widen anybody's access: two names with different letters or
+     digits give different keys, so a tick still governs exactly the one
+     nursery it was put against. */
+  const mayOpen = useMemo(() => {
+    if (allowed === null) return () => true;
+    const keys = new Set(allowed.map(nurseryKey));
+    return (name) => keys.has(nurseryKey(name));
+  }, [allowed]);
+
   const visiblePlots = useMemo(
     () => plots.filter((p) =>
-      (allowed === null || allowed.includes(p.nursery_name)) &&
+      mayOpen(p.nursery_name) &&
       (!plotFilter || plotFilter(p.plot_name))),
-    [plots, allowed, plotFilter]
+    [plots, mayOpen, plotFilter]
+  );
+
+  /* WHICH NURSERY A RECORD IS IN: THE PLOT DECIDES.
+
+     The office's Work Maintenance List has always answered it that way — the
+     plot is the thing that is somewhere, and a record is wherever its plot
+     is (see _rejNursery in nursery_ops/plot_maintenance_script.js). This
+     screen answered it off the record's own nursery_name instead, compared
+     spelling for spelling, and the two disagreed:
+
+       · a record whose nursery_name is EMPTY matched no pick at all, so it
+         was on the office list and nowhere in History;
+       · one spelt "UNN2" against a picker offering "UNN 2" likewise.
+
+     Either way the work was done, the conductor had signed it, the office
+     could see it — and the phone said it had never happened. A job that
+     cannot be found is a job somebody does twice.
+
+     The record's own nursery_name is still the fallback, for a plot
+     shared_plots does not list.
+
+     Shared with the office — change one, change the other. */
+  const plotNurseryKey = useMemo(() => {
+    const m = new Map();
+    plots.forEach((p) => {
+      const k = plotKey(p.plot_name);
+      if (k && p.nursery_name) m.set(k, nurseryKey(p.nursery_name));
+    });
+    return m;
+  }, [plots]);
+
+  const recordNurseryKey = useMemo(
+    () => (r) => plotNurseryKey.get(plotKey(r && r.plot_name))
+              || nurseryKey(r && r.nursery_name),
+    [plotNurseryKey]
   );
 
   /* This nursery's workers. A conductor covering two nurseries should not be
@@ -340,16 +396,20 @@ export default function MaintenanceModule({
      twice. The dashboard's month summary counts the same way (withQueued). */
   const allRecords = useMemo(() => withQueued(records, pending), [records, pending]);
 
-  // Records this user may see, in the nursery they are looking at.
-  const visible = useMemo(
-    () => allRecords.filter(
-      (r) =>
-        (allowed === null || allowed.includes(r.nursery_name)) &&
-        (!plotFilter || plotFilter(r.plot_name)) &&
-        (!nursery || r.nursery_name === nursery)
-    ),
-    [allRecords, allowed, plotFilter, nursery]
-  );
+  /* Records this user may see, in the nursery they are looking at.
+
+     Both nursery questions go through the record's PLOT — see
+     recordNurseryKey above for why, and for what it cost when they went
+     through the record's own nursery_name compared letter for letter. */
+  const visible = useMemo(() => {
+    const want = nursery ? nurseryKey(nursery) : null;
+    return allRecords.filter((r) => {
+      const k = recordNurseryKey(r);
+      return mayOpen(k) &&
+             (!plotFilter || plotFilter(r.plot_name)) &&
+             (!want || k === want);
+    });
+  }, [allRecords, allowed, mayOpen, recordNurseryKey, plotFilter, nursery]);
 
   /* A record sent back is a record refused, so the plot it was made against
      goes back on the list as still outstanding — that is the whole point of
@@ -741,6 +801,7 @@ export default function MaintenanceModule({
         {!setup && mayVerify && (
           <VerifyHub
             records={deck}
+            loadTrack={source.loadTrack}
             columnsReady={verifyReady}
             canReject={rejectReady}
             staffName={staffName}
@@ -858,6 +919,9 @@ export default function MaintenanceModule({
         <HistoryDialog
           records={visible}
           today={today}
+          /* So a record's reporter can be told apart from a conductor who
+             keyed it — see didTheWork in helpers.js. */
+          workerNames={nurseryWorkers.map((w) => w.full_name).filter(Boolean)}
           mayVerify={mayVerify}
           mayEdit={mayEdit}
           mayDelete={mayDelete}
@@ -865,6 +929,7 @@ export default function MaintenanceModule({
           onEdit={(r) => setEditing({ record: r })}
           onDelete={handleDelete}
           onClose={() => setHistory(false)}
+          loadTrack={source.loadTrack}
         />
       )}
 

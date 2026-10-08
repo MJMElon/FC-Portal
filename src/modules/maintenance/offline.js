@@ -37,10 +37,20 @@
    wrong decision. */
 const KEY = 'mjm_maint_offline_v1';
 
-/* How many records to keep. The board shows recent work — the office keeps
-   the history — and 300 rows of summary columns is comfortably inside what
-   localStorage will take even beside the other modules' caches. */
-const MAX_RECORDS = 300;
+/* How many records to keep.
+
+   Three hundred was set when the live read asked for five hundred, and both
+   numbers turned out to be the same fault: at a hundred records a day, three
+   hundred rows is THREE DAYS. A conductor who lost signal could not see last
+   week's work at all, and nothing on screen said the list had been cut — it
+   simply looked as though nothing had been done.
+
+   The live read is a date window now (see loadMaintenanceData), so this is
+   the cache's share of it. Four thousand slim rows — the tracks are stripped
+   below, which is what makes a row small — comes to roughly a megabyte,
+   inside what localStorage will take beside the other modules' caches, and
+   covers the same three months on a phone with no signal at all. */
+const MAX_RECORDS = 4000;
 
 /** The columns the board actually draws. Everything else is left behind. */
 function slimRecord(r) {
