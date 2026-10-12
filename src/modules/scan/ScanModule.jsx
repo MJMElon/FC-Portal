@@ -139,6 +139,12 @@ export default function ScanModule() {
           ...prev,
           [consentId]: { ...cur, issuedQty: serverIssuedQty, doIssued: serverIssuedQty > 0 },
         };
+        if (serverIssuedQty > 0) {
+          (active?.memberIds || [consentId]).forEach((id) => {
+            if (id === consentId) return;
+            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+          });
+        }
         saveProgress(map);
         return map;
       });
@@ -167,6 +173,13 @@ export default function ScanModule() {
           const cur = map[c.id] || defaultProgress();
           if ((cur.issuedQty || 0) >= serverIssuedQty) return;
           map[c.id] = { ...cur, issuedQty: serverIssuedQty, doIssued: true };
+          // Same reason as onDoSaved: every member of a merged card has to
+          // carry doIssued, or the ones besides the anchor fall back out of
+          // the group and reappear as their own "Pending to Scan" cards.
+          (c.memberIds || [c.id]).forEach((id) => {
+            if (id === c.id) return;
+            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+          });
           changed = true;
         });
         if (!changed) return prev;
@@ -200,9 +213,13 @@ export default function ScanModule() {
     seenRef.current = new Set(progressRef.current[activeId]?.seen || []);
 
     if (!activeId || !navigator.onLine) return;
+    // A merged card's scans can be filed against any of its member consent
+    // rows (one device may still be writing against a row that just joined
+    // the group), not only the group's anchor id.
+    const scanIds = activeRef.current?.memberIds || [activeId];
 
     // Pull server records → merge in barcodes scanned by other devices.
-    fetchScanRecords(activeId).then((rows) => {
+    fetchScanRecords(scanIds).then((rows) => {
       const newBarcodes = rows.map((r) => r.barcode).filter((b) => !seenRef.current.has(b));
       if (!newBarcodes.length) return;
       setProgress((prev) => {
@@ -224,7 +241,7 @@ export default function ScanModule() {
     }).catch(() => {/* stay with localStorage */});
 
     // Subscribe to live INSERTs from other devices scanning the same consent.
-    realtimeChannelRef.current = subscribeScanRecords(activeId, (barcode) => {
+    realtimeChannelRef.current = subscribeScanRecords(scanIds, (barcode) => {
       if (seenRef.current.has(barcode)) return;
       seenRef.current.add(barcode);
       setProgress((prev) => {
@@ -354,12 +371,13 @@ export default function ScanModule() {
     const newScans = Math.max(0, consent.unique - issuedQty);
     const remainingBalance = Math.max(0, consent.qty - issuedQty);
     const suggestQty = newScans > 0 ? newScans : remainingBalance;
-    setDoEntry({ al, suggestQty, consentId: consent.id });
+    setDoEntry({ al, suggestQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
   }
 
   function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     const al = doEntry?.al || {};
     const consentId = doEntry?.consentId;
+    const memberIds = doEntry?.memberIds || (consentId ? [consentId] : []);
     setDoEntry(null);
     if (consentId) {
       setProgress((prev) => {
@@ -372,6 +390,14 @@ export default function ScanModule() {
             issuedQty: (cur.issuedQty || 0) + (payload.total_qty || 0),
           },
         };
+        // A merged card's OTHER member rows carry no progress of their own
+        // (all scans and the issuedQty live under the anchor id above) — but
+        // they still need doIssued so mergeConsents stops treating them as
+        // open and folding them back into a fresh group next load.
+        memberIds.forEach((id) => {
+          if (id === consentId) return;
+          map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+        });
         saveProgress(map);
         return map;
       });
