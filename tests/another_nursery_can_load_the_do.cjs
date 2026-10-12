@@ -18,7 +18,12 @@
        alone writes nothing. `{ "UNN1": [] }` reads on every other screen
        as a nursery that was involved;
      · the offered row never offers a nursery that is already a section,
-       and it is sorted, so it does not reshuffle itself between two DOs.
+       and it is sorted, so it does not reshuffle itself between two DOs;
+     · only a MAIN NURSERY is offered. The company files every section
+       under Pre Nursery, Main Nursery or Estate on the Worker Portal's
+       System Setting, and a DO is loaded out of a main one — PN is the
+       tray shed and UNE is the estate. The rule RECOGNISES rather than
+       lists, so a BNN2 added next year is offered without an edit.
 
    The three real functions are lifted out of useWorkerTick.js rather than
    restated here. nurseriesOfDO is lifted out of data.js for the same
@@ -46,12 +51,13 @@ const body = [
   grab(access, 'export function nurseryKey', 'nurseryKey'),
   grab(data, 'export function nurseriesOfDO', 'nurseriesOfDO'),
   grab(hook, 'export function sectionsForDO', 'sectionsForDO'),
+  grab(hook, 'export function isMainNursery', 'isMainNursery'),
   grab(hook, 'export function otherNurseries', 'otherNurseries'),
   grab(hook, 'export function cleanPicks', 'cleanPicks'),
 ].join('\n\n');
 
-const { sectionsForDO, otherNurseries, cleanPicks } =
-  new Function(body + '\nreturn { sectionsForDO, otherNurseries, cleanPicks };')();
+const { sectionsForDO, isMainNursery, otherNurseries, cleanPicks } =
+  new Function(body + '\nreturn { sectionsForDO, isMainNursery, otherNurseries, cleanPicks };')();
 
 let bad = 0;
 const is = (got, want, what) => {
@@ -64,7 +70,10 @@ const is = (got, want, what) => {
    general workers in all three nurseries, spelt the way the office types
    them ("UNN 1"), which nurseryKey strips to UNN1. */
 const PLOT_MAP = { B4: 'BNN', N3: 'BNN', U3: 'UNN 1', V7: 'UNN 2' };
-const BY_NURSERY = { BNN: [{ id: 1 }], UNN1: [{ id: 2 }], UNN2: [{ id: 3 }] };
+/* The roster carries PN and UNE people too, and neither may ever be
+   offered: a DO is loaded out of a main nursery. */
+const BY_NURSERY = { BNN: [{ id: 1 }], UNN1: [{ id: 2 }], UNN2: [{ id: 3 }],
+                     PN: [{ id: 4 }], UNE: [{ id: 5 }] };
 const DO_BNN = { do_number: 'DO-ABWST002', plot_1: 'B4', plot_2: 'N3' };
 
 console.log('\n── 1. The DO own nursery is open, the others are offered ──');
@@ -105,16 +114,29 @@ is(cleanPicks(['BNN'], {}), {}, 'and a popup nobody touched writes nothing');
 is(cleanPicks(['BNN', 'UNN1'], { BNN: [], UNN1: [] }), {},
   'unticking everybody clears the record rather than leaving a stale key');
 
-console.log('\n── 6. A nursery with no workers is never offered ──');
+console.log('\n── 6. Only a MAIN NURSERY is offered ──');
+is(['BNN', 'UNN1', 'UNN2'].map(isMainNursery), [true, true, true], 'the three there are today');
+is(['PN', 'UNE'].map(isMainNursery), [false, false], 'the tray shed and the estate are not');
+is(['BNN2', 'UNN3'].map(isMainNursery), [true, true],
+  'and one added next year is taken in without an edit here');
+is(isMainNursery(''), false, 'nothing is not a nursery');
+/* The office own words: only BNN, UNN1 and UNN2 for selection now. */
+is(otherNurseries(BY_NURSERY, []), ['BNN', 'UNN1', 'UNN2'],
+  'so the picker offers those three and nothing else');
+is(otherNurseries(Object.assign({ BNN2: [{ id: 6 }] }, BY_NURSERY), ['BNN']),
+  ['BNN2', 'UNN1', 'UNN2'],
+  'and a BNN 2 with workers on it joins them the day it exists');
+
+console.log('\n── 7. A nursery with no workers is never offered ──');
 is(otherNurseries({ BNN: [{ id: 1 }] }, ['BNN']), [],
   'nothing to offer when the roster only knows the DO own nursery');
 is(otherNurseries({}, []), [], 'and an unreadable roster offers nothing rather than throwing');
 
-console.log('\n── 7. A DO whose plots match no nursery ──');
+console.log('\n── 8. A DO whose plots match no nursery ──');
 const none = sectionsForDO({ plot_1: '' }, PLOT_MAP);
 is(none, { own: [], extra: [] }, 'no section is derived');
 is(otherNurseries(BY_NURSERY, []), ['BNN', 'UNN1', 'UNN2'],
-  'but every nursery is offered, so the question can still be answered');
+  'but every main nursery is offered, so the question can still be answered');
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'all good'));
 process.exit(bad ? 1 : 0);
