@@ -15,9 +15,117 @@ export function defaultProgress() {
   return { seen: [], scans: [], unique: 0, over: 0, completedFired: false, overFired: false, completedAt: null, doIssued: false };
 }
 
+/* ── A SEAL IS COUNTED ONCE ───────────────────────────────────────────
+   The barcode on a seal is the thing being counted, so the count is a
+   SET of barcodes and not a tally kept beside one. That distinction is
+   the whole of this section, and it is the difference between a count
+   that can drift and one that cannot.
+
+   The scanner itself has always refused a seal it has already taken --
+   it beeps, it buzzes, it says so. What got past that guard came in by
+   the OTHER door. A card can be a merged consent group, several rows for
+   one trip, and the scan table is unique on (consent_id, barcode): the
+   SAME seal filed against two member rows is two perfectly legal rows,
+   and the merge read them both in. Nothing in the list filtered the
+   incoming barcodes against EACH OTHER -- only against what was already
+   held -- so the seal landed twice, `unique` went up by two, and the log
+   carried two lines reading the same number.
+
+   A tally that is wrong stays wrong for ever, because nothing afterwards
+   recomputes it. So:
+
+   - **One door in.** `addBarcodes` is the only way a barcode joins a
+     card, and it filters against what is held AND against the rest of
+     its own batch.
+   - **`unique` is derived**, never incremented. It is the size of the
+     set, so a count cannot disagree with the seals it is made of.
+   - **It heals on load.** A phone already carrying a doubled count has
+     nothing to recompute it -- so `loadProgress` does, every time, and
+     an over-quota card that was never over goes back to what was
+     actually scanned. */
+export const barcodeKey = (c) => String(c == null ? '' : c).trim();
+
+/* The log is stored newest-first. Walk it from the OLDEST so the FIRST
+   sighting of a seal is the one kept -- that is the entry with the real
+   time on it, where a copy arriving later off the server merge carries
+   no time at all. */
+export function dedupeScans(scans) {
+  const seen = new Set();
+  const out = [];
+  for (let i = (scans || []).length - 1; i >= 0; i--) {
+    const s = scans[i];
+    const code = barcodeKey(s && s.code);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push(s);
+  }
+  out.reverse();
+  return out;
+}
+
+/* Returns the SAME object when there was nothing to clean, so this can
+   run on every load and in every updater without churning React. */
+export function dedupeProgress(p) {
+  if (!p) return p;
+  const seen = [];
+  const held = new Set();
+  for (const raw of p.seen || []) {
+    const code = barcodeKey(raw);
+    if (!code || held.has(code)) continue;
+    held.add(code);
+    seen.push(code);
+  }
+  const scans = dedupeScans(p.scans);
+  const clean = seen.length === (p.seen || []).length
+    && scans.length === (p.scans || []).length
+    && p.unique === seen.length;
+  return clean ? p : { ...p, seen, scans, unique: seen.length };
+}
+
+export function dedupeProgressMap(map) {
+  let moved = false;
+  const out = {};
+  for (const id of Object.keys(map || {})) {
+    const fixed = dedupeProgress(map[id]);
+    if (fixed !== map[id]) moved = true;
+    out[id] = fixed;
+  }
+  return moved ? out : map;
+}
+
+/* The one door in. `entryOf(code, uniqueAfter)` builds the log line, so
+   the caller decides what the time says and whether the seal was over
+   quota -- off the count it will ACTUALLY be, not off a running one. */
+export function addBarcodes(cur, codes, entryOf) {
+  const base = dedupeProgress(cur);
+  const held = new Set((base.seen || []).map(barcodeKey));
+  const fresh = [];
+  const entries = [];
+  for (const raw of codes || []) {
+    const code = barcodeKey(raw);
+    if (!code || held.has(code)) continue;
+    held.add(code);
+    fresh.push(code);
+    entries.push(entryOf(code, held.size));
+  }
+  if (!fresh.length) return base;
+  return {
+    ...base,
+    seen: [...(base.seen || []), ...fresh],
+    /* Newest first, so a batch goes on in reverse. */
+    scans: [...entries.reverse(), ...(base.scans || [])],
+    unique: held.size,
+  };
+}
+
 export function loadProgress() {
   try {
-    return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}') || {};
+    const raw = JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}') || {};
+    const fixed = dedupeProgressMap(raw);
+    /* Written back, so a card repaired on this load stays repaired even
+       if nothing is ever scanned against it again. */
+    if (fixed !== raw) saveProgress(fixed);
+    return fixed;
   } catch (e) {
     return {};
   }

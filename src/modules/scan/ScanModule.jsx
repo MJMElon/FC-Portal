@@ -14,6 +14,7 @@ import {
   fetchConsents,
   cachedTodayALs,
   fetchTodayBookingALs,
+  addBarcodes,
   loadProgress,
   saveProgress,
   defaultProgress,
@@ -233,20 +234,20 @@ export default function ScanModule() {
 
     // Pull server records → merge in barcodes scanned by other devices.
     fetchScanRecords(scanIds).then((rows) => {
-      const newBarcodes = rows.map((r) => r.barcode).filter((b) => !seenRef.current.has(b));
-      if (!newBarcodes.length) return;
+      /* A merged card is several consent rows, and the scan table is
+         unique on (consent_id, barcode) -- so ONE seal filed against two
+         of its members comes back as two rows. addBarcodes filters the
+         batch against itself as well as against what is held, which is
+         the thing that was missing. */
+      const incoming = rows.map((r) => r.barcode);
+      if (!incoming.length) return;
       setProgress((prev) => {
         const cur = prev[activeId] || defaultProgress();
-        const newUnique = cur.unique + newBarcodes.length;
         const qty = activeRef.current?.qty || 0;
-        const next = {
-          ...cur,
-          seen: [...cur.seen, ...newBarcodes],
-          scans: [...newBarcodes.map((b) => ({ code: b, time: '–', over: false })), ...cur.scans],
-          unique: newUnique,
-          over: Math.max(0, newUnique - qty),
-        };
-        newBarcodes.forEach((b) => seenRef.current.add(b));
+        const added = addBarcodes(cur, incoming, (code, n) => ({ code, time: '–', over: n > qty }));
+        if (added === cur) return prev;
+        const next = { ...added, over: Math.max(0, added.unique - qty) };
+        next.seen.forEach((b) => seenRef.current.add(b));
         const map = { ...prev, [activeId]: next };
         saveProgress(map);
         return map;
@@ -259,15 +260,11 @@ export default function ScanModule() {
       seenRef.current.add(barcode);
       setProgress((prev) => {
         const cur = prev[activeId] || defaultProgress();
-        const unique = cur.unique + 1;
         const qty = activeRef.current?.qty || 0;
-        const next = {
-          ...cur,
-          seen: [...cur.seen, barcode],
-          scans: [{ code: barcode, time: new Date().toLocaleTimeString(), over: unique > qty }, ...cur.scans],
-          unique,
-          over: Math.max(0, unique - qty),
-        };
+        const time = new Date().toLocaleTimeString();
+        const added = addBarcodes(cur, [barcode], (code, n) => ({ code, time, over: n > qty }));
+        if (added === cur) return prev;
+        const next = { ...added, over: Math.max(0, added.unique - qty) };
         const map = { ...prev, [activeId]: next };
         saveProgress(map);
         return map;
@@ -322,16 +319,14 @@ export default function ScanModule() {
         .catch(() => {});
 
       const cur = progressRef.current[a.id] || defaultProgress();
-      const unique = cur.unique + 1;
-      const willBeOver = unique > a.qty;
       const time = new Date().toLocaleTimeString();
-      const next = {
-        ...cur,
-        unique,
-        seen: [...cur.seen, code],
-        scans: [{ code, time, over: willBeOver }, ...cur.scans],
-        over: willBeOver ? cur.over + 1 : cur.over,
-      };
+      /* The seenRef guard above has already turned a repeat away, so this
+         is a seal the card has not had. It goes on through the one door
+         all the same, because that is where `unique` comes from. */
+      const added = addBarcodes(cur, [code], (c, n) => ({ code: c, time, over: n > a.qty }));
+      const unique = added.unique;
+      const willBeOver = unique > a.qty;
+      const next = { ...added, over: Math.max(0, unique - a.qty) };
 
       if (willBeOver) {
         setLastInfo({ key: 'scan.overItem', vars: { code } });
