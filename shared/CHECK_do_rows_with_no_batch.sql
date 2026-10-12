@@ -6,7 +6,7 @@
 -- the same rule -- plotBatches.js in the phone app, shared_plot_movement.js
 -- and operation_reports.html in the office:
 --
---     if (!pk || !bk) continue;
+--     a line with no batch key is skipped, not subtracted
 --
 -- So a line with a plot and a quantity but NO BATCH takes nothing off any
 -- batch. The seedlings left the nursery and the balance still carries them.
