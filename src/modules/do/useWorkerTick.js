@@ -41,11 +41,30 @@ export function sectionsForDO(doRecord, plotMap) {
   return { own, extra };
 }
 
-/* What is offered underneath: every nursery with workers on the roster that
-   is not already a section. Sorted, so the row does not reshuffle itself
-   between two DOs. */
+/* MAIN NURSERY ONLY, and it is the company's own grouping that says which
+   those are — the Location card on the 555 Worker Portal's System Setting
+   files every section under Pre Nursery, Main Nursery or Estate. A DO is
+   loaded out of a main nursery: PN is the tray shed and UNE is the estate,
+   and neither has a gang that carries seedlings onto a lorry.
+
+   It RECOGNISES rather than lists, so BNN, UNN1 and UNN2 today and a BNN2
+   or a UNN3 the day somebody adds one — no edit here, no edit there. UNE is
+   not caught by it: the estate is UNE, not UNN.
+
+   SAME RULE as LOCATIONS.main in mjm-ai-system's shared/
+   shared_worker_locations.js, which is where the Location card and the Team
+   Board read it from. Change one, change the other. */
+export function isMainNursery(key) {
+  return /^(BNN|UNN)\d*$/.test(String(key || ''));
+}
+
+/* What is offered underneath: every MAIN nursery with workers on the roster
+   that is not already a section. Sorted, so the row does not reshuffle
+   itself between two DOs. */
 export function otherNurseries(byNursery, open) {
-  return Object.keys(byNursery || {}).filter((k) => (open || []).indexOf(k) < 0).sort();
+  return Object.keys(byNursery || {})
+    .filter((k) => isMainNursery(k) && (open || []).indexOf(k) < 0)
+    .sort();
 }
 
 /* AN EMPTY NURSERY IS NOT AN ANSWER. A section opened by hand and then left
