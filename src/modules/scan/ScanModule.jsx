@@ -24,6 +24,7 @@ import {
   fetchScanRecords,
   subscribeScanRecords,
   unsubscribeScanRecords,
+  findBarcodeElsewhere,
 } from './store.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
 
@@ -286,6 +287,28 @@ export default function ScanModule() {
       // other phones hear about it when the line returns rather than never.
       saveScanRecord(a.id, a.al_number, code).catch(() => {});
 
+      // Does this seal already belong to a DIFFERENT order? Scanning stays
+      // fast/optimistic — this runs in the background and flags the entry
+      // after the fact rather than making every scan wait on a round trip.
+      // No line, or the check itself fails: fail open, same as every other
+      // best-effort sync here (realtime, the issued-qty sync) — there is no
+      // way to know about another device's scans without one anyway.
+      findBarcodeElsewhere(code, a.memberIds || [a.id])
+        .then((hit) => {
+          if (!hit) return;
+          const other = consentsRef.current.find((c) =>
+            (c.memberIds || [c.id]).map(String).includes(String(hit.consent_id))
+          );
+          const label = other
+            ? other.customer + (other.al_number ? ' (' + other.al_number + ')' : '')
+            : (hit.al_number || t('scan.anotherOrder'));
+          flagScanElsewhere(a.id, code, label);
+          flash(t('scan.sealReusedElsewhere', { code, who: label }), 'danger');
+          beepAlarm();
+          vibrate([120, 60, 120, 60, 200]);
+        })
+        .catch(() => {});
+
       const cur = progressRef.current[a.id] || defaultProgress();
       const unique = cur.unique + 1;
       const willBeOver = unique > a.qty;
@@ -328,6 +351,26 @@ export default function ScanModule() {
     },
     [flash, t]
   );
+
+  // Marks an already-recorded scan log entry with which OTHER order it
+  // turned out to belong to, once the background check in recordScan comes
+  // back positive. The scan itself is left counted — it really was scanned,
+  // same as an "over" scan stays counted rather than being erased — this
+  // only adds the warning so the office knows to go sort out which order
+  // the physical seal actually belongs to.
+  function flagScanElsewhere(consentId, code, label) {
+    setProgress((prev) => {
+      const cur = prev[consentId];
+      if (!cur) return prev;
+      const idx = cur.scans.findIndex((s) => s.code === code);
+      if (idx === -1) return prev;
+      const scans = cur.scans.slice();
+      scans[idx] = { ...scans[idx], elsewhere: label };
+      const map = { ...prev, [consentId]: { ...cur, scans } };
+      saveProgress(map);
+      return map;
+    });
+  }
 
   async function openIssueDO(consent) {
     if (!consent || issuing) return;
@@ -1056,10 +1099,15 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
             consent.scans.slice(0, 100)
               .sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true, sensitivity: 'base' }))
               .map((s, i) => (
-              <div key={i} className="flex justify-between items-center gap-2 py-2 border-b border-[#1f2a38] last:border-0 text-slate-400">
-                <span className={`flex-1 break-all ${s.over ? 'text-red-400' : 'text-slate-200'}`}>{s.code}</span>
-                {s.over && <span className="text-[9px] text-red-400 tracking-widest uppercase">{t('scan.statusOver')}</span>}
-                <span className="text-[10px] shrink-0">{s.time}</span>
+              <div key={i} className={`py-2 border-b border-[#1f2a38] last:border-0 ${s.elsewhere ? 'bg-red-500/10 -mx-2 px-2 rounded-lg' : ''}`}>
+                <div className="flex justify-between items-center gap-2 text-slate-400">
+                  <span className={`flex-1 break-all ${s.over || s.elsewhere ? 'text-red-400' : 'text-slate-200'}`}>{s.code}</span>
+                  {s.over && <span className="text-[9px] text-red-400 tracking-widest uppercase">{t('scan.statusOver')}</span>}
+                  <span className="text-[10px] shrink-0">{s.time}</span>
+                </div>
+                {s.elsewhere && (
+                  <div className="text-[10px] text-red-400 mt-1">{t('scan.sealAlreadyWith', { who: s.elsewhere })}</div>
+                )}
               </div>
             ))
           )}

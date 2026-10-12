@@ -234,6 +234,27 @@ export async function fetchScanRecords(consentIds) {
   return data || [];
 }
 
+// Has this barcode already been scanned under a DIFFERENT order? The
+// table's own unique index is (consent_id, barcode) — it stops the SAME
+// order's seal being double-counted, but nothing stops the same physical
+// seal being filed a second time under a different consent_id entirely,
+// which is exactly a seal reused on the wrong customer's order. This is the
+// app-level check for that: excludeConsentIds is the scanning card's own
+// member ids, so its own rows (and any sibling row from the same merged
+// consent group) never flag themselves. Returns the first other row found
+// (consent_id, al_number, scanned_at) or null.
+export async function findBarcodeElsewhere(barcode, excludeConsentIds) {
+  const { data, error } = await supabase
+    .from('fcportal_scan_records')
+    .select('consent_id, al_number, scanned_at')
+    .eq('barcode', barcode)
+    .order('scanned_at', { ascending: true })
+    .limit(10);
+  if (error) throw error;
+  const exclude = new Set((excludeConsentIds || []).map(String));
+  return (data || []).find((r) => !exclude.has(String(r.consent_id))) || null;
+}
+
 // Subscribe to live INSERTs across one or more consent ids. callback(barcode)
 // fires when another device scans a new seal against any of them. Returns
 // the channel — pass to unsubscribeScanRecords().
