@@ -24,6 +24,7 @@ import {
   fetchScanRecords,
   subscribeScanRecords,
   unsubscribeScanRecords,
+  findBarcodeElsewhere,
 } from './store.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
 
@@ -139,6 +140,12 @@ export default function ScanModule() {
           ...prev,
           [consentId]: { ...cur, issuedQty: serverIssuedQty, doIssued: serverIssuedQty > 0 },
         };
+        if (serverIssuedQty > 0) {
+          (active?.memberIds || [consentId]).forEach((id) => {
+            if (id === consentId) return;
+            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+          });
+        }
         saveProgress(map);
         return map;
       });
@@ -167,6 +174,13 @@ export default function ScanModule() {
           const cur = map[c.id] || defaultProgress();
           if ((cur.issuedQty || 0) >= serverIssuedQty) return;
           map[c.id] = { ...cur, issuedQty: serverIssuedQty, doIssued: true };
+          // Same reason as onDoSaved: every member of a merged card has to
+          // carry doIssued, or the ones besides the anchor fall back out of
+          // the group and reappear as their own "Pending to Scan" cards.
+          (c.memberIds || [c.id]).forEach((id) => {
+            if (id === c.id) return;
+            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+          });
           changed = true;
         });
         if (!changed) return prev;
@@ -200,9 +214,13 @@ export default function ScanModule() {
     seenRef.current = new Set(progressRef.current[activeId]?.seen || []);
 
     if (!activeId || !navigator.onLine) return;
+    // A merged card's scans can be filed against any of its member consent
+    // rows (one device may still be writing against a row that just joined
+    // the group), not only the group's anchor id.
+    const scanIds = activeRef.current?.memberIds || [activeId];
 
     // Pull server records → merge in barcodes scanned by other devices.
-    fetchScanRecords(activeId).then((rows) => {
+    fetchScanRecords(scanIds).then((rows) => {
       const newBarcodes = rows.map((r) => r.barcode).filter((b) => !seenRef.current.has(b));
       if (!newBarcodes.length) return;
       setProgress((prev) => {
@@ -224,7 +242,7 @@ export default function ScanModule() {
     }).catch(() => {/* stay with localStorage */});
 
     // Subscribe to live INSERTs from other devices scanning the same consent.
-    realtimeChannelRef.current = subscribeScanRecords(activeId, (barcode) => {
+    realtimeChannelRef.current = subscribeScanRecords(scanIds, (barcode) => {
       if (seenRef.current.has(barcode)) return;
       seenRef.current.add(barcode);
       setProgress((prev) => {
@@ -269,6 +287,28 @@ export default function ScanModule() {
       // other phones hear about it when the line returns rather than never.
       saveScanRecord(a.id, a.al_number, code).catch(() => {});
 
+      // Does this seal already belong to a DIFFERENT order? Scanning stays
+      // fast/optimistic — this runs in the background and flags the entry
+      // after the fact rather than making every scan wait on a round trip.
+      // No line, or the check itself fails: fail open, same as every other
+      // best-effort sync here (realtime, the issued-qty sync) — there is no
+      // way to know about another device's scans without one anyway.
+      findBarcodeElsewhere(code, a.memberIds || [a.id])
+        .then((hit) => {
+          if (!hit) return;
+          const other = consentsRef.current.find((c) =>
+            (c.memberIds || [c.id]).map(String).includes(String(hit.consent_id))
+          );
+          const label = other
+            ? other.customer + (other.al_number ? ' (' + other.al_number + ')' : '')
+            : (hit.al_number || t('scan.anotherOrder'));
+          flagScanElsewhere(a.id, code, label);
+          flash(t('scan.sealReusedElsewhere', { code, who: label }), 'danger');
+          beepAlarm();
+          vibrate([120, 60, 120, 60, 200]);
+        })
+        .catch(() => {});
+
       const cur = progressRef.current[a.id] || defaultProgress();
       const unique = cur.unique + 1;
       const willBeOver = unique > a.qty;
@@ -312,6 +352,26 @@ export default function ScanModule() {
     [flash, t]
   );
 
+  // Marks an already-recorded scan log entry with which OTHER order it
+  // turned out to belong to, once the background check in recordScan comes
+  // back positive. The scan itself is left counted — it really was scanned,
+  // same as an "over" scan stays counted rather than being erased — this
+  // only adds the warning so the office knows to go sort out which order
+  // the physical seal actually belongs to.
+  function flagScanElsewhere(consentId, code, label) {
+    setProgress((prev) => {
+      const cur = prev[consentId];
+      if (!cur) return prev;
+      const idx = cur.scans.findIndex((s) => s.code === code);
+      if (idx === -1) return prev;
+      const scans = cur.scans.slice();
+      scans[idx] = { ...scans[idx], elsewhere: label };
+      const map = { ...prev, [consentId]: { ...cur, scans } };
+      saveProgress(map);
+      return map;
+    });
+  }
+
   async function openIssueDO(consent) {
     if (!consent || issuing) return;
     setIssuing(true);
@@ -354,12 +414,13 @@ export default function ScanModule() {
     const newScans = Math.max(0, consent.unique - issuedQty);
     const remainingBalance = Math.max(0, consent.qty - issuedQty);
     const suggestQty = newScans > 0 ? newScans : remainingBalance;
-    setDoEntry({ al, suggestQty, consentId: consent.id });
+    setDoEntry({ al, suggestQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
   }
 
   function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     const al = doEntry?.al || {};
     const consentId = doEntry?.consentId;
+    const memberIds = doEntry?.memberIds || (consentId ? [consentId] : []);
     setDoEntry(null);
     if (consentId) {
       setProgress((prev) => {
@@ -372,6 +433,14 @@ export default function ScanModule() {
             issuedQty: (cur.issuedQty || 0) + (payload.total_qty || 0),
           },
         };
+        // A merged card's OTHER member rows carry no progress of their own
+        // (all scans and the issuedQty live under the anchor id above) — but
+        // they still need doIssued so mergeConsents stops treating them as
+        // open and folding them back into a fresh group next load.
+        memberIds.forEach((id) => {
+          if (id === consentId) return;
+          map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+        });
         saveProgress(map);
         return map;
       });
@@ -1030,10 +1099,15 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
             consent.scans.slice(0, 100)
               .sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true, sensitivity: 'base' }))
               .map((s, i) => (
-              <div key={i} className="flex justify-between items-center gap-2 py-2 border-b border-[#1f2a38] last:border-0 text-slate-400">
-                <span className={`flex-1 break-all ${s.over ? 'text-red-400' : 'text-slate-200'}`}>{s.code}</span>
-                {s.over && <span className="text-[9px] text-red-400 tracking-widest uppercase">{t('scan.statusOver')}</span>}
-                <span className="text-[10px] shrink-0">{s.time}</span>
+              <div key={i} className={`py-2 border-b border-[#1f2a38] last:border-0 ${s.elsewhere ? 'bg-red-500/10 -mx-2 px-2 rounded-lg' : ''}`}>
+                <div className="flex justify-between items-center gap-2 text-slate-400">
+                  <span className={`flex-1 break-all ${s.over || s.elsewhere ? 'text-red-400' : 'text-slate-200'}`}>{s.code}</span>
+                  {s.over && <span className="text-[9px] text-red-400 tracking-widest uppercase">{t('scan.statusOver')}</span>}
+                  <span className="text-[10px] shrink-0">{s.time}</span>
+                </div>
+                {s.elsewhere && (
+                  <div className="text-[10px] text-red-400 mt-1">{t('scan.sealAlreadyWith', { who: s.elsewhere })}</div>
+                )}
               </div>
             ))
           )}
