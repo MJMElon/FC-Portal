@@ -32,7 +32,7 @@
    cannot hold a file that was never fetched. Field test found it exactly
    that way — sync pressed, airplane mode on, a tab that had not been opened
    online refused to draw. */
-const VER = 'fc-shell-mv4zgs5k';
+const VER = 'fc-shell-mv4zmoop';
 const PRECACHE = ["./","./index.html","./icon.svg","./assets/CullingModule-ekfvigxW.js","./assets/DoModule-BlCbE4ZP.js","./assets/MaintenanceModule-BWzJpUna.js","./assets/PalmsBody-GH534nOO.js","./assets/PalmsModule-DOvrDXbM.js","./assets/ScanModule-Bfyojy2D.js","./assets/TrackMap-Dgihpmma.css","./assets/TrackMap-tv_iFvBt.js","./assets/WorkerPortal-Bmx1Zsku.js","./assets/WorkerTickModal-uvDp1OSS.js","./assets/ago-Bxn_7WUD.js","./assets/app-BakvhpsV.js","./assets/app-Bowmyuwi.css","./assets/apple-touch-icon-S6sv4MlH.png","./assets/b1-CSzJ9mIh.jpeg","./assets/b4-DxhMv_2i.jpeg","./assets/cullingData-BlStugDs.js","./assets/cullingOffline-BFoit7l1.js","./assets/cullingSource-BxOemjW2.js","./assets/day-DztWSInZ.js","./assets/html2canvas.esm-CBrSDip1.js","./assets/icon-192-qA6CMvfK.png","./assets/icon-512-DwyxxBVP.png","./assets/icon-B5EoKwz6.svg","./assets/index.es-DZRNGgir.js","./assets/purify.es-BwoZCkIS.js","./assets/store-DMCerayy.js","./assets/sync-BU8ZZyVg.js","./assets/u8-C1D4M1Bz.jpeg","./assets/workerApi-C3pGUfiQ.js"];
 
 self.addEventListener('install', (e) => {
