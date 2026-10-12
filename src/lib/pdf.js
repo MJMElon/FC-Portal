@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { formatSealRanges } from './sealRanges.js';
 
 // Company letterhead — same identity block the Sales Web proforma invoice
 // uses (admin-orders.js openProformaInvoice).
@@ -129,6 +130,32 @@ export function buildDOPdf(doRec, al = {}, staff = '—', sigDataUrl = null, pho
   doc.setTextColor(...INK);
   doc.text('TOTAL QUANTITY', 92, y + 4);
   doc.text(fmtQty(doRec.total_qty), 187, y + 4, { align: 'right' });
+
+  // ── Seals that went out on this DO ──
+  // Written by the scan card when the DO was issued from one (the seals
+  // scanned since its last DO). Capped at four lines so a scatter of odd
+  // seals cannot push the signature boxes into the footer; the full list
+  // is in the system. With five items and four lines the boxes still end
+  // well above the footer rule at 280.
+  const seals = Array.isArray(doRec.seal_ranges) ? doRec.seal_ranges : [];
+  if (seals.length) {
+    y += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...GREY);
+    doc.text('SEAL NO.', 20, y);
+    doc.text('SEAL QTY: ' + fmtQty(doRec.seal_qty || seals.reduce((n, r) => n + (Number(r.qty) || 0), 0)), 190, y, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...INK);
+    let lines = doc.splitTextToSize(formatSealRanges(seals), 170);
+    if (lines.length > 4) {
+      lines = lines.slice(0, 4);
+      lines[3] = doc.splitTextToSize(lines[3], 115)[0] + ' … (' + seals.length + ' ranges, see system)';
+    }
+    doc.text(lines, 20, y + 4.5);
+    y += 4.5 + (lines.length - 1) * 3.8;
+  }
 
   // ── Customer acknowledgement: collection photo + signature ──
   y += 18;

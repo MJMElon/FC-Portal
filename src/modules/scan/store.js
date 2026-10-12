@@ -1,6 +1,7 @@
 import { supabase } from '../../lib/supabase.js';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { PERMANENT, flushOutbox, looksOffline, queueJob } from '../../lib/outbox.js';
+import { sealNo, rangeHolding } from '../../lib/sealRanges.js';
 
 // The scan list is now driven by SIGNED CONSENTS from the mobile web
 // (mobile_consent_records). When a consent is signed there, it appears here for
@@ -12,7 +13,7 @@ const CONSENTS_CACHE = 'scan_consents';
 export const PROGRESS_KEY = 'mjm.scan.progress.v1';
 
 export function defaultProgress() {
-  return { seen: [], scans: [], rejected: {}, unique: 0, over: 0, completedFired: false, overFired: false, completedAt: null, doIssued: false };
+  return { seen: [], scans: [], rejected: {}, unique: 0, over: 0, completedFired: false, overFired: false, completedAt: null, doIssued: false, doSeals: [] };
 }
 
 /* ── A SEAL IS COUNTED ONCE ───────────────────────────────────────────
@@ -313,6 +314,7 @@ export function mergeConsents(serverList, progress) {
       overFired: !!p.overFired,
       doIssued: !!p.doIssued,
       issuedQty: p.issuedQty || 0,
+      doSeals: Array.isArray(p.doSeals) ? p.doSeals : null,
     });
   });
 
@@ -335,10 +337,150 @@ export function mergeConsents(serverList, progress) {
       overFired: !!p.overFired,
       doIssued: !!p.doIssued,
       issuedQty: p.issuedQty || 0,
+      doSeals: Array.isArray(p.doSeals) ? p.doSeals : null,
     });
   });
 
   return cards;
+}
+
+/* ── WHICH SEALS A CUSTOMER WAS GIVEN ─────────────────────────────────
+   A consent signed on Mobile Consent now names the seal ranges handed to
+   the customer, and a database trigger turns those into rows of
+   seal_allocations. The scanner reads them so a seal that is not this
+   customer's is turned away at the lorry, with no line, the same instant
+   a duplicate is.
+
+   Two reads, merged: the allocations of every AL on the list (what this
+   phone is about to scan against), and every allocation made in the last
+   120 days whatever its AL (so "this seal belongs to ANOTHER customer"
+   can be said offline for an order this phone has never opened).
+
+   FAIL OPEN, twice over. A read that fails -- no line, or the table not
+   there because the SQL has not been run -- leaves whatever was cached
+   last, and a phone that has never read the table successfully has NO
+   cache at all, which every caller takes as "no seal feature". That
+   absence is load-bearing: `sealFeatureLive()` is what decides whether a
+   DO may carry seal_ranges, and a DO inserting a column the database does
+   not have yet would be refused -- and then retried from the offline queue
+   for ever. */
+const SEAL_ALLOC_CACHE = 'seal_allocations';
+const SEAL_ALLOC_DAYS = 120;
+const SEAL_ALLOC_COLS = 'id, consent_id, al_number, customer_name, start_code, end_code, start_no, end_no';
+
+/** The cached allocation rows, or null when this phone has never managed
+    to read the table (no SQL yet, or never online since). */
+export function cachedSealAllocations() {
+  const hit = cacheGet(SEAL_ALLOC_CACHE);
+  return hit && Array.isArray(hit.value) ? hit.value : null;
+}
+
+export function sealFeatureLive() {
+  return cachedSealAllocations() !== null;
+}
+
+export async function fetchSealAllocations(alNumbers) {
+  const als = [...new Set((alNumbers || []).filter(Boolean))];
+  const since = new Date(Date.now() - SEAL_ALLOC_DAYS * 86400000).toISOString();
+  const recent = await supabase
+    .from('seal_allocations')
+    .select(SEAL_ALLOC_COLS)
+    .gte('created_at', since)
+    .limit(5000);
+  if (recent.error) throw recent.error;
+  const byId = new Map();
+  (recent.data || []).forEach((r) => byId.set(String(r.id), r));
+  /* In slices, so three hundred AL numbers do not make one address too
+     long for a proxy to carry. */
+  for (let i = 0; i < als.length; i += 100) {
+    const { data, error } = await supabase
+      .from('seal_allocations')
+      .select(SEAL_ALLOC_COLS)
+      .in('al_number', als.slice(i, i + 100));
+    if (error) throw error;
+    (data || []).forEach((r) => byId.set(String(r.id), r));
+  }
+  const rows = [...byId.values()];
+  cacheSet(SEAL_ALLOC_CACHE, rows);
+  return rows;
+}
+
+/** A card's own allocations: filed under its AL, or against one of its
+    member consent rows (a walk-in consent may carry no real AL). */
+export function allocationsOf(card, allocs) {
+  if (!card) return [];
+  const al = String(card.al_number || '').trim();
+  const ids = new Set((card.memberIds || [card.id]).map(String));
+  return (allocs || []).filter((r) =>
+    (al && String(r.al_number || '').trim() === al) || ids.has(String(r.consent_id))
+  );
+}
+
+/** Is this seal the card's to take?
+     null                      -- the card has no allocations (an order
+                                  signed before seal ranges existed): no
+                                  opinion, scan as it always has
+     { ok: true, range }       -- inside one of the card's own ranges
+     { ok: false, kind: 'other', other }  -- inside somebody else's
+     { ok: false, kind: 'outside' }       -- inside nobody's */
+export function sealVerdict(code, card, allocs) {
+  const own = allocationsOf(card, allocs);
+  if (!own.length) return null;
+  if (sealNo(code) == null) return null;   // not a seal number at all: no opinion
+  const range = rangeHolding(code, own);
+  if (range) return { ok: true, range };
+  const ownIds = new Set(own.map((r) => String(r.id)));
+  const other = rangeHolding(code, (allocs || []).filter((r) => !ownIds.has(String(r.id))));
+  return other ? { ok: false, kind: 'other', other } : { ok: false, kind: 'outside' };
+}
+
+/* ── WHICH SEALS GO ON THE NEXT DO ────────────────────────────────────
+   A DO names the seals that went out on it: the ones scanned on the card
+   since the last DO. `doSeals` is the list already put on one, kept in
+   the card's progress beside `seen`, so a second DO for a part-collected
+   order carries only its own.
+
+   A card whose progress predates this list (no `doSeals` at all) may
+   already have had DOs issued for what it scanned. Those took the seals
+   in the order they were scanned, so the oldest `issuedQty` of `seen`
+   are counted as gone -- the alternative, naming every seal again on the
+   next DO, would mark seals collected twice. */
+const sealKey = (c) => {
+  const n = sealNo(c);
+  return n == null ? barcodeKey(c) : 'n' + n;
+};
+
+export function sealsAlreadyOnDO(p) {
+  const cur = p || {};
+  if (Array.isArray(cur.doSeals)) return cur.doSeals;
+  return (cur.seen || []).slice(0, Math.max(0, cur.issuedQty || 0));
+}
+
+export function sealsForNextDO(p) {
+  const gone = new Set(sealsAlreadyOnDO(p).map(sealKey));
+  const out = [];
+  const taken = new Set();
+  for (const c of (p || {}).seen || []) {
+    const k = sealKey(c);
+    if (!barcodeKey(c) || gone.has(k) || taken.has(k)) continue;
+    taken.add(k);
+    out.push(barcodeKey(c));
+  }
+  return out;
+}
+
+/** The progress with `codes` added to the list already on a DO. */
+export function markSealsOnDO(p, codes) {
+  const base = p || defaultProgress();
+  const list = [...sealsAlreadyOnDO(base)];
+  const have = new Set(list.map(sealKey));
+  for (const c of codes || []) {
+    const k = sealKey(c);
+    if (!barcodeKey(c) || have.has(k)) continue;
+    have.add(k);
+    list.push(barcodeKey(c));
+  }
+  return { ...base, doSeals: list };
 }
 
 // ── Multi-device sync via Supabase (fcportal_scan_records table) ──────────────
@@ -403,6 +545,21 @@ export async function fetchScanRecords(consentIds) {
     .order('scanned_at', { ascending: true });
   if (error) throw error;
   return data || [];
+}
+
+// Barcodes on these consents that a DO has already carried, on any device
+// -- the database fills fcportal_scan_records.do_number from each DO's
+// seal_ranges. Asked only once the seal SQL is known to be in, since the
+// column does not exist before it; and best effort, like every read here.
+export async function fetchSealsOnDO(consentIds) {
+  const ids = Array.isArray(consentIds) ? consentIds : [consentIds];
+  const { data, error } = await supabase
+    .from('fcportal_scan_records')
+    .select('barcode')
+    .in('consent_id', ids)
+    .not('do_number', 'is', null);
+  if (error) throw error;
+  return (data || []).map((r) => r.barcode);
 }
 
 // Has this barcode already been scanned under a DIFFERENT order? The
