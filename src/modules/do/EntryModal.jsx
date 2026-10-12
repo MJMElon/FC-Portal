@@ -3,7 +3,7 @@ import CfSelect from '../../components/CfSelect.jsx';
 import SignaturePad from './SignaturePad.jsx';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { callGemini, compressImage, DO_SCAN_PROMPT } from '../../lib/gemini.js';
-import { generateDONumber, offlineDONumber } from './data.js';
+import { generateDONumber, offlineDONumber, loadPlotBreeds, loosePlot } from './data.js';
 import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
 
 /* picks is the batches chosen on this row, each with its OWN quantity:
@@ -16,7 +16,7 @@ const emptyRow = () => ({ key: Math.random().toString(36).slice(2), nursery: '',
 // Add / scan a new Delivery Order for the given AL.
 // props: al, plots, breeds, photoBase64 (null for manual),
 //        onSaved(payload, sigDataUrl, queued, photoBase64, savedRow), onClose, toast
-export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photoBase64, initialQty, onSubmit, onSaved, onClose, toast }) {
+export default function EntryModal({ al, plots, breeds, batchMap, photoBase64, initialQty, onSubmit, onSaved, onClose, toast }) {
   const { t } = useLang();
   const [doNumber, setDoNumber] = useState('…');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -58,9 +58,42 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
      batch row simply does not appear and the form works as it did. */
   const batchesFor = (plot) => (plot && batchMap ? batchesIn(batchMap, plot) : []);
 
-  /* The breed the ledger has for a batch, or '' when it has none. */
-  const ledgerBreed = (batch) =>
-    (batch && breedOf ? breedOf.get(batchKey(batch)) || '' : '');
+  /* The breed of each batch IN A PLOT, keyed by plot. Fetched when a plot
+     is chosen and kept, so switching back and forth does not ask twice.
+     A breed belongs to the plot and batch together: one batch can be
+     transplanted into several plots, and it is the log that put it into
+     THIS plot that says what went in. */
+  const [plotBreeds, setPlotBreeds] = useState(() => ({}));
+  const ledgerBreed = (plot, batch) => {
+    const m = plotBreeds[loosePlot(plot)];
+    return (m && batch) ? (m.get(batchKey(batch)) || '') : '';
+  };
+
+  /* One read per plot the form is actually using, filtered to the batches
+     standing in it. Never the whole ledger. */
+  useEffect(() => {
+    let live = true;
+    const wanted = [...new Set(rows.map((r) => r.plot).filter(Boolean))];
+    for (const plot of wanted) {
+      const key = loosePlot(plot);
+      if (!key || plotBreeds[key]) continue;
+      const names = batchesFor(plot).map((b) => b.batch);
+      if (!names.length) continue;
+      loadPlotBreeds(plot, names).then((m) => {
+        if (!live) return;
+        setPlotBreeds((prev) => (prev[key] ? prev : { ...prev, [key]: m }));
+        /* A batch tapped before the read came back carries no breed yet.
+           Fill those in now rather than leaving a line that will print
+           with the breed blank. */
+        setRows((rs) => rs.map((r) => (loosePlot(r.plot) !== key ? r : {
+          ...r,
+          picks: (r.picks || []).map((pk) => (pk.breed ? pk
+            : { ...pk, breed: m.get(batchKey(pk.batch)) || '' })),
+        })));
+      }, () => {});
+    }
+    return () => { live = false; };
+  }, [rows, batchMap]);
 
   /* Tap a batch to add it to the row, tap it again to take it off. Each
      one carries its own quantity, and its breed comes off the ledger when
@@ -82,7 +115,7 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
           ...r,
           picks: picks.some((p) => p.batch === batch)
             ? picks.filter((p) => p.batch !== batch)
-            : [...picks, { batch, breed: ledgerBreed(batch), qty: '' }],
+            : [...picks, { batch, breed: ledgerBreed(r.plot, batch), qty: '' }],
         };
       });
     });
@@ -382,7 +415,7 @@ const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []
                           {batchesFor(r.plot).length > 0 && (
                             <div className="flex flex-wrap gap-1.5">
                               {batchesFor(r.plot).map((b) => {
-                                const bBreed = ledgerBreed(b.batch);
+                                const bBreed = ledgerBreed(r.plot, b.batch);
                                 const on = (r.picks || []).some((p) => p.batch === b.batch);
                                 return (
                                   <button

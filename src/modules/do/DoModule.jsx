@@ -36,7 +36,6 @@ export default function DoModule() {
      second copy here would be the same rows twice and a second thing to go
      stale. A plot with no batches simply offers none. */
   const [batchMap, setBatchMap] = useState(() => new Map());
-  const [breedOf, setBreedOf] = useState(() => new Map());
   const [workers, setWorkers] = useState(() => cacheGet('do_workers')?.value || []);
   const wt = useWorkerTick(workers);
   const plotMap = {};
@@ -102,10 +101,7 @@ export default function DoModule() {
     await reload();
     /* Best effort beside the dropdowns: the form works without it, the
        batch row just does not appear. */
-    loadBatchData().then(({ batchMap, breedOf }) => {
-      setBatchMap(batchMap);
-      setBreedOf(breedOf);
-    }, () => {});
+    loadBatchData().then(({ batchMap }) => setBatchMap(batchMap), () => {});
     loadDropdownData()
       .then(({ plots, breeds }) => {
         setPlots(plots);
@@ -338,7 +334,6 @@ export default function DoModule() {
           plots={plots}
           breeds={breeds}
           batchMap={batchMap}
-          breedOf={breedOf}
           photoBase64={entry.photoBase64}
           toast={flash}
           onSubmit={submitDO}

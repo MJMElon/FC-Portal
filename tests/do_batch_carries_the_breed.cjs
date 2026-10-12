@@ -31,13 +31,13 @@ const fail = (m) => { console.log('FAIL  ' + m); failed++; };
 const pass = (m) => console.log('pass  ' + m);
 
 /* ── 1. The batches come from the movement report reader ─────────────── */
-const DATA = R('src/modules/do/data.js');
-if (/loadPlotBatches/.test(DATA) && /shared_plot_batch_balance/.test(R('src/modules/maintenance/data.js'))) {
+const DOSRC = R('src/modules/do/data.js');
+if (/loadPlotBatches/.test(DOSRC) && /shared_plot_batch_balance/.test(R('src/modules/maintenance/data.js'))) {
   pass('the DO form reads batches through loadPlotBatches, the movement report reader');
 } else {
   fail('the DO form does not use loadPlotBatches — a second reader of that report will drift from it');
 }
-if (!/from\(['"]shared_plot_batch_balance/.test(DATA)) {
+if (!/from\(['"]shared_plot_batch_balance/.test(DOSRC)) {
   pass('it does not query the balance view a second time of its own');
 } else {
   fail('the DO module queries shared_plot_batch_balance directly, bypassing the shared reader');
@@ -56,10 +56,34 @@ const batchKey = vm.runInContext('__bk', pbCtx);
 /* ── 2. Several batches, one line each ───────────────────────────────
    Lifted from the component: expandRows is the whole reason a row cannot
    just carry a comma-joined batch. */
-const breedOf = new Map([
-  [batchKey('256'), 'IOI DxP HYBRID'],
-  [batchKey('268'), 'AA Hybrida 1S'],
-]);
+/* The REAL loadPlotBreeds, against a stubbed ledger. Batch 256 is
+   transplanted into two plots with DIFFERENT breeds, which is the whole
+   reason this is per plot and not per batch. B01 and B1 are the same
+   plot, which the ledger and the balance view disagree about. */
+const dFrom = DOSRC.indexOf('export function loosePlot');
+const dTo   = DOSRC.indexOf('export async function loadDropdownData');
+const LEDGER = [
+  { plot_name: 'B1',  batch_name: '256', breed_name: 'IOI DxP HYBRID' },
+  { plot_name: 'U8',  batch_name: '256', breed_name: 'UPB PREMIER HYBRID' },
+  { plot_name: 'B01', batch_name: '268', breed_name: 'AA Hybrida 1S' },
+  { plot_name: 'B1',  batch_name: '900', breed_name: '   ' },
+];
+const dCtx = {
+  console: { warn(){}, log(){} },
+  plotKey: (v) => String(v == null ? '' : v).trim().toUpperCase()
+    .replace(/^PLOT\s*:?\s*/, '').split(/[\s(,[]/)[0].replace(/[^0-9A-Z-]/g, ''),
+  batchKey,
+  supabase: { from: () => { const q = {
+    select: () => q, in: () => q,
+    then: (res) => Promise.resolve({ data: LEDGER, error: null }).then(res) }; return q; } },
+};
+vm.createContext(dCtx);
+vm.runInContext(DOSRC.slice(dFrom, dTo).replace(/^export /gm, '') +
+  '\n;globalThis.__lpb = loadPlotBreeds; globalThis.__lp = loosePlot;', dCtx);
+const loadPlotBreeds = vm.runInContext('__lpb', dCtx);
+const loosePlot = vm.runInContext('__lp', dCtx);
+
+let breedOf = new Map();                       // filled per plot, below
 const ledgerBreed = (b) => (b ? breedOf.get(batchKey(b)) || '' : '');
 const MAX_LINES = 5;
 const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []).length), 0);
@@ -95,6 +119,37 @@ function togglePick(rows, rowKey, batch) {
 }
 const setQty = (rows, k, b, q) => rows.map((r) => (r.key !== k ? r : {
   ...r, picks: r.picks.map((p) => (p.batch === b ? { ...p, qty: q } : p)) }));
+
+(async () => {
+  if (loosePlot('B01') === loosePlot('B1') && loosePlot('B1') === 'B1') {
+    pass('B01 and B1 are read as the same plot');
+  } else {
+    fail('B01 and B1 did not match: ' + loosePlot('B01') + ' vs ' + loosePlot('B1'));
+  }
+
+  const inB1 = await loadPlotBreeds('B1', ['256', '268', '900']);
+  const inU8 = await loadPlotBreeds('U8', ['256']);
+
+  if (inB1.get(batchKey('256')) === 'IOI DxP HYBRID') pass('batch 256 in B1 reads IOI DxP HYBRID');
+  else fail('B1 batch 256 breed wrong: ' + JSON.stringify([...inB1]));
+
+  if (inU8.get(batchKey('256')) === 'UPB PREMIER HYBRID') {
+    pass('the SAME batch 256 in U8 reads UPB PREMIER HYBRID — the breed is per plot');
+  } else {
+    fail('U8 batch 256 should differ from B1: ' + JSON.stringify([...inU8]) +
+         '\n      A batch-wide breed answers the wrong question.');
+  }
+
+  if (inB1.get(batchKey('268')) === 'AA Hybrida 1S') {
+    pass('a log written against B01 is found for plot B1');
+  } else {
+    fail('the zero-padded plot name was missed: ' + JSON.stringify([...inB1]));
+  }
+
+  if (!inB1.has(batchKey('900'))) pass('a blank breed on the log is not recorded as a breed');
+  else fail('a whitespace breed_name was taken as an answer');
+
+  breedOf = inB1;                      // the rest of the test is plot B1
 
 let rows = [{ key: 'a', nursery: 'UNN 1', plot: 'B1', picks: [], batch: '', breed: '', qty: '' }];
 rows = togglePick(rows, 'a', '256');
@@ -168,6 +223,8 @@ if (plain.length === 1 && plain[0].qty === 40 && plain[0].breed === 'AA Hybrida 
   fail('the no-batch path broke: ' + JSON.stringify(plain));
 }
 
+})();
+
 /* ── 3. The PDF is untouched ─────────────────────────────────────────── */
 const PDF = R('src/lib/pdf.js');
 if (!/batch/i.test(PDF)) pass('the customer PDF never mentions a batch');
@@ -177,5 +234,7 @@ const walks = /Object\.keys\(\s*doRec|for\s*\(\s*const\s+\w+\s+in\s+doRec/.test(
 if (!walks) pass('the PDF names its columns one by one, so a new column cannot leak onto it');
 else fail('the PDF walks the record columns — adding batch_N would put it on a signed delivery order');
 
-console.log(failed ? `\n${failed} failure(s)` : '\nall good');
-process.exit(failed ? 1 : 0);
+setTimeout(() => {
+  console.log(failed ? `\n${failed} failure(s)` : '\nall good');
+  process.exit(failed ? 1 : 0);
+}, 50);

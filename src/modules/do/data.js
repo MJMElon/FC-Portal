@@ -26,38 +26,73 @@ export async function loadConsentALSet() {
 
 // Nursery / breed autocomplete data.
 /**
- * The batches standing in each plot, and the breed of each, for the DO form.
+ * The batches standing in each plot, for the DO form.
  *
  * THE SAME SOURCE THE REST OF THE SYSTEM USES. loadPlotBatches is the
  * maintenance module reader for shared_plot_batch_balance, which is the
- * Nursery Movement Report arithmetic in the database — transplanted in plus
- * transfer in, less sold, 3rd culled, transfer out, plus approved stock
- * adjustment. A batch that works out to zero has been culled, sold or moved
- * on and is not offered. Reusing that reader rather than writing a second
- * one is the point: two readers of the same report drift, and the one that
- * drifts is always the newer one nobody is watching.
- *
- * Breed is not in that view, so it comes from operation_batches, one row per
- * batch. It FAILS SOFT to an empty map: not knowing a breed must not stop a
- * Field Conductor picking a batch, and the breed chips are still there to
- * press by hand.
+ * Nursery Movement Report arithmetic in the database. Reusing that reader
+ * rather than writing a second one is the point: two readers of the same
+ * report drift, and the one that drifts is always the newer one nobody is
+ * watching.
  */
 export async function loadBatchData() {
-  const [map, breedRows] = await Promise.all([
-    loadPlotBatches().catch((e) => {
-      console.warn('[do] plot batches unavailable:', (e && e.message) || e);
-      return new Map();
-    }),
-    supabase.from('operation_batches').select('name, breed_name').then(
-      (r) => (r.error ? [] : r.data || []),
-      () => []
-    ),
-  ]);
-  const breedOf = new Map();
-  (breedRows || []).forEach((b) => {
-    if (b && b.name) breedOf.set(batchKey(b.name), b.breed_name || '');
+  const map = await loadPlotBatches().catch((e) => {
+    console.warn('[do] plot batches unavailable:', (e && e.message) || e);
+    return new Map();
   });
-  return { batchMap: map, breedOf };
+  return { batchMap: map };
+}
+
+/* B01 and B1 are the same plot. plotKey keeps the padding, because
+   elsewhere it has to; here the ledger and the balance view disagree about
+   it, so the comparison drops leading zeros from the number and leaves
+   anything else -- a -R suffix included -- alone. */
+export function loosePlot(v) {
+  return plotKey(v).replace(/^([A-Z]+)0*(\d+)/, '$1$2');
+}
+
+/**
+ * The breed of each batch IN THIS PLOT, off the ledger.
+ *
+ * A breed belongs to the plot and batch together, not to the batch. One
+ * batch can be transplanted into several plots, and it is the log that put
+ * it into THIS plot that says what went in. A batch-wide lookup answers
+ * the wrong question and is right often enough to be trusted.
+ *
+ * Asked per plot, when a plot is chosen, and filtered to the batches
+ * already known to be standing there -- a handful of rows. The whole
+ * ledger is tens of thousands and maintenance/data.js carries a hard-won
+ * note about what paging it from every phone does to a database under
+ * strain. This never does that.
+ *
+ * Planted and the three Transplanted types are the logs that put stock on
+ * the ground, which is where a breed is recorded. Returns a Map keyed by
+ * batchKey, empty on any failure -- not knowing a breed must not stop a
+ * Field Conductor choosing a batch.
+ */
+export async function loadPlotBreeds(plot, batchNames) {
+  const out = new Map();
+  const want = loosePlot(plot);
+  if (!want || !(batchNames || []).length) return out;
+  const res = await supabase
+    .from('shared_inventory_logs')
+    .select('plot_name, batch_name, breed_name')
+    .in('transaction_type', ['Planted', 'Transplanted',
+      'Transplanted_Premium', 'Transplanted_DoubleTone'])
+    .in('batch_name', batchNames)
+    .then((r) => (r.error ? null : r.data || []), () => null);
+  if (!res) {
+    console.warn('[do] breeds for', plot, 'could not be read');
+    return out;
+  }
+  for (const r of res) {
+    if (loosePlot(r.plot_name) !== want) continue;   // a different plot of the same batch
+    const bk = batchKey(r.batch_name);
+    const breed = String(r.breed_name || '').trim();
+    if (!bk || !breed || out.has(bk)) continue;
+    out.set(bk, breed);
+  }
+  return out;
 }
 
 export async function loadDropdownData() {
