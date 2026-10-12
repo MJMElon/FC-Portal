@@ -60,40 +60,57 @@ function pickBatch(rows, rowKey, batch) {
     if (r.key !== rowKey) return r;
     const next = r.batch === batch ? '' : batch;
     const known = next && breedOf ? (breedOf.get(batchKey(next)) || '') : '';
-    return { ...r, batch: next, breed: r.breed || known };
+    return { ...r, batch: next, breed: next ? known : '' };
   });
 }
+/* When the hand-pick breed chips are shown at all. */
+const ledgerBreedOf = (r) => (r && r.batch ? breedOf.get(batchKey(r.batch)) || '' : '');
+const chipsShown = (r, batchCount) => !ledgerBreedOf(r) && (!!r.batch || batchCount === 0);
 
 let rows = [{ key: 'a', plot: 'U8', batch: '', breed: '', qty: '' }];
 rows = pickBatch(rows, 'a', '252');
 if (rows[0].batch === '252' && rows[0].breed === 'AA Hybrida 1S') {
-  pass('picking a batch on an empty row fills the breed from the ledger');
+  pass('picking a batch sets the breed from the ledger');
 } else {
   fail('expected batch 252 and breed AA Hybrida 1S, got ' + JSON.stringify(rows[0]));
 }
+if (!chipsShown(rows[0], 2)) pass('with the breed known, the hand-pick chips stay hidden');
+else fail('the breed chips showed for a batch the ledger can answer — two ways to say one fact');
 
-rows = [{ key: 'a', plot: 'U8', batch: '', breed: 'UPB PREMIER HYBRID', qty: '' }];
-rows = pickBatch(rows, 'a', '252');
-if (rows[0].breed === 'UPB PREMIER HYBRID') {
-  pass('a breed already chosen by hand is NOT overwritten by the batch');
+/* Switching batch must take the breed with it. The old rule kept the first
+   breed, which was right when a human had typed it and wrong now. */
+rows = pickBatch(rows, 'a', '250');
+if (rows[0].breed === 'IOI DxP HYBRID') {
+  pass('switching batch switches the breed with it');
 } else {
-  fail('picking a batch changed a breed the Field Conductor had already answered: ' +
-       JSON.stringify(rows[0]) + '\n      A lookup fills an empty cell. It never writes over a full one.');
+  fail('changing the batch left the old breed behind: ' + JSON.stringify(rows[0]) +
+       '\n      The breed is a fact about the batch. A stale one is a wrong one.');
 }
 
-rows = pickBatch(rows, 'a', '252');   // press the same chip again
-if (rows[0].batch === '' && rows[0].breed === 'UPB PREMIER HYBRID') {
-  pass('pressing the same batch again clears it and leaves the breed alone');
+rows = pickBatch(rows, 'a', '250');   // press the same tile again
+if (rows[0].batch === '' && rows[0].breed === '') {
+  pass('unpicking the batch clears the breed it had filled');
 } else {
-  fail('unpicking the batch did not behave: ' + JSON.stringify(rows[0]));
+  fail('unpicking left something behind: ' + JSON.stringify(rows[0]));
 }
 
+/* The case that would otherwise print a blank breed on a customer PDF. */
 rows = [{ key: 'a', plot: 'U8', batch: '', breed: '', qty: '' }];
-rows = pickBatch(rows, 'a', '999');   // a batch nobody has a breed for
+rows = pickBatch(rows, 'a', '999');
 if (rows[0].batch === '999' && rows[0].breed === '') {
-  pass('a batch with no breed on record still selects, and invents nothing');
+  pass('a batch with no breed on record selects, and invents nothing');
 } else {
   fail('an unknown batch should select with no breed, got ' + JSON.stringify(rows[0]));
+}
+if (chipsShown(rows[0], 2)) {
+  pass('and THEN the breed chips appear, so the PDF is not printed breed-blank');
+} else {
+  fail('a batch with no breed left no way to enter one — breed_N is on the customer PDF');
+}
+if (chipsShown({ key: 'b', plot: 'P01', batch: '', breed: '' }, 0)) {
+  pass('a plot with no batches at all (a PN plot) still offers the breed chips');
+} else {
+  fail('a plot with no batches left no way to enter a breed');
 }
 
 /* ── 3. The PDF is untouched ─────────────────────────────────────────── */

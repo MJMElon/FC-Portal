@@ -53,16 +53,24 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
      batch row simply does not appear and the form works as it did. */
   const batchesFor = (plot) => (plot && batchMap ? batchesIn(batchMap, plot) : []);
 
-  /* Picking a batch fills the breed, but only when the breed is EMPTY.
-     The house rule: a lookup fills an empty cell and never writes over a
-     full one. A Field Conductor who pressed a breed chip has answered the
-     question, and a batch chosen afterwards must not quietly change it. */
-  function pickBatch(rowKey, batch, current) {
+  /* The breed the ledger has for the batch on a row, or '' when it has
+     none. One place, because the tile shows it, the fallback chips appear
+     on it, and the saved breed comes from it. */
+  const ledgerBreedOf = (r) =>
+    (r && r.batch && breedOf ? breedOf.get(batchKey(r.batch)) || '' : '');
+
+  /* Picking a batch SETS the breed, it no longer merely fills an empty one.
+     That rule existed to protect a breed somebody had pressed by hand, and
+     the hand chips are gone for a batch the ledger can answer -- the breed
+     is a fact about the batch, and two ways to say it is how the two come
+     to disagree. A batch the ledger has no breed for clears the breed and
+     the chips appear, so the one field that still needs a hand gets one. */
+  function pickBatch(rowKey, batch) {
     setRows((prev) => prev.map((r) => {
       if (r.key !== rowKey) return r;
       const next = r.batch === batch ? '' : batch;
       const known = next && breedOf ? (breedOf.get(batchKey(next)) || '') : '';
-      return { ...r, batch: next, breed: r.breed || known };
+      return { ...r, batch: next, breed: next ? known : '' };
     }));
   }
 
@@ -300,60 +308,75 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
                             ))}
                           </CfSelect>
                           {/* Batch — what is standing in that plot, per the
-                              Nursery Movement Report, with the balance beside
-                              it so a block that is nearly empty says so
-                              before anybody loads a lorry. Only shown once a
-                              plot is chosen and only when that plot has
-                              batches: an empty row of nothing is noise on a
-                              form this long. */}
+                              Nursery Movement Report. Batch number, the
+                              balance, and the breed, on one tile: those three
+                              are one fact about one block of ground, and a
+                              Field Conductor reads them together. The balance
+                              is there so a block that is nearly empty says so
+                              before anybody loads a lorry. */}
                           {batchesFor(r.plot).length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 items-center">
-                              {batchesFor(r.plot).map((b) => (
-                                <button
-                                  key={b.batch}
-                                  type="button"
-                                  onClick={() => pickBatch(r.key, b.batch, r.batch)}
-                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer transition-colors ${
-                                    r.batch === b.batch
-                                      ? 'bg-amber-600 text-white border-amber-600'
-                                      : 'bg-white text-slate-600 border-slate-300 hover:border-amber-400'
-                                  }`}
-                                >
-                                  {b.batch}
-                                  <span className="font-bold opacity-70 ml-1 tabular-nums">
-                                    {Number(b.qty || 0).toLocaleString()}
-                                  </span>
-                                </button>
-                              ))}
-                              {/* The breed of the chosen batch, shown whether
-                                  or not it filled the chip below — the chip
-                                  may already have been pressed by hand, and
-                                  this is still what the ledger says that
-                                  batch is. */}
-                              {r.batch && breedOf && breedOf.get(batchKey(r.batch)) && (
-                                <span className="text-[11px] font-bold text-slate-500">
-                                  {breedOf.get(batchKey(r.batch))}
-                                </span>
-                              )}
+                            <div className="flex flex-wrap gap-1.5">
+                              {batchesFor(r.plot).map((b) => {
+                                const bBreed = breedOf ? (breedOf.get(batchKey(b.batch)) || '') : '';
+                                const on = r.batch === b.batch;
+                                return (
+                                  <button
+                                    key={b.batch}
+                                    type="button"
+                                    onClick={() => pickBatch(r.key, b.batch)}
+                                    className={`px-3 py-2 rounded-lg border text-left cursor-pointer transition-colors ${
+                                      on
+                                        ? 'bg-amber-600 text-white border-amber-600'
+                                        : 'bg-white text-slate-600 border-slate-300 hover:border-amber-400'
+                                    }`}
+                                  >
+                                    <div className="text-[12px] font-black leading-tight">{b.batch}</div>
+                                    <div className={`text-[11px] font-bold tabular-nums leading-tight ${on ? 'opacity-80' : 'text-slate-500'}`}>
+                                      {Number(b.qty || 0).toLocaleString()}
+                                    </div>
+                                    {/* The breed of that batch, off the ledger.
+                                        A batch nobody has recorded one for
+                                        shows no line rather than an empty one
+                                        pretending to be an answer. */}
+                                    {bBreed && (
+                                      <div className={`text-[10px] font-bold leading-tight ${on ? 'opacity-80' : 'text-slate-400'}`}>
+                                        {bBreed}
+                                      </div>
+                                    )}
+                                  </button>
+                                );
+                              })}
                             </div>
                           )}
-                          {/* Breed — button toggle group */}
-                          <div className="flex flex-wrap gap-1.5">
-                            {withCurrent(breedOptions, r.breed).map((b) => (
-                              <button
-                                key={b}
-                                type="button"
-                                onClick={() => updateRow(r.key, 'breed', r.breed === b ? '' : b)}
-                                className={`px-3 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer transition-colors ${
-                                  r.breed === b
-                                    ? 'bg-blue-600 text-white border-blue-600'
-                                    : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
-                                }`}
-                              >
-                                {b}
-                              </button>
-                            ))}
-                          </div>
+                          {/* Breed — only when the batch cannot answer it.
+                              The chips used to be here always and are gone:
+                              the breed is a fact about the batch, and asking
+                              for it twice is how the two come to disagree.
+
+                              But breed_N is on the CUSTOMER PDF. A batch with
+                              no breed on record, or a plot with no batches at
+                              all (a PN plot, or a balance read that failed),
+                              would otherwise mean a delivery order printed
+                              with the breed blank and no way to fill it. So
+                              the chips come back for exactly those cases. */}
+                          {!ledgerBreedOf(r) && (r.batch || batchesFor(r.plot).length === 0) && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {withCurrent(breedOptions, r.breed).map((b) => (
+                                <button
+                                  key={b}
+                                  type="button"
+                                  onClick={() => updateRow(r.key, 'breed', r.breed === b ? '' : b)}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer transition-colors ${
+                                    r.breed === b
+                                      ? 'bg-blue-600 text-white border-blue-600'
+                                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                                  }`}
+                                >
+                                  {b}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           {/* Qty */}
                           <input
                             type="number"
