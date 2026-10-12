@@ -5,6 +5,7 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import { callGemini, compressImage, DO_SCAN_PROMPT } from '../../lib/gemini.js';
 import { generateDONumber, offlineDONumber, loadPlotBreeds, loosePlot } from './data.js';
 import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
+import { rowQty, lineCount, totalQty as sumQty, scanTally, applyScannedQty } from './qty.js';
 
 /* picks is the batches chosen on this row, each with its OWN quantity:
    [{ batch, breed, qty }]. One delivery order line per batch, because
@@ -39,7 +40,7 @@ const emptyRow = () => ({ key: Math.random().toString(36).slice(2), nursery: '',
 // Add / scan a new Delivery Order for the given AL.
 // props: al, plots, breeds, photoBase64 (null for manual),
 //        onSaved(payload, sigDataUrl, queued, photoBase64, savedRow), onClose, toast
-export default function EntryModal({ al, plots, breeds, batchMap, photoBase64, initialQty, onSubmit, onSaved, onClose, toast }) {
+export default function EntryModal({ al, plots, breeds, batchMap, photoBase64, initialQty, scannedQty, onSubmit, onSaved, onClose, toast }) {
   const { t } = useLang();
   const [doNumber, setDoNumber] = useState('…');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -198,12 +199,18 @@ function expandRows(rows) {
 /* Five slots on the record — plot_1..plot_5 — so five LINES, not five
    rows. A row naming three batches spends three of them. */
 const MAX_LINES = 5;
-const rowQty = (r) => (r.picks && r.picks.length
-  ? r.picks.reduce((s, p) => s + (parseInt(p.qty) || 0), 0)
-  : parseInt(r.qty) || 0);
-const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []).length), 0);
 
-  const totalQty = rows.reduce((s, r) => s + rowQty(r), 0);
+  const totalQty = sumQty(rows);
+  /* What the scanner counted onto the lorry, and whether the lines add
+     up to it. Nought, and every bit of this is inert -- see qty.js. */
+  const scan = scanTally(rows, scannedQty);
+  /* One line: the scanned count IS the quantity, so it is filled in
+     rather than keyed. More than one: whatever the scan filled in is
+     withdrawn, because only the conductor knows the split. */
+  useEffect(() => {
+    if (!scannedQty) return;
+    setRows((rs) => applyScannedQty(rs, scannedQty));
+  }, [scannedQty, rows]);
   const balance = al?.balance_quantity ?? 0;
   const remain = balance - totalQty;
   const customerMatch = customer.trim().toLowerCase() === (al?.customer_name || '').toLowerCase();
@@ -265,6 +272,10 @@ const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []
     if (!date) return alert(t('do.selectDate'));
     if (!items.length) return alert(t('do.addItem'));
     if (totalQty <= 0) return alert(t('do.qtyGtZero'));
+    /* The scanner counted them onto the lorry. A delivery order issued
+       off that scan and signed for a different number is a record that
+       disagrees with the count it came from, so it does not save. */
+    if (!scan.tallies) return alert(t('do.mustTallyScan', { t: totalQty, s: scan.scanned }));
     if (totalQty > balance) return alert(t('do.exceedsBalance', { t: totalQty, b: balance }));
     if (!sigRef.current?.hasSig()) return alert(t('do.pleaseSign'));
 
@@ -380,6 +391,29 @@ const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []
                     <button onClick={addRow} className="text-[9px] font-black text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg cursor-pointer uppercase tracking-widest">{t('do.addRow')}</button>
                   )}
                 </div>
+                {/* WHAT THE SCANNER COUNTED, kept on screen for the
+                    whole of the form. It is the figure this delivery
+                    order is being issued for, so it is not a default
+                    that disappears into a box -- the conductor is
+                    splitting it between batches and has to be able to
+                    see what they are splitting. */}
+                {scan.scanned > 0 && (
+                  <div className={`rounded-2xl border px-4 py-2.5 mb-2 ${scan.tallies ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{t('do.scannedLabel')}</span>
+                      <span className="text-lg font-black tabular-nums text-slate-800">{scan.scanned.toLocaleString()}</span>
+                    </div>
+                    <div className={`text-[10px] font-bold leading-tight mt-0.5 ${scan.tallies ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {scan.auto
+                        ? t('do.scanOneLine')
+                        : scan.left === 0
+                          ? t('do.scanTallies')
+                          : scan.left > 0
+                            ? t('do.scanShort', { n: scan.left })
+                            : t('do.scanOver', { n: -scan.left })}
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-2">
                   {rows.map((r, i) => {
                     const rowPlotOpts = plotOptionsForRow(r.nursery);
@@ -484,9 +518,13 @@ const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []
                                 min="0"
                                 value={p.qty}
                                 onChange={(e) => updatePick(r.key, p.batch, 'qty', e.target.value)}
+                                readOnly={scan.auto}
                                 placeholder="0"
-                                className="search-input text-sm w-28"
+                                className={`search-input text-sm w-28 ${scan.auto ? 'bg-emerald-50 border-emerald-200 font-black' : ''}`}
                               />
+                              {scan.auto && (
+                                <span className="text-[9px] font-black uppercase tracking-widest text-emerald-700">{t('do.fromTheScan')}</span>
+                              )}
                             </div>
                           ))}
 
@@ -502,14 +540,20 @@ const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []
                               surprised: such a line saves with breed_N empty,
                               and breed_N is on the customer PDF. */}
                           {batchesFor(r.plot).length === 0 && (
-                            <input
-                              type="number"
-                              min="0"
-                              value={r.qty}
-                              onChange={(e) => updateRow(r.key, 'qty', e.target.value)}
-                              placeholder="0"
-                              className="search-input text-sm w-28"
-                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                value={r.qty}
+                                onChange={(e) => updateRow(r.key, 'qty', e.target.value)}
+                                readOnly={scan.auto}
+                                placeholder="0"
+                                className={`search-input text-sm w-28 ${scan.auto ? 'bg-emerald-50 border-emerald-200 font-black' : ''}`}
+                              />
+                              {scan.auto && (
+                                <span className="text-[9px] font-black uppercase tracking-widest text-emerald-700">{t('do.fromTheScan')}</span>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>

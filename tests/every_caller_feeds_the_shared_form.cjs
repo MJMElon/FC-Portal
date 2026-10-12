@@ -40,6 +40,10 @@ const MAY_OMIT = {
   photoBase64: 'the scan flow has no photo yet when the form opens',
   /* Only the scan flow knows how many seals were just counted. */
   initialQty: 'only the scan flow can suggest a quantity',
+  /* And only the scan flow has a COUNT to hold the quantities to. A
+     manual delivery order has no scanner behind it, so there is nothing
+     for its lines to tally with -- see src/modules/do/qty.js. */
+  scannedQty: 'only a delivery order opened out of a scan has one',
 };
 
 const src = R(FORM);

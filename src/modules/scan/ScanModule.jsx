@@ -44,7 +44,7 @@ export default function ScanModule() {
   const [lastInfo, setLastInfo] = useState({ key: 'scan.waitingFirst' });
 
   // Issue DO popup state (opens the DO entry form in-place, no navigation).
-  const [doEntry, setDoEntry] = useState(null); // { al, suggestQty, consentId }
+  const [doEntry, setDoEntry] = useState(null); // { al, suggestQty, scannedQty, consentId }
   const [doPlots, setDoPlots] = useState([]);
   const [doBreeds, setDoBreeds] = useState([]);
   /* The batches standing in each plot. EntryModal is shared with the DO
@@ -432,7 +432,16 @@ export default function ScanModule() {
     const newScans = Math.max(0, consent.unique - issuedQty);
     const remainingBalance = Math.max(0, consent.qty - issuedQty);
     const suggestQty = newScans > 0 ? newScans : remainingBalance;
-    setDoEntry({ al, suggestQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
+    /* WHAT THE SCANNER ACTUALLY COUNTED, which the delivery order is then
+       issued for -- the form fills it in on one batch and makes several
+       batches tally to it (see do/qty.js).
+
+       Only newScans, never the balance fallback beside it. With nothing
+       newly scanned the form is offered the remaining balance as a
+       SUGGESTION the conductor may key over, and binding a delivery order
+       to a figure no scanner ever saw would be the opposite of the rule. */
+    const scannedQty = newScans > 0 ? newScans : 0;
+    setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
   }
 
   function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
@@ -542,6 +551,7 @@ export default function ScanModule() {
           batchMap={doBatchMap}
           photoBase64={null}
           initialQty={doEntry.suggestQty}
+          scannedQty={doEntry.scannedQty}
           toast={(m) => flash(m, 'warn')}
           onSubmit={(args) => persistDO({ ...args, staff: staffName })}
           onSaved={onDoSaved}
