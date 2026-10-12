@@ -11,6 +11,29 @@ import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
    that is the only shape the rest of the system can read -- see
    expandRows below. batch/breed/qty on the row itself are still used for
    a plot that offers no batches at all. */
+/* B1, B2, B3 ... B10, B11 -- not B1, B10, B11, B2.
+   A plain sort compares "B10" and "B2" letter by letter, so the 1 beats
+   the 2 and a conductor scrolling for B4 finds it after B39. Split the
+   name into its letters, its NUMBER and whatever follows (a -R transfer
+   plot keeps its suffix), and compare the number as a number. A plot with
+   no digits at all falls back to comparing the text. */
+function comparePlots(a, b) {
+  const part = (v) => {
+    const m = /^([A-Za-z]*)(\d*)(.*)$/.exec(String(v == null ? '' : v).trim());
+    return m ? { pre: m[1].toUpperCase(), n: m[2] === '' ? null : parseInt(m[2], 10), rest: m[3].toUpperCase() }
+             : { pre: '', n: null, rest: '' };
+  };
+  const x = part(a), y = part(b);
+  if (x.pre !== y.pre) return x.pre < y.pre ? -1 : 1;
+  if (x.n === null || y.n === null) {
+    return String(a).localeCompare(String(b));
+  }
+  if (x.n !== y.n) return x.n - y.n;
+  /* Same number: the bare plot first, then its -R and anything else. */
+  if (x.rest !== y.rest) return x.rest < y.rest ? -1 : 1;
+  return 0;
+}
+
 const emptyRow = () => ({ key: Math.random().toString(36).slice(2), nursery: '', plot: '', picks: [], batch: '', breed: '', qty: '', ai: false });
 
 // Add / scan a new Delivery Order for the given AL.
@@ -49,7 +72,7 @@ export default function EntryModal({ al, plots, breeds, batchMap, photoBase64, i
     [plots]
   );
   const plotOptions = useMemo(
-    () => [...new Set((plots || []).map((p) => p.plot_name).filter(Boolean))].sort(),
+    () => [...new Set((plots || []).map((p) => p.plot_name).filter(Boolean))].sort(comparePlots),
     [plots]
   );
   /* Which batches stand in the row plot, straight off the Nursery Movement
@@ -127,15 +150,11 @@ export default function EntryModal({ al, plots, breeds, batchMap, photoBase64, i
     })));
   }
 
-  const breedOptions = useMemo(
-    () => [...new Set((breeds || []).map((b) => b.name).filter(Boolean))].sort(),
-    [breeds]
-  );
 
   function plotOptionsForRow(nursery) {
     if (!nursery) return plotOptions;
     const filtered = (plots || []).filter((p) => p.nursery_name === nursery).map((p) => p.plot_name).filter(Boolean);
-    return [...new Set(filtered)].sort();
+    return [...new Set(filtered)].sort(comparePlots);
   }
 
   const withCurrent = (list, val) => (val && !list.includes(val) ? [val, ...list] : list);
@@ -471,38 +490,26 @@ const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []
                             </div>
                           ))}
 
-                          {/* Breed and quantity by hand, for a plot the
-                              batches cannot answer for: a PN plot, or a
-                              balance read that failed. breed_N is on the
-                              CUSTOMER PDF, so leaving no way to fill it
-                              would print a delivery order with it blank. */}
+                          {/* No breed chips. The breed is a fact about the
+                              plot and batch, read off the ledger, and asking
+                              for it by hand is a second way to say one thing.
+
+                              The quantity box stays, for a plot that offers no
+                              batches -- a PN plot, or a balance read that
+                              failed -- or the row could record nothing at all.
+
+                              What this costs, so the next person is not
+                              surprised: such a line saves with breed_N empty,
+                              and breed_N is on the customer PDF. */}
                           {batchesFor(r.plot).length === 0 && (
-                            <>
-                              <div className="flex flex-wrap gap-1.5">
-                                {withCurrent(breedOptions, r.breed).map((b) => (
-                                  <button
-                                    key={b}
-                                    type="button"
-                                    onClick={() => updateRow(r.key, 'breed', r.breed === b ? '' : b)}
-                                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer transition-colors ${
-                                      r.breed === b
-                                        ? 'bg-blue-600 text-white border-blue-600'
-                                        : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
-                                    }`}
-                                  >
-                                    {b}
-                                  </button>
-                                ))}
-                              </div>
-                              <input
-                                type="number"
-                                min="0"
-                                value={r.qty}
-                                onChange={(e) => updateRow(r.key, 'qty', e.target.value)}
-                                placeholder="0"
-                                className="search-input text-sm w-28"
-                              />
-                            </>
+                            <input
+                              type="number"
+                              min="0"
+                              value={r.qty}
+                              onChange={(e) => updateRow(r.key, 'qty', e.target.value)}
+                              placeholder="0"
+                              className="search-input text-sm w-28"
+                            />
                           )}
                         </div>
                       </div>

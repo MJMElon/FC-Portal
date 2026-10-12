@@ -214,13 +214,21 @@ if (before === 5 && many[0].picks.length === 5) {
        '\n      A dropped line means signing a delivery order for more than it records.');
 }
 
-/* A plot that offers no batches still produces a line from the row. */
+/* A plot that offers no batches still produces a line, with its quantity.
+   The breed chips are gone by request, so such a line carries no breed --
+   and breed_N is on the customer PDF. Held here so the cost is written
+   down rather than discovered on a signed delivery order. */
 const plain = expandRows([{ key: 'b', nursery: 'PN', plot: 'P01', picks: [],
-                            batch: '', breed: 'AA Hybrida 1S', qty: '40' }]);
-if (plain.length === 1 && plain[0].qty === 40 && plain[0].breed === 'AA Hybrida 1S') {
-  pass('a plot with no batches still makes a line, with its hand-picked breed');
+                            batch: '', breed: '', qty: '40' }]);
+if (plain.length === 1 && plain[0].qty === 40 && plain[0].plot === 'P01') {
+  pass('a plot with no batches still makes a line, carrying its quantity');
 } else {
   fail('the no-batch path broke: ' + JSON.stringify(plain));
+}
+if (plain[0].breed === '') {
+  pass('and that line has no breed — the known cost of dropping the chips');
+} else {
+  fail('expected an empty breed on a no-batch line, got ' + JSON.stringify(plain[0]));
 }
 
 })();
