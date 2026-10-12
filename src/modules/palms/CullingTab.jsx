@@ -5,7 +5,7 @@ import { CULL_LIMIT, actionFor, caseBody } from './cullingActions.js';
 // Every figure on this screen comes from here.
 import {
   blocksCachedAt, diagnose, figuresBroken, figuresFor, hasFigures, lastLoadWasCached,
-  loadPlots, plantedNear, rateFor, closeCollectingStatus,
+  loadPlots, plantedNear, rateFor, closeCollectingStatus, openStatuses,
 } from './cullingSource.js';
 import { todayStr } from './data.js';
 import { agoText } from '../../lib/ago.js';
@@ -93,7 +93,28 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
   const [removing, setRemoving] = useState(null);
   async function removePlot(plot) {
     if (!canRemove || removing) return;
-    if (!window.confirm(t('cull.removeAsk', { plot }))) return;
+
+    /* Ask what is running BEFORE asking the person, so the confirm names
+       the statuses rather than describing them. A read that fails falls
+       back to the plain wording — it still says the PALMS status changes,
+       it just cannot say which. */
+    let msg = t('cull.removeAskPlain', { plot });
+    try {
+      const st = await openStatuses(plot);
+      if (!st.collecting.length) { flash(t('cull.removeNothing', { plot })); return; }
+      const lines = [t('cull.removeAsk1', { plot })];
+      lines.push(t('cull.removeCloses', { names: st.collecting.join(', ') }));
+      if (st.other.length) {
+        lines.push(t('cull.removeKeeps', { names: st.other.join(', ') }));
+        lines.push(t('cull.removeBoard', { plot, names: st.other.join(', ') }));
+      } else {
+        lines.push(t('cull.removeBoardNone', { plot }));
+      }
+      lines.push(t('cull.removeAsk2'));
+      msg = lines.join('\n');
+    } catch (e) { /* plain wording, set above */ }
+
+    if (!window.confirm(msg)) return;
     setRemoving(plot);
     try {
       const n = await closeCollectingStatus(plot);

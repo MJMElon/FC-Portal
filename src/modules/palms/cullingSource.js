@@ -212,6 +212,45 @@ export async function pengambilanPlots() {
 }
 
 /**
+ * What is RUNNING on a plot right now, split into the statuses that put it
+ * on this screen and the ones that do not.
+ *
+ * Read before the confirm, so the question can name them: Pengambilan
+ * closes, Membesar keeps running, the board will show Membesar only. A
+ * dialog that says "the collecting status" in the abstract leaves the admin
+ * to work out which of the plot two running activities that means, and the
+ * answer decides whether they press OK.
+ *
+ * Both lists come back EMPTY rather than null on a failure the caller can
+ * see, so a caller can tell "nothing is running" from "could not ask".
+ */
+export async function openStatuses(plot) {
+  const want = plotKey(String(plot || '').split('#')[0]);
+  const out = { collecting: [], other: [] };
+  if (!want) return out;
+
+  const stages = await supabase
+    .from('nops_plot_status_stages').select('name, sort_order').order('sort_order');
+  if (stages.error || !(stages.data || []).length) throw new Error('no stage list');
+  const nameOf = new Map((stages.data || []).map((x) => [x.sort_order, x.name]));
+
+  const open = await supabase
+    .from('fcportal_palms_plot_logs')
+    .select('plot_name, act_n')
+    .is('end_date', null);
+  if (open.error) throw new Error(open.error.message);
+
+  (open.data || []).forEach((r) => {
+    if (plotKey(String(r.plot_name || '').split('#')[0]) !== want) return;
+    const name = nameOf.get(r.act_n);
+    if (!name) return;
+    const side = CULLING_STAGES.has(stageKey(name)) ? out.collecting : out.other;
+    if (!side.includes(name)) side.push(name);
+  });
+  return out;
+}
+
+/**
  * Close the collecting status on a plot, so it leaves this screen.
  *
  * What the X in the plot picker does. It is NOT a delete: the log row is

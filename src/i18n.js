@@ -72,7 +72,24 @@ const en = {
      touched. It is: this closes the same row PALMS closes when a Field
      Conductor unticks an activity, and the board reads that row. Somebody
      about to press OK has to know that before they press it, not after. */
-  'cull.removeAsk':     'Take {plot} off this list?\n\nTHIS CHANGES THE PALMS STATUS. The collecting status on {plot} is closed with today date, exactly as if it had been unticked in PALMS, and the board will stop showing it. Any other activity running on the plot is left alone.\n\nNothing is deleted: the collecting period stays in the history, and PALMS puts the plot back here whenever collecting starts again.',
+  /* Built line by line in removePlot from what is actually running on THAT
+     plot, so the question reads
+         Pengambilan closes, dated today
+         Membesar is untouched and keeps running
+         the PALMS board will show B4 as Membesar only
+     rather than "the collecting status" in the abstract, which leaves an
+     admin to work out which of the plot two running activities is meant --
+     and that is the answer that decides whether they press OK. */
+  'cull.removeAsk1':    'Take {plot} off this list?\n\nTHIS CHANGES THE PALMS STATUS.\n',
+  'cull.removeCloses':  '· {names} closes, dated today',
+  'cull.removeKeeps':   '· {names} is untouched and keeps running',
+  'cull.removeBoard':   '· the PALMS board will show {plot} as {names} only',
+  'cull.removeBoardNone': '· the PALMS board will show {plot} with nothing running',
+  'cull.removeAsk2':    '\nNothing is deleted: the collecting period stays in the history, and PALMS puts the plot back here whenever collecting starts again.',
+  /* Only when the statuses could not be read. Never dressed up as the
+     precise version above -- a dialog that guesses at what it is about to
+     change is worse than one that admits it does not know. */
+  'cull.removeAskPlain': 'Take {plot} off this list?\n\nTHIS CHANGES THE PALMS STATUS. The collecting status on {plot} is closed with today date, exactly as if it had been unticked in PALMS. Any other activity running on the plot is left alone.\n\nThe statuses on this plot could not be read just now, so this cannot name them.\n\nNothing is deleted: the collecting period stays in the history.',
   'cull.removed':       '{plot} taken off the list',
   'cull.removeNothing': '{plot} has no collecting status open — it will go on the next refresh',
   'cull.removeOffline': 'This needs a line — the change has to reach the office, not sit on the phone',
