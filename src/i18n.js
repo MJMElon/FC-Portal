@@ -64,6 +64,7 @@ const en = {
      is keeping the plot on this screen -- it does not delete anything, and
      the wording says so, because "delete" on a plot would read as something
      far bigger than it is. */
+  'do.noBreedOnBatch': 'no breed on record',
   'cull.removeTitle':   'Close the PALMS collecting status on this plot',
   'cull.removeAria':    'Close the PALMS collecting status on {plot}',
   /* It says CHANGES THE PALMS STATUS, in those words, at the top. The first

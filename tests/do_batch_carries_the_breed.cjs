@@ -53,64 +53,119 @@ vm.createContext(pbCtx);
 vm.runInContext(PB.replace(/^export /gm, '') + '\n;globalThis.__bk = batchKey;', pbCtx);
 const batchKey = vm.runInContext('__bk', pbCtx);
 
-/* pickBatch, lifted from the component and run against plain rows. */
-const breedOf = new Map([[batchKey('252'), 'AA Hybrida 1S'], [batchKey('250'), 'IOI DxP HYBRID']]);
-function pickBatch(rows, rowKey, batch) {
+/* ── 2. Several batches, one line each ───────────────────────────────
+   Lifted from the component: expandRows is the whole reason a row cannot
+   just carry a comma-joined batch. */
+const breedOf = new Map([
+  [batchKey('256'), 'IOI DxP HYBRID'],
+  [batchKey('268'), 'AA Hybrida 1S'],
+]);
+const ledgerBreed = (b) => (b ? breedOf.get(batchKey(b)) || '' : '');
+const MAX_LINES = 5;
+const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []).length), 0);
+
+function expandRows(rows) {
+  const out = [];
+  for (const r of rows) {
+    const nursery = (r.nursery || '').trim();
+    const plot = (r.plot || '').trim();
+    if (r.picks && r.picks.length) {
+      for (const p of r.picks) {
+        out.push({ nursery, plot, batch: (p.batch || '').trim(),
+                   breed: (p.breed || '').trim(), qty: parseInt(p.qty) || 0 });
+      }
+    } else {
+      out.push({ nursery, plot, batch: (r.batch || '').trim(),
+                 breed: (r.breed || '').trim(), qty: parseInt(r.qty) || 0 });
+    }
+  }
+  return out;
+}
+function togglePick(rows, rowKey, batch) {
+  const row = rows.find((r) => r.key === rowKey);
+  const on = row && (row.picks || []).some((p) => p.batch === batch);
+  if (!on && lineCount(rows) >= MAX_LINES) return rows;          // refused
   return rows.map((r) => {
     if (r.key !== rowKey) return r;
-    const next = r.batch === batch ? '' : batch;
-    const known = next && breedOf ? (breedOf.get(batchKey(next)) || '') : '';
-    return { ...r, batch: next, breed: next ? known : '' };
+    const picks = r.picks || [];
+    return { ...r, picks: picks.some((p) => p.batch === batch)
+      ? picks.filter((p) => p.batch !== batch)
+      : [...picks, { batch, breed: ledgerBreed(batch), qty: '' }] };
   });
 }
-/* When the hand-pick breed chips are shown at all. */
-const ledgerBreedOf = (r) => (r && r.batch ? breedOf.get(batchKey(r.batch)) || '' : '');
-const chipsShown = (r, batchCount) => !ledgerBreedOf(r) && (!!r.batch || batchCount === 0);
+const setQty = (rows, k, b, q) => rows.map((r) => (r.key !== k ? r : {
+  ...r, picks: r.picks.map((p) => (p.batch === b ? { ...p, qty: q } : p)) }));
 
-let rows = [{ key: 'a', plot: 'U8', batch: '', breed: '', qty: '' }];
-rows = pickBatch(rows, 'a', '252');
-if (rows[0].batch === '252' && rows[0].breed === 'AA Hybrida 1S') {
-  pass('picking a batch sets the breed from the ledger');
+let rows = [{ key: 'a', nursery: 'UNN 1', plot: 'B1', picks: [], batch: '', breed: '', qty: '' }];
+rows = togglePick(rows, 'a', '256');
+if (rows[0].picks.length === 1 && rows[0].picks[0].breed === 'IOI DxP HYBRID') {
+  pass('choosing a batch takes its breed straight off the ledger');
 } else {
-  fail('expected batch 252 and breed AA Hybrida 1S, got ' + JSON.stringify(rows[0]));
-}
-if (!chipsShown(rows[0], 2)) pass('with the breed known, the hand-pick chips stay hidden');
-else fail('the breed chips showed for a batch the ledger can answer — two ways to say one fact');
-
-/* Switching batch must take the breed with it. The old rule kept the first
-   breed, which was right when a human had typed it and wrong now. */
-rows = pickBatch(rows, 'a', '250');
-if (rows[0].breed === 'IOI DxP HYBRID') {
-  pass('switching batch switches the breed with it');
-} else {
-  fail('changing the batch left the old breed behind: ' + JSON.stringify(rows[0]) +
-       '\n      The breed is a fact about the batch. A stale one is a wrong one.');
+  fail('expected one pick carrying its breed, got ' + JSON.stringify(rows[0].picks));
 }
 
-rows = pickBatch(rows, 'a', '250');   // press the same tile again
-if (rows[0].batch === '' && rows[0].breed === '') {
-  pass('unpicking the batch clears the breed it had filled');
+rows = togglePick(rows, 'a', '268');
+if (rows[0].picks.length === 2) pass('a second batch can be chosen on the same row');
+else fail('the row would not take a second batch: ' + JSON.stringify(rows[0].picks));
+
+rows = setQty(rows, 'a', '256', '2300');
+rows = setQty(rows, 'a', '268', '700');
+const items = expandRows(rows);
+if (items.length === 2) pass('two batches become TWO delivery order lines, not one');
+else fail('expected 2 lines, got ' + items.length + ': ' + JSON.stringify(items));
+
+const l256 = items.find((i) => i.batch === '256');
+const l268 = items.find((i) => i.batch === '268');
+if (l256 && l256.qty === 2300 && l268 && l268.qty === 700) {
+  pass('each line carries its OWN quantity — 256 got 2,300 and 268 got 700');
 } else {
-  fail('unpicking left something behind: ' + JSON.stringify(rows[0]));
+  fail('the quantities did not land per batch: ' + JSON.stringify(items));
+}
+if (l256.breed === 'IOI DxP HYBRID' && l268.breed === 'AA Hybrida 1S') {
+  pass('each line carries the breed of ITS batch');
+} else {
+  fail('a line carried the wrong breed: ' + JSON.stringify(items));
+}
+if (items.every((i) => !/[,;/|]/.test(i.batch))) {
+  pass('no line joins batches with a comma');
+} else {
+  fail('a line names more than one batch. The office report does\n' +
+       '      _mvBatchKey("256,268") → matches nothing → the whole sale vanishes.');
+}
+if (items.every((i) => i.plot === 'B1' && i.nursery === 'UNN 1')) {
+  pass('both lines keep the row plot and nursery');
+} else {
+  fail('the plot or nursery was lost on expansion: ' + JSON.stringify(items));
 }
 
-/* The case that would otherwise print a blank breed on a customer PDF. */
-rows = [{ key: 'a', plot: 'U8', batch: '', breed: '', qty: '' }];
-rows = pickBatch(rows, 'a', '999');
-if (rows[0].batch === '999' && rows[0].breed === '') {
-  pass('a batch with no breed on record selects, and invents nothing');
+/* Tapping again removes it. */
+rows = togglePick(rows, 'a', '256');
+if (rows[0].picks.length === 1 && rows[0].picks[0].batch === '268') {
+  pass('tapping a chosen batch again takes it off, and leaves the other alone');
 } else {
-  fail('an unknown batch should select with no breed, got ' + JSON.stringify(rows[0]));
+  fail('removing one batch did not behave: ' + JSON.stringify(rows[0].picks));
 }
-if (chipsShown(rows[0], 2)) {
-  pass('and THEN the breed chips appear, so the PDF is not printed breed-blank');
+
+/* Five slots on the record, so five LINES. The sixth is refused HERE,
+   not dropped at save time. */
+let many = [{ key: 'a', nursery: 'UNN 1', plot: 'B1', picks: [], batch: '', breed: '', qty: '' }];
+for (const b of ['256', '268', '252', '253', '254']) many = togglePick(many, 'a', b);
+const before = many[0].picks.length;
+many = togglePick(many, 'a', '257');
+if (before === 5 && many[0].picks.length === 5) {
+  pass('a sixth line is refused at the tap, not silently dropped at save');
 } else {
-  fail('a batch with no breed left no way to enter one — breed_N is on the customer PDF');
+  fail(`expected five picks and a refused sixth, got ${before} then ${many[0].picks.length}` +
+       '\n      A dropped line means signing a delivery order for more than it records.');
 }
-if (chipsShown({ key: 'b', plot: 'P01', batch: '', breed: '' }, 0)) {
-  pass('a plot with no batches at all (a PN plot) still offers the breed chips');
+
+/* A plot that offers no batches still produces a line from the row. */
+const plain = expandRows([{ key: 'b', nursery: 'PN', plot: 'P01', picks: [],
+                            batch: '', breed: 'AA Hybrida 1S', qty: '40' }]);
+if (plain.length === 1 && plain[0].qty === 40 && plain[0].breed === 'AA Hybrida 1S') {
+  pass('a plot with no batches still makes a line, with its hand-picked breed');
 } else {
-  fail('a plot with no batches left no way to enter a breed');
+  fail('the no-batch path broke: ' + JSON.stringify(plain));
 }
 
 /* ── 3. The PDF is untouched ─────────────────────────────────────────── */

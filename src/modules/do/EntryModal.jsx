@@ -6,7 +6,12 @@ import { callGemini, compressImage, DO_SCAN_PROMPT } from '../../lib/gemini.js';
 import { generateDONumber, offlineDONumber } from './data.js';
 import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
 
-const emptyRow = () => ({ key: Math.random().toString(36).slice(2), nursery: '', plot: '', batch: '', breed: '', qty: '', ai: false });
+/* picks is the batches chosen on this row, each with its OWN quantity:
+   [{ batch, breed, qty }]. One delivery order line per batch, because
+   that is the only shape the rest of the system can read -- see
+   expandRows below. batch/breed/qty on the row itself are still used for
+   a plot that offers no batches at all. */
+const emptyRow = () => ({ key: Math.random().toString(36).slice(2), nursery: '', plot: '', picks: [], batch: '', breed: '', qty: '', ai: false });
 
 // Add / scan a new Delivery Order for the given AL.
 // props: al, plots, breeds, photoBase64 (null for manual),
@@ -53,25 +58,40 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
      batch row simply does not appear and the form works as it did. */
   const batchesFor = (plot) => (plot && batchMap ? batchesIn(batchMap, plot) : []);
 
-  /* The breed the ledger has for the batch on a row, or '' when it has
-     none. One place, because the tile shows it, the fallback chips appear
-     on it, and the saved breed comes from it. */
-  const ledgerBreedOf = (r) =>
-    (r && r.batch && breedOf ? breedOf.get(batchKey(r.batch)) || '' : '');
+  /* The breed the ledger has for a batch, or '' when it has none. */
+  const ledgerBreed = (batch) =>
+    (batch && breedOf ? breedOf.get(batchKey(batch)) || '' : '');
 
-  /* Picking a batch SETS the breed, it no longer merely fills an empty one.
-     That rule existed to protect a breed somebody had pressed by hand, and
-     the hand chips are gone for a batch the ledger can answer -- the breed
-     is a fact about the batch, and two ways to say it is how the two come
-     to disagree. A batch the ledger has no breed for clears the breed and
-     the chips appear, so the one field that still needs a hand gets one. */
-  function pickBatch(rowKey, batch) {
-    setRows((prev) => prev.map((r) => {
-      if (r.key !== rowKey) return r;
-      const next = r.batch === batch ? '' : batch;
-      const known = next && breedOf ? (breedOf.get(batchKey(next)) || '') : '';
-      return { ...r, batch: next, breed: next ? known : '' };
-    }));
+  /* Tap a batch to add it to the row, tap it again to take it off. Each
+     one carries its own quantity, and its breed comes off the ledger when
+     it is added -- the breed is a fact about the batch, so there is one
+     place it can come from and no second way to say it.
+
+     Refused at five lines, because the record has five slots. Silently
+     dropping the sixth at save time would mean a Field Conductor signing
+     a delivery order for more than it records. */
+  function togglePick(rowKey, batch) {
+    setRows((rs) => {
+      const row = rs.find((r) => r.key === rowKey);
+      const on = row && (row.picks || []).some((p) => p.batch === batch);
+      if (!on && lineCount(rs) >= MAX_LINES) { toast(t('do.maxRows')); return rs; }
+      return rs.map((r) => {
+        if (r.key !== rowKey) return r;
+        const picks = r.picks || [];
+        return {
+          ...r,
+          picks: picks.some((p) => p.batch === batch)
+            ? picks.filter((p) => p.batch !== batch)
+            : [...picks, { batch, breed: ledgerBreed(batch), qty: '' }],
+        };
+      });
+    });
+  }
+  function updatePick(rowKey, batch, field, value) {
+    setRows((rs) => rs.map((r) => (r.key !== rowKey ? r : {
+      ...r,
+      picks: (r.picks || []).map((p) => (p.batch === batch ? { ...p, [field]: value } : p)),
+    })));
   }
 
   const breedOptions = useMemo(
@@ -87,7 +107,51 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
 
   const withCurrent = (list, val) => (val && !list.includes(val) ? [val, ...list] : list);
 
-  const totalQty = rows.reduce((s, r) => s + (parseInt(r.qty) || 0), 0);
+/* ── ONE DELIVERY ORDER LINE PER BATCH ───────────────────────────────
+   A row can name several batches, and each becomes its own line with its
+   own quantity. It cannot be one line naming several, and that is not a
+   layout choice -- it is what the readers can take.
+
+   The office movement report does
+
+       const bk = _mvBatchKey(dRec[`batch_${i}`]);
+       const batch = [...r.batches].find(x => _mvBatchKey(x) === bk);
+       if (!batch) continue;
+
+   so "256,268" matches no batch and the WHOLE SALE disappears from the
+   report. The phone reader, plotBatches.js, splits differently and would
+   take 256 alone and subtract the whole quantity from it. One column, two
+   wrong answers, neither of them visible. So the form carries the several
+   and the record keeps them apart.
+
+   It is also the only honest answer to "how many came off each", which a
+   single shared quantity cannot give. */
+function expandRows(rows) {
+  const out = [];
+  for (const r of rows) {
+    const nursery = (r.nursery || '').trim();
+    const plot = (r.plot || '').trim();
+    if (r.picks && r.picks.length) {
+      for (const p of r.picks) {
+        out.push({ nursery, plot, batch: (p.batch || '').trim(),
+                   breed: (p.breed || '').trim(), qty: parseInt(p.qty) || 0 });
+      }
+    } else {
+      out.push({ nursery, plot, batch: (r.batch || '').trim(),
+                 breed: (r.breed || '').trim(), qty: parseInt(r.qty) || 0 });
+    }
+  }
+  return out;
+}
+/* Five slots on the record — plot_1..plot_5 — so five LINES, not five
+   rows. A row naming three batches spends three of them. */
+const MAX_LINES = 5;
+const rowQty = (r) => (r.picks && r.picks.length
+  ? r.picks.reduce((s, p) => s + (parseInt(p.qty) || 0), 0)
+  : parseInt(r.qty) || 0);
+const lineCount = (rows) => rows.reduce((s, r) => s + Math.max(1, (r.picks || []).length), 0);
+
+  const totalQty = rows.reduce((s, r) => s + rowQty(r), 0);
   const balance = al?.balance_quantity ?? 0;
   const remain = balance - totalQty;
   const customerMatch = customer.trim().toLowerCase() === (al?.customer_name || '').toLowerCase();
@@ -111,7 +175,7 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
         if (cancelled) return;
         const items = (result.items || []).slice(0, 5);
         if (items.length) {
-          setRows(items.map((it) => ({ key: Math.random().toString(36).slice(2), nursery: it.nursery || '', plot: '', batch: '', breed: it.breed || '', qty: it.quantity || '', ai: true })));
+          setRows(items.map((it) => ({ key: Math.random().toString(36).slice(2), nursery: it.nursery || '', plot: '', picks: [], batch: '', breed: it.breed || '', qty: it.quantity || '', ai: true })));
         }
         if (result.date) setDate(result.date);
         if (result.customer_name) setCustomer(result.customer_name);
@@ -128,20 +192,24 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
       if (r.key !== key) return r;
       const updated = { ...r, [field]: value };
       if (field === 'nursery') updated.plot = '';
+      /* The batches belong to the plot. Moving the row to another plot
+         must take them with it, or a line goes out naming a batch that
+         never stood there. */
+      if (field === 'nursery' || field === 'plot') updated.picks = [];
       return updated;
     }));
   }
   function addRow() {
-    setRows((rs) => (rs.length >= 5 ? (toast(t('do.maxRows')), rs) : [...rs, emptyRow()]));
+    setRows((rs) => (lineCount(rs) >= MAX_LINES ? (toast(t('do.maxRows')), rs) : [...rs, emptyRow()]));
   }
   function removeRow(key) {
     setRows((rs) => (rs.length <= 1 ? rs : rs.filter((r) => r.key !== key)));
   }
 
   async function save() {
-    const items = rows
-      .map((r) => ({ nursery: r.nursery.trim(), plot: r.plot.trim(), batch: (r.batch || '').trim(), breed: r.breed.trim(), qty: parseInt(r.qty) || 0 }))
+    const items = expandRows(rows)
       .filter((it) => it.nursery || it.plot || it.batch || it.breed || it.qty > 0);
+    if (items.length > MAX_LINES) return alert(t('do.maxRows'));
     if (!date) return alert(t('do.selectDate'));
     if (!items.length) return alert(t('do.addItem'));
     if (totalQty <= 0) return alert(t('do.qtyGtZero'));
@@ -308,22 +376,19 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
                             ))}
                           </CfSelect>
                           {/* Batch — what is standing in that plot, per the
-                              Nursery Movement Report. Batch number, the
-                              balance, and the breed, on one tile: those three
-                              are one fact about one block of ground, and a
-                              Field Conductor reads them together. The balance
-                              is there so a block that is nearly empty says so
-                              before anybody loads a lorry. */}
+                              Nursery Movement Report. Number, balance and
+                              breed on one tile: three facts about one block
+                              of ground, read together. Tap more than one. */}
                           {batchesFor(r.plot).length > 0 && (
                             <div className="flex flex-wrap gap-1.5">
                               {batchesFor(r.plot).map((b) => {
-                                const bBreed = breedOf ? (breedOf.get(batchKey(b.batch)) || '') : '';
-                                const on = r.batch === b.batch;
+                                const bBreed = ledgerBreed(b.batch);
+                                const on = (r.picks || []).some((p) => p.batch === b.batch);
                                 return (
                                   <button
                                     key={b.batch}
                                     type="button"
-                                    onClick={() => pickBatch(r.key, b.batch)}
+                                    onClick={() => togglePick(r.key, b.batch)}
                                     className={`px-3 py-2 rounded-lg border text-left cursor-pointer transition-colors ${
                                       on
                                         ? 'bg-amber-600 text-white border-amber-600'
@@ -334,9 +399,8 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
                                     <div className={`text-[11px] font-bold tabular-nums leading-tight ${on ? 'opacity-80' : 'text-slate-500'}`}>
                                       {Number(b.qty || 0).toLocaleString()}
                                     </div>
-                                    {/* The breed of that batch, off the ledger.
-                                        A batch nobody has recorded one for
-                                        shows no line rather than an empty one
+                                    {/* A batch nobody has recorded a breed for
+                                        shows no line, rather than an empty one
                                         pretending to be an answer. */}
                                     {bBreed && (
                                       <div className={`text-[10px] font-bold leading-tight ${on ? 'opacity-80' : 'text-slate-400'}`}>
@@ -348,45 +412,65 @@ export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photo
                               })}
                             </div>
                           )}
-                          {/* Breed — only when the batch cannot answer it.
-                              The chips used to be here always and are gone:
-                              the breed is a fact about the batch, and asking
-                              for it twice is how the two come to disagree.
 
-                              But breed_N is on the CUSTOMER PDF. A batch with
-                              no breed on record, or a plot with no batches at
-                              all (a PN plot, or a balance read that failed),
-                              would otherwise mean a delivery order printed
-                              with the breed blank and no way to fill it. So
-                              the chips come back for exactly those cases. */}
-                          {!ledgerBreedOf(r) && (r.batch || batchesFor(r.plot).length === 0) && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {withCurrent(breedOptions, r.breed).map((b) => (
-                                <button
-                                  key={b}
-                                  type="button"
-                                  onClick={() => updateRow(r.key, 'breed', r.breed === b ? '' : b)}
-                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer transition-colors ${
-                                    r.breed === b
-                                      ? 'bg-blue-600 text-white border-blue-600'
-                                      : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
-                                  }`}
-                                >
-                                  {b}
-                                </button>
-                              ))}
+                          {/* One quantity per batch chosen. A single figure
+                              shared across several batches cannot say how
+                              many came off each, and that is the one thing
+                              the movement report needs from a delivery
+                              order. The breed is shown here, not asked for:
+                              it is the ledger answer for that batch. */}
+                          {(r.picks || []).map((p) => (
+                            <div key={p.batch} className="flex items-center gap-2 pl-1">
+                              <div className="min-w-[92px]">
+                                <div className="text-[12px] font-black text-slate-700 leading-tight">{p.batch}</div>
+                                {p.breed
+                                  ? <div className="text-[10px] font-bold text-slate-400 leading-tight">{p.breed}</div>
+                                  : <div className="text-[10px] font-bold text-amber-600 leading-tight">{t('do.noBreedOnBatch')}</div>}
+                              </div>
+                              <input
+                                type="number"
+                                min="0"
+                                value={p.qty}
+                                onChange={(e) => updatePick(r.key, p.batch, 'qty', e.target.value)}
+                                placeholder="0"
+                                className="search-input text-sm w-28"
+                              />
                             </div>
+                          ))}
+
+                          {/* Breed and quantity by hand, for a plot the
+                              batches cannot answer for: a PN plot, or a
+                              balance read that failed. breed_N is on the
+                              CUSTOMER PDF, so leaving no way to fill it
+                              would print a delivery order with it blank. */}
+                          {batchesFor(r.plot).length === 0 && (
+                            <>
+                              <div className="flex flex-wrap gap-1.5">
+                                {withCurrent(breedOptions, r.breed).map((b) => (
+                                  <button
+                                    key={b}
+                                    type="button"
+                                    onClick={() => updateRow(r.key, 'breed', r.breed === b ? '' : b)}
+                                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer transition-colors ${
+                                      r.breed === b
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'
+                                    }`}
+                                  >
+                                    {b}
+                                  </button>
+                                ))}
+                              </div>
+                              <input
+                                type="number"
+                                min="0"
+                                value={r.qty}
+                                onChange={(e) => updateRow(r.key, 'qty', e.target.value)}
+                                placeholder="0"
+                                className="search-input text-sm w-28"
+                              />
+                            </>
                           )}
-                          {/* Qty */}
-                          <input
-                            type="number"
-                            min="0"
-                            value={r.qty}
-                            onChange={(e) => updateRow(r.key, 'qty', e.target.value)}
-                            placeholder="0"
-                            className="search-input text-sm w-28"
-                            style={{ padding: '8px 12px' }}
-                          />
                         </div>
                       </div>
                     );
