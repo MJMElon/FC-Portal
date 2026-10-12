@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { printDO } from '../../lib/pdf.js';
 import EntryModal from '../do/EntryModal.jsx';
-import { loadALByNumber, loadDropdownData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
+import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
 import { useWorkerTick } from '../do/useWorkerTick.js';
 import WorkerTickModal from '../do/WorkerTickModal.jsx';
 import {
@@ -47,6 +47,14 @@ export default function ScanModule() {
   const [doEntry, setDoEntry] = useState(null); // { al, suggestQty, consentId }
   const [doPlots, setDoPlots] = useState([]);
   const [doBreeds, setDoBreeds] = useState([]);
+  /* The batches standing in each plot. EntryModal is shared with the DO
+     module, and it only draws the batch tiles when it is HANDED this --
+     without it batchesFor() answers [] and the row silently has no
+     batches, which is exactly how the scan form came to look like the
+     old one while the DO module looked new. The form is shared; the data
+     feeding it is loaded per module, so a new feed has to be added in
+     BOTH places. */
+  const [doBatchMap, setDoBatchMap] = useState(() => new Map());
   const [issuing, setIssuing] = useState(false);
   const [printPrompt, setPrintPrompt] = useState(null);
   const [activeDOs, setActiveDOs] = useState([]);
@@ -114,6 +122,10 @@ export default function ScanModule() {
         })
         .catch(() => {});
     }
+    /* Best effort beside the dropdowns, the same way DoModule treats it:
+       the form still works without it, the batch row just does not
+       appear. */
+    loadBatchData().then(({ batchMap }) => setDoBatchMap(batchMap), () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -407,6 +419,12 @@ export default function ScanModule() {
     }
     setDoPlots(plots);
     setDoBreeds(breeds);
+    /* The prewarm above runs once at mount and is skipped when the phone
+       was offline then. Asked again here so opening the form after the
+       line comes back still offers the batches. */
+    if (navigator.onLine) {
+      loadBatchData().then(({ batchMap }) => setDoBatchMap(batchMap), () => {});
+    }
     setIssuing(false);
     // Use the higher of localStorage-tracked qty and server-derived qty from activeDOs.
     const serverIssuedQty = activeDOs.reduce((sum, d) => sum + (d.total_qty || 0), 0);
@@ -521,6 +539,7 @@ export default function ScanModule() {
           al={doEntry.al}
           plots={doPlots}
           breeds={doBreeds}
+          batchMap={doBatchMap}
           photoBase64={null}
           initialQty={doEntry.suggestQty}
           toast={(m) => flash(m, 'warn')}
