@@ -1,6 +1,8 @@
 import { supabase } from '../../lib/supabase.js';
 import { doPdfBlob } from '../../lib/pdf.js';
 import { nurseryKey } from '../../lib/access.js';
+import { loadPlotBatches } from '../maintenance/data.js';
+import { batchKey, batchesIn, plotKey } from '../maintenance/plotBatches.js';
 
 // ── Active Approval Letters (AL) ──────────────────────────────
 export async function loadActiveALs() {
@@ -23,6 +25,41 @@ export async function loadConsentALSet() {
 }
 
 // Nursery / breed autocomplete data.
+/**
+ * The batches standing in each plot, and the breed of each, for the DO form.
+ *
+ * THE SAME SOURCE THE REST OF THE SYSTEM USES. loadPlotBatches is the
+ * maintenance module reader for shared_plot_batch_balance, which is the
+ * Nursery Movement Report arithmetic in the database — transplanted in plus
+ * transfer in, less sold, 3rd culled, transfer out, plus approved stock
+ * adjustment. A batch that works out to zero has been culled, sold or moved
+ * on and is not offered. Reusing that reader rather than writing a second
+ * one is the point: two readers of the same report drift, and the one that
+ * drifts is always the newer one nobody is watching.
+ *
+ * Breed is not in that view, so it comes from operation_batches, one row per
+ * batch. It FAILS SOFT to an empty map: not knowing a breed must not stop a
+ * Field Conductor picking a batch, and the breed chips are still there to
+ * press by hand.
+ */
+export async function loadBatchData() {
+  const [map, breedRows] = await Promise.all([
+    loadPlotBatches().catch((e) => {
+      console.warn('[do] plot batches unavailable:', (e && e.message) || e);
+      return new Map();
+    }),
+    supabase.from('operation_batches').select('name, breed_name').then(
+      (r) => (r.error ? [] : r.data || []),
+      () => []
+    ),
+  ]);
+  const breedOf = new Map();
+  (breedRows || []).forEach((b) => {
+    if (b && b.name) breedOf.set(batchKey(b.name), b.breed_name || '');
+  });
+  return { batchMap: map, breedOf };
+}
+
 export async function loadDropdownData() {
   const [{ data: plots }, { data: breeds }] = await Promise.all([
     supabase.from('shared_plots').select('plot_name, nursery_name'),

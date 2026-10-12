@@ -12,6 +12,7 @@ import {
   loadActiveALs,
   loadConsentALSet,
   loadDropdownData,
+  loadBatchData,
   loadDOWorkers,
   persistDO,
   flushDOQueue,
@@ -29,6 +30,13 @@ export default function DoModule() {
   const [consentSet, setConsentSet] = useState(() => new Set(cacheGet('do_consentAls')?.value || []));
   const [plots, setPlots] = useState(() => cacheGet('do_plots')?.value || []);
   const [breeds, setBreeds] = useState(() => cacheGet('do_breeds')?.value || []);
+  /* Which batches stand in each plot, and the breed of each. Not cached in
+     localStorage with the two above: the map is every plot in the nursery
+     and its own reader already keeps an offline copy of exactly this, so a
+     second copy here would be the same rows twice and a second thing to go
+     stale. A plot with no batches simply offers none. */
+  const [batchMap, setBatchMap] = useState(() => new Map());
+  const [breedOf, setBreedOf] = useState(() => new Map());
   const [workers, setWorkers] = useState(() => cacheGet('do_workers')?.value || []);
   const wt = useWorkerTick(workers);
   const plotMap = {};
@@ -92,6 +100,12 @@ export default function DoModule() {
     const res = await flushDOQueue();
     if (res.synced > 0) flash(t('do.doSavedToast', { do: res.synced + '×' }));
     await reload();
+    /* Best effort beside the dropdowns: the form works without it, the
+       batch row just does not appear. */
+    loadBatchData().then(({ batchMap, breedOf }) => {
+      setBatchMap(batchMap);
+      setBreedOf(breedOf);
+    }, () => {});
     loadDropdownData()
       .then(({ plots, breeds }) => {
         setPlots(plots);
@@ -323,6 +337,8 @@ export default function DoModule() {
           al={entry.al}
           plots={plots}
           breeds={breeds}
+          batchMap={batchMap}
+          breedOf={breedOf}
           photoBase64={entry.photoBase64}
           toast={flash}
           onSubmit={submitDO}

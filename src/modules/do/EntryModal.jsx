@@ -4,13 +4,14 @@ import SignaturePad from './SignaturePad.jsx';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { callGemini, compressImage, DO_SCAN_PROMPT } from '../../lib/gemini.js';
 import { generateDONumber, offlineDONumber } from './data.js';
+import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
 
-const emptyRow = () => ({ key: Math.random().toString(36).slice(2), nursery: '', plot: '', breed: '', qty: '', ai: false });
+const emptyRow = () => ({ key: Math.random().toString(36).slice(2), nursery: '', plot: '', batch: '', breed: '', qty: '', ai: false });
 
 // Add / scan a new Delivery Order for the given AL.
 // props: al, plots, breeds, photoBase64 (null for manual),
 //        onSaved(payload, sigDataUrl, queued, photoBase64, savedRow), onClose, toast
-export default function EntryModal({ al, plots, breeds, photoBase64, initialQty, onSubmit, onSaved, onClose, toast }) {
+export default function EntryModal({ al, plots, breeds, batchMap, breedOf, photoBase64, initialQty, onSubmit, onSaved, onClose, toast }) {
   const { t } = useLang();
   const [doNumber, setDoNumber] = useState('…');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -46,6 +47,25 @@ export default function EntryModal({ al, plots, breeds, photoBase64, initialQty,
     () => [...new Set((plots || []).map((p) => p.plot_name).filter(Boolean))].sort(),
     [plots]
   );
+  /* Which batches stand in the row plot, straight off the Nursery Movement
+     Report. Empty for a plot with nothing standing, a PN plot (no main
+     nursery movement), or a map that could not be read — in all three the
+     batch row simply does not appear and the form works as it did. */
+  const batchesFor = (plot) => (plot && batchMap ? batchesIn(batchMap, plot) : []);
+
+  /* Picking a batch fills the breed, but only when the breed is EMPTY.
+     The house rule: a lookup fills an empty cell and never writes over a
+     full one. A Field Conductor who pressed a breed chip has answered the
+     question, and a batch chosen afterwards must not quietly change it. */
+  function pickBatch(rowKey, batch, current) {
+    setRows((prev) => prev.map((r) => {
+      if (r.key !== rowKey) return r;
+      const next = r.batch === batch ? '' : batch;
+      const known = next && breedOf ? (breedOf.get(batchKey(next)) || '') : '';
+      return { ...r, batch: next, breed: r.breed || known };
+    }));
+  }
+
   const breedOptions = useMemo(
     () => [...new Set((breeds || []).map((b) => b.name).filter(Boolean))].sort(),
     [breeds]
@@ -83,7 +103,7 @@ export default function EntryModal({ al, plots, breeds, photoBase64, initialQty,
         if (cancelled) return;
         const items = (result.items || []).slice(0, 5);
         if (items.length) {
-          setRows(items.map((it) => ({ key: Math.random().toString(36).slice(2), nursery: it.nursery || '', plot: '', breed: it.breed || '', qty: it.quantity || '', ai: true })));
+          setRows(items.map((it) => ({ key: Math.random().toString(36).slice(2), nursery: it.nursery || '', plot: '', batch: '', breed: it.breed || '', qty: it.quantity || '', ai: true })));
         }
         if (result.date) setDate(result.date);
         if (result.customer_name) setCustomer(result.customer_name);
@@ -112,8 +132,8 @@ export default function EntryModal({ al, plots, breeds, photoBase64, initialQty,
 
   async function save() {
     const items = rows
-      .map((r) => ({ nursery: r.nursery.trim(), plot: r.plot.trim(), breed: r.breed.trim(), qty: parseInt(r.qty) || 0 }))
-      .filter((it) => it.nursery || it.plot || it.breed || it.qty > 0);
+      .map((r) => ({ nursery: r.nursery.trim(), plot: r.plot.trim(), batch: (r.batch || '').trim(), breed: r.breed.trim(), qty: parseInt(r.qty) || 0 }))
+      .filter((it) => it.nursery || it.plot || it.batch || it.breed || it.qty > 0);
     if (!date) return alert(t('do.selectDate'));
     if (!items.length) return alert(t('do.addItem'));
     if (totalQty <= 0) return alert(t('do.qtyGtZero'));
@@ -135,6 +155,12 @@ export default function EntryModal({ al, plots, breeds, photoBase64, initialQty,
     items.slice(0, 5).forEach((it, i) => {
       const n = i + 1;
       payload[`plot_${n}`] = it.plot || it.nursery || null;
+      /* Saved so the DO says which block the seedlings came off, which is
+         what the culling calculator matches its collected figure on. The PDF
+         is untouched: lib/pdf.js names plot_N, breed_N and qty_N one by one
+         and never walks the columns, so a new one cannot appear on a
+         customer copy. */
+      payload[`batch_${n}`] = it.batch || null;
       payload[`breed_${n}`] = it.breed || null;
       payload[`qty_${n}`] = it.qty || null;
     });
@@ -273,6 +299,44 @@ export default function EntryModal({ al, plots, breeds, photoBase64, initialQty,
                               <option key={p} value={p}>{p}</option>
                             ))}
                           </CfSelect>
+                          {/* Batch — what is standing in that plot, per the
+                              Nursery Movement Report, with the balance beside
+                              it so a block that is nearly empty says so
+                              before anybody loads a lorry. Only shown once a
+                              plot is chosen and only when that plot has
+                              batches: an empty row of nothing is noise on a
+                              form this long. */}
+                          {batchesFor(r.plot).length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 items-center">
+                              {batchesFor(r.plot).map((b) => (
+                                <button
+                                  key={b.batch}
+                                  type="button"
+                                  onClick={() => pickBatch(r.key, b.batch, r.batch)}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer transition-colors ${
+                                    r.batch === b.batch
+                                      ? 'bg-amber-600 text-white border-amber-600'
+                                      : 'bg-white text-slate-600 border-slate-300 hover:border-amber-400'
+                                  }`}
+                                >
+                                  {b.batch}
+                                  <span className="font-bold opacity-70 ml-1 tabular-nums">
+                                    {Number(b.qty || 0).toLocaleString()}
+                                  </span>
+                                </button>
+                              ))}
+                              {/* The breed of the chosen batch, shown whether
+                                  or not it filled the chip below — the chip
+                                  may already have been pressed by hand, and
+                                  this is still what the ledger says that
+                                  batch is. */}
+                              {r.batch && breedOf && breedOf.get(batchKey(r.batch)) && (
+                                <span className="text-[11px] font-bold text-slate-500">
+                                  {breedOf.get(batchKey(r.batch))}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {/* Breed — button toggle group */}
                           <div className="flex flex-wrap gap-1.5">
                             {withCurrent(breedOptions, r.breed).map((b) => (
