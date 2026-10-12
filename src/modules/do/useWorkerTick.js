@@ -20,6 +20,43 @@ function groupWorkersByNursery(allWorkers) {
   return out;
 }
 
+/* WHERE THE SEEDLINGS WERE IS NOT WHO CARRIED THEM, and the three decisions
+   that follow from it are pure, so they live out here where a test can drive
+   the real ones instead of a restatement of them.
+   `tests/another_nursery_can_load_the_do.cjs` lifts all three.
+
+   SAME RULE IN the Mobile repository's src/pages/DoSigning.jsx, which has
+   its own copy of this popup for the admin portal. Change one, change the
+   other — the test here is the one that holds both. */
+
+/* Which sections the popup opens with. `own` is what the DO's own plots say
+   and is never closed; `extra` is a nursery somebody added BY HAND on an
+   earlier visit, and it has to come back open — otherwise the answer they
+   gave is on the record and nowhere on the screen, and the next save, built
+   from what is on screen, would quietly drop it. */
+export function sectionsForDO(doRecord, plotMap) {
+  const own = nurseriesOfDO(doRecord || {}, plotMap || {});
+  const saved = (doRecord && doRecord.worked_by_by_nursery) || {};
+  const extra = Object.keys(saved).filter((k) => !own.includes(k) && (saved[k] || []).length);
+  return { own, extra };
+}
+
+/* What is offered underneath: every nursery with workers on the roster that
+   is not already a section. Sorted, so the row does not reshuffle itself
+   between two DOs. */
+export function otherNurseries(byNursery, open) {
+  return Object.keys(byNursery || {}).filter((k) => (open || []).indexOf(k) < 0).sort();
+}
+
+/* AN EMPTY NURSERY IS NOT AN ANSWER. A section opened by hand and then left
+   alone would otherwise write `{ "UNN1": [] }`, which reads on every other
+   screen as a nursery that was involved. */
+export function cleanPicks(open, picked) {
+  const out = {};
+  (open || []).forEach((k) => { if (((picked || {})[k] || []).length) out[k] = picked[k]; });
+  return out;
+}
+
 /* "Who Loaded This DO" — shared between the DO module and the scan module,
    both of which save a DO through the same persistDO() and both of which
    need the same popup after. One hook, one modal (WorkerTickModal.jsx),
@@ -30,7 +67,15 @@ export function useWorkerTick(workers) {
 
   const [wtOpen, setWtOpen] = useState(false);
   const [wtDO, setWtDO] = useState(null);
-  const [wtNurseries, setWtNurseries] = useState([]);
+  /* WHERE THE SEEDLINGS WERE is not WHO CARRIED THEM. The DO's own plots
+     say which nursery they came out of, and that nursery is always open
+     because it is the answer nearly every time. It is not the only answer:
+     seedlings standing in BNN, on a DO issued against BNN, are regularly
+     loaded by a UNN 1 gang. So the DO's nurseries are the ones OPENED and
+     every other nursery with workers on the roster can be opened by hand —
+     the two lists are kept apart because only the first can be derived. */
+  const [wtOwn, setWtOwn] = useState([]);
+  const [wtExtra, setWtExtra] = useState([]);
   const [wtPicked, setWtPicked] = useState({});
   const [wtSaving, setWtSaving] = useState(false);
   const thenRef = useRef(null);
@@ -38,17 +83,38 @@ export function useWorkerTick(workers) {
   const wtLocked = !!(wtDO && wtDO.worked_by_locked_at) && !isAdmin;
   const byNursery = groupWorkersByNursery(workers);
 
+  const wtNurseries = wtOwn.concat(wtExtra.filter((k) => !wtOwn.includes(k)));
+  // Offered underneath, never above: a nursery nobody has opened is a
+  // prompt, not a section.
+  const wtOtherNurseries = otherNurseries(byNursery, wtNurseries);
+
   // Opened right after a fresh online save AND from a DO row's own Workers
   // button once it has been issued, so a skipped step is never a dead end.
   function openWorkerTick(doRecord, plotMap, after = null) {
-    const keys = nurseriesOfDO(doRecord, plotMap || {});
+    const { own, extra } = sectionsForDO(doRecord, plotMap);
+    const saved = doRecord.worked_by_by_nursery || {};
     const seeded = {};
-    keys.forEach((k) => { seeded[k] = (doRecord.worked_by_by_nursery || {})[k] || []; });
+    own.concat(extra).forEach((k) => { seeded[k] = saved[k] || []; });
     setWtDO(doRecord);
-    setWtNurseries(keys);
+    setWtOwn(own);
+    setWtExtra(extra);
     setWtPicked(seeded);
     thenRef.current = after;
     setWtOpen(true);
+  }
+
+  function addNursery(key) {
+    if (wtLocked || !key || wtNurseries.includes(key)) return;
+    setWtExtra((prev) => prev.concat([key]));
+    setWtPicked((prev) => (prev[key] ? prev : { ...prev, [key]: [] }));
+  }
+
+  // Only a hand-opened one can be closed again, and closing it drops its
+  // ticks — the DO's own nursery is not a choice anybody made.
+  function removeNursery(key) {
+    if (wtLocked || wtOwn.includes(key)) return;
+    setWtExtra((prev) => prev.filter((k) => k !== key));
+    setWtPicked((prev) => { const next = { ...prev }; delete next[key]; return next; });
   }
 
   function closeWorkerTick() {
@@ -78,7 +144,7 @@ export function useWorkerTick(workers) {
     if (!wtDO || !wtDO.id || wtSaving) return;
     setWtSaving(true);
     try {
-      await saveDOWorkers(wtDO.id, wtPicked, staffName || null);
+      await saveDOWorkers(wtDO.id, cleanPicks(wtNurseries, wtPicked), staffName || null);
       closeWorkerTick();
     } finally {
       setWtSaving(false);
@@ -86,7 +152,8 @@ export function useWorkerTick(workers) {
   }
 
   return {
-    wtOpen, wtDO, wtNurseries, wtPicked, wtSaving, wtLocked, isAdmin, byNursery,
+    wtOpen, wtDO, wtNurseries, wtOwn, wtOtherNurseries, wtPicked, wtSaving, wtLocked, isAdmin, byNursery,
     openWorkerTick, closeWorkerTick, skipWorkerTick, toggleWorkerPick, saveWorkerTick,
+    addNursery, removeNursery,
   };
 }
