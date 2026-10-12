@@ -64,9 +64,15 @@ const en = {
      is keeping the plot on this screen -- it does not delete anything, and
      the wording says so, because "delete" on a plot would read as something
      far bigger than it is. */
-  'cull.removeTitle':   'Close the collecting status on this plot',
-  'cull.removeAria':    'Close the collecting status on {plot}',
-  'cull.removeAsk':     'Take {plot} off this list?\n\nIts collecting status is closed with today date. The plot and its history are kept, and PALMS can put it back at Pengambilan whenever collecting starts again.',
+  'cull.removeTitle':   'Close the PALMS collecting status on this plot',
+  'cull.removeAria':    'Close the PALMS collecting status on {plot}',
+  /* It says CHANGES THE PALMS STATUS, in those words, at the top. The first
+     wording led with "take it off this list" and mentioned PALMS only as
+     the thing that could undo it, which read as though the board were not
+     touched. It is: this closes the same row PALMS closes when a Field
+     Conductor unticks an activity, and the board reads that row. Somebody
+     about to press OK has to know that before they press it, not after. */
+  'cull.removeAsk':     'Take {plot} off this list?\n\nTHIS CHANGES THE PALMS STATUS. The collecting status on {plot} is closed with today date, exactly as if it had been unticked in PALMS, and the board will stop showing it. Any other activity running on the plot is left alone.\n\nNothing is deleted: the collecting period stays in the history, and PALMS puts the plot back here whenever collecting starts again.',
   'cull.removed':       '{plot} taken off the list',
   'cull.removeNothing': '{plot} has no collecting status open — it will go on the next refresh',
   'cull.removeOffline': 'This needs a line — the change has to reach the office, not sit on the phone',
