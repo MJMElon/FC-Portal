@@ -122,8 +122,31 @@ async function loadDeliveryOrders() {
   return res.data || [];
 }
 
+/* ── THE STATUSES THAT PUT A PLOT ON THIS SCREEN ──────────────────────
+   Collecting does not happen at one status. Saringan Anak Bibit is the
+   screening pass, and seedlings go out of a plot during it just as they do
+   at Pengambilan, so a plot at either is a plot a Field Conductor may be
+   standing in with stock leaving it. Gating on Pengambilan alone hid the
+   screening plots from the calculator entirely.
+
+   Named here, once, rather than written into the query: adding the next
+   one is a line in this list, and the fallback below only fires when NONE
+   of them is in the office stage list at all.
+
+   Compared on letters and digits, upper-cased -- the same rule
+   nurseryKey/plotKey use everywhere else in this system. The office types
+   these names by hand, so "Saringan Anak Bibit", "saringan anak bibit" and
+   a stray double space are the same stage. It cannot merge two different
+   stages: two names differing by a letter or digit give different keys. */
+const stageKey = (s) => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+const CULLING_STAGES = new Set([
+  stageKey('Pengambilan'),
+  stageKey('Saringan Anak Bibit'),
+]);
+
 /**
- * Which plots PALMS says are at Pengambilan, right now.
+ * Which plots PALMS says are at Pengambilan or Saringan Anak Bibit, right
+ * now.
  *
  * Read for the DIAGNOSIS, not for the list. The status answers a question
  * about a plot — is the field collecting from it — and the calculator's
@@ -143,13 +166,14 @@ async function loadDeliveryOrders() {
  * work from the Field Conductor standing in front of it.
  *
  * Matched by NAME rather than by "the last stage in the list", because the
- * list is the office's to extend: a nursery that adds a stage after
- * Pengambilan (Up-keep, say) would otherwise silently move the gate onto it.
- * Falls back to the last stage only when nothing is named Pengambilan at all.
+ * list is the office's to extend: a nursery that adds a stage after the last
+ * collecting one (Up-keep, say) would otherwise silently move the gate onto
+ * it. Falls back to the last stage only when NONE of the names below is in
+ * the list at all.
  *
  * A split plot logs against "B2#A". The plot is what the delivery orders and
- * the batch report name, so an area at Pengambilan puts its PLOT on the
- * screen — the figures are per batch either way.
+ * the batch report name, so an area at one of these statuses puts its PLOT
+ * on the screen — the figures are per batch either way.
  */
 export async function pengambilanPlots() {
   const [logs, stages] = await Promise.all([
@@ -171,12 +195,17 @@ export async function pengambilanPlots() {
     return null;
   }
   const list = stages.data;
-  const hit = list.find((x) => String(x.name).trim().toLowerCase() === 'pengambilan')
-           || list[list.length - 1];
-  const want = hit.sort_order;
+  /* Every stage whose name is one of CULLING_STAGES, not just the first
+     one found. A plot is offered when it sits at ANY of them. */
+  const want = new Set(
+    list.filter((x) => CULLING_STAGES.has(stageKey(x.name))).map((x) => x.sort_order)
+  );
+  /* Nothing recognised at all — the office has renamed the lot. Fall back
+     to the last stage, which is what this did when it knew one name. */
+  if (!want.size) want.add(list[list.length - 1].sort_order);
   const out = new Set();
   (logs.data || []).forEach((r) => {
-    if (r.act_n !== want) return;
+    if (!want.has(r.act_n)) return;
     out.add(plotKey(String(r.plot_name || '').split('#')[0]));
   });
   return out;
