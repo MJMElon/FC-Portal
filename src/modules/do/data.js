@@ -1,5 +1,6 @@
 import { supabase } from '../../lib/supabase.js';
 import { doPdfBlob } from '../../lib/pdf.js';
+import { nurseryKey } from '../../lib/access.js';
 
 // ── Active Approval Letters (AL) ──────────────────────────────
 export async function loadActiveALs() {
@@ -112,18 +113,26 @@ export async function uploadDOPhoto(base64, alNumber, doNumber) {
   }
 }
 
-// Insert a DO record and deduct the AL balance. Returns the new balance (or null
-// when there is no linked AL row to deduct from). Same table the mobile DO
-// module writes to, so both apps share one database.
+// Insert a DO record and deduct the AL balance. Returns { row, balance } — row
+// is the inserted record (with its id, needed to open the Who Loaded This DO
+// step against it) and balance is the new AL balance (or null when there is
+// no linked AL row to deduct from). Same table the mobile DO module writes
+// to, so both apps share one database.
+//
+// insert(...).select().single() rather than a plain insert(): the worker-tick
+// step needs the row's id right after save, and a second query for it by
+// do_number is a race a request this close behind the write is not
+// guaranteed to win — the Mobile app hit exactly this and the fix there was
+// the same one applied here, returning the row the insert already has.
 export async function saveDORecord(payload, al) {
-  const { error } = await supabase.from('shared_do_records').insert([payload]);
+  const { data: row, error } = await supabase.from('shared_do_records').insert([payload]).select().single();
   if (error) throw error;
   if (al && al.id != null) {
     const newBalance = (al.balance_quantity ?? 0) - (payload.total_qty || 0);
     await supabase.from('shared_al_orders').update({ balance_quantity: newBalance }).eq('id', al.id);
-    return newBalance;
+    return { row, balance: newBalance };
   }
-  return null;
+  return { row, balance: null };
 }
 
 // Look up an approval-letter order by its AL number (for the scan module's
@@ -170,21 +179,25 @@ export async function attachDOToOrder({ payload, al, staff, sigDataUrl, photoBas
 
 // Persist a DO: online insert (+ photo upload + balance deduct + customer-order
 // attachment) or, on no-network / failure, queue it for the next sync. Shared
-// by the DO module and the scan module's Issue DO popup. Returns { queued, payload }.
+// by the DO module and the scan module's Issue DO popup. Returns
+// { queued, payload, savedRow } — savedRow is the inserted shared_do_records
+// row (with its id) on a fresh online save, or null when queued: a queued DO
+// has no server row yet to open the Who Loaded This DO step against, same as
+// the Mobile app's equivalent flow.
 export async function persistDO({ payload, photoBase64, al, sigDataUrl, staff }) {
   if (navigator.onLine) {
     try {
       const finalPayload = { ...payload };
       if (photoBase64) finalPayload.image_url = await uploadDOPhoto(photoBase64, al.al_number, payload.do_number);
-      await saveDORecord(finalPayload, al);
+      const { row } = await saveDORecord(finalPayload, al);
       await attachDOToOrder({ payload: finalPayload, al, staff, sigDataUrl, photoBase64 });
-      return { queued: false, payload: finalPayload };
+      return { queued: false, payload: finalPayload, savedRow: row || null };
     } catch (e) {
       /* fall through to offline queue */
     }
   }
   queueDO({ payload, photoBase64, sigDataUrl, staff });
-  return { queued: true, payload };
+  return { queued: true, payload, savedRow: null };
 }
 
 // ── Offline support ──────────────────────────────────────────────────
@@ -265,6 +278,58 @@ export async function flushDOQueue() {
   }
   writeDOQueue(remaining);
   return { synced, remaining: remaining.length };
+}
+
+// ── Who loaded this DO ──────────────────────────────────────────────────
+// The distinct nurseries a DO's items actually touch, resolved through
+// plotMap (plot_name -> nursery_name) the same way itemsFromRecord already
+// labels each item's nursery. nurseryKey (lib/access.js) is the same
+// letters-and-digits normalisation every other nursery comparison in this
+// system uses, so a DO's plot spelling lines up with mjmnpayroll_workers'
+// own nursery spelling without trusting either side to be typed the same.
+export function nurseriesOfDO(d, plotMap) {
+  const keys = [];
+  for (let i = 1; i <= 5; i++) {
+    const plot = d[`plot_${i}`];
+    if (!plot) continue;
+    const key = nurseryKey(plotMap[plot] || plot);
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+// Active workers for the "Who Loaded This DO" tick list. Same table, same
+// columns, same active-only filter as the maintenance module's own
+// loadWorkers() (mjmnpayroll_workers — the roster the 555 Worker Portal
+// signs people in against) but written as its own small query rather than
+// importing the maintenance data layer, which pulls in offline/batch/
+// schedule machinery the DO and Scan modules otherwise never touch — that
+// coupling alone used to add several hundred KB to both of their bundles.
+export async function loadDOWorkers() {
+  const { data, error } = await supabase
+    .from('mjmnpayroll_workers')
+    .select('id, worker_no, full_name, nursery, section, role, job_title, maint_general, active')
+    .eq('active', true)
+    .order('full_name');
+  if (error) throw error;
+  return data || [];
+}
+
+// Writes who loaded a DO, grouped by nursery, and locks it — only an admin
+// (checked by the caller) may call this again on an already-locked DO.
+// Skipping the step writes nothing at all, same as leaving a cell blank: a
+// DO with no worked_by_by_nursery and no lock reads identically to one
+// nobody has looked at yet.
+export async function saveDOWorkers(doId, workedByByNursery, lockedBy) {
+  const { error } = await supabase
+    .from('shared_do_records')
+    .update({
+      worked_by_by_nursery: workedByByNursery,
+      worked_by_locked_at: new Date().toISOString(),
+      worked_by_locked_by: lockedBy || null,
+    })
+    .eq('id', doId);
+  if (error) throw error;
 }
 
 // Extract item rows (nursery/breed/qty) from a DO record's plot_n columns.

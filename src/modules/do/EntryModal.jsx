@@ -8,7 +8,8 @@ import { generateDONumber, offlineDONumber } from './data.js';
 const emptyRow = () => ({ key: Math.random().toString(36).slice(2), nursery: '', plot: '', breed: '', qty: '', ai: false });
 
 // Add / scan a new Delivery Order for the given AL.
-// props: al, plots, breeds, photoBase64 (null for manual), onSaved(payload, sigDataUrl), onClose, toast
+// props: al, plots, breeds, photoBase64 (null for manual),
+//        onSaved(payload, sigDataUrl, queued, photoBase64, savedRow), onClose, toast
 export default function EntryModal({ al, plots, breeds, photoBase64, initialQty, onSubmit, onSaved, onClose, toast }) {
   const { t } = useLang();
   const [doNumber, setDoNumber] = useState('…');
@@ -146,7 +147,7 @@ export default function EntryModal({ al, plots, breeds, photoBase64, initialQty,
       return alert(t('do.saveError', { msg: e.message }));
     }
     setSaving(false);
-    onSaved(res.payload, sigDataUrl, res.queued, capturedPhoto || photoBase64);
+    onSaved(res.payload, sigDataUrl, res.queued, capturedPhoto || photoBase64, res.savedRow || null);
   }
 
   return (

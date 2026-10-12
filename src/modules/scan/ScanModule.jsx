@@ -6,7 +6,9 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { printDO } from '../../lib/pdf.js';
 import EntryModal from '../do/EntryModal.jsx';
-import { loadALByNumber, loadDropdownData, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
+import { loadALByNumber, loadDropdownData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
+import { useWorkerTick } from '../do/useWorkerTick.js';
+import WorkerTickModal from '../do/WorkerTickModal.jsx';
 import {
   cachedConsents,
   fetchConsents,
@@ -47,6 +49,8 @@ export default function ScanModule() {
   const [issuing, setIssuing] = useState(false);
   const [printPrompt, setPrintPrompt] = useState(null);
   const [activeDOs, setActiveDOs] = useState([]);
+  const [workers, setWorkers] = useState(() => cacheGet('do_workers')?.value || []);
+  const wt = useWorkerTick(workers);
 
   const progressRef = useRef(progress);
   progressRef.current = progress;
@@ -87,6 +91,28 @@ export default function ScanModule() {
 
   useEffect(() => {
     if (navigator.onLine) sync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The "Who Loaded This DO" roster and the plot→nursery map it groups by —
+  // same lists the DO module loads, cached the same way, loaded up front so
+  // both Issue DO and the Workers button on an already-issued DO have them
+  // ready rather than only after openIssueDO's own lazy fetch.
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    loadDOWorkers()
+      .then((rows) => { setWorkers(rows); cacheSet('do_workers', rows); })
+      .catch(() => {});
+    if (!doPlots.length) {
+      loadDropdownData()
+        .then(({ plots, breeds }) => {
+          setDoPlots(plots);
+          setDoBreeds(breeds);
+          cacheSet('do_plots', plots);
+          cacheSet('do_breeds', breeds);
+        })
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -331,7 +357,7 @@ export default function ScanModule() {
     setDoEntry({ al, suggestQty, consentId: consent.id });
   }
 
-  function onDoSaved(payload, sigDataUrl, queued, photoBase64) {
+  function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     const al = doEntry?.al || {};
     const consentId = doEntry?.consentId;
     setDoEntry(null);
@@ -352,7 +378,16 @@ export default function ScanModule() {
     }
     setActiveId(null);
     flash(queued ? t('do.savedOffline') : t('do.doSavedToast', { do: payload.do_number }), 'done');
-    setPrintPrompt({ payload, sigDataUrl, al, plots: doPlots, photoBase64 });
+    const printJob = { payload, sigDataUrl, al, plots: doPlots, photoBase64 };
+    // Same rule as the DO module: a queued (offline) save has no server row
+    // yet to tick workers against, so it falls straight to the print prompt.
+    if (!queued && savedRow) {
+      const plotMap = {};
+      doPlots.forEach((p) => { plotMap[p.plot_name] = p.nursery_name; });
+      wt.openWorkerTick(savedRow, plotMap, () => setPrintPrompt(printJob));
+    } else {
+      setPrintPrompt(printJob);
+    }
   }
 
   function doPrint(pp) {
@@ -457,6 +492,8 @@ export default function ScanModule() {
           </div>
         </div>
       )}
+
+      <WorkerTickModal wt={wt} staffName={staffName} />
 
       {toast && (
         <div
@@ -1055,12 +1092,30 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                   <span className="text-emerald-400 font-bold ml-3">Total: {viewDO.total_qty}</span>
                 </div>
               </div>
-              <button
-                onClick={closeViewDO}
-                className="w-8 h-8 rounded-xl bg-[#1f2a38] text-slate-300 hover:text-white font-bold flex items-center justify-center shrink-0"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => {
+                    const plotMap = {};
+                    doPlots.forEach((p) => { plotMap[p.plot_name] = p.nursery_name; });
+                    wt.openWorkerTick(viewDO, plotMap);
+                  }}
+                  title={t('do.workersButtonTitle')}
+                  className={`relative w-8 h-8 rounded-xl flex items-center justify-center font-bold ${
+                    viewDO.worked_by_locked_at ? 'bg-[#1f2a38] text-slate-300 hover:text-white' : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                  }`}
+                >
+                  👷
+                  {!viewDO.worked_by_locked_at && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400" />
+                  )}
+                </button>
+                <button
+                  onClick={closeViewDO}
+                  className="w-8 h-8 rounded-xl bg-[#1f2a38] text-slate-300 hover:text-white font-bold flex items-center justify-center shrink-0"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             <div className="p-5 space-y-4">

@@ -12,11 +12,14 @@ import {
   loadActiveALs,
   loadConsentALSet,
   loadDropdownData,
+  loadDOWorkers,
   persistDO,
   flushDOQueue,
 } from './data.js';
+import { useWorkerTick } from './useWorkerTick.js';
 import ManageModal from './ManageModal.jsx';
 import EntryModal from './EntryModal.jsx';
+import WorkerTickModal from './WorkerTickModal.jsx';
 
 export default function DoModule() {
   const { staffName } = useAuth();
@@ -26,6 +29,10 @@ export default function DoModule() {
   const [consentSet, setConsentSet] = useState(() => new Set(cacheGet('do_consentAls')?.value || []));
   const [plots, setPlots] = useState(() => cacheGet('do_plots')?.value || []);
   const [breeds, setBreeds] = useState(() => cacheGet('do_breeds')?.value || []);
+  const [workers, setWorkers] = useState(() => cacheGet('do_workers')?.value || []);
+  const wt = useWorkerTick(workers);
+  const plotMap = {};
+  plots.forEach((p) => { plotMap[p.plot_name] = p.nursery_name; });
   const [query, setQuery] = useState('');
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -92,6 +99,9 @@ export default function DoModule() {
         cacheSet('do_plots', plots);
         cacheSet('do_breeds', breeds);
       })
+      .catch(() => {});
+    loadDOWorkers()
+      .then((rows) => { setWorkers(rows); cacheSet('do_workers', rows); })
       .catch(() => {});
   }, 60000);
 
@@ -160,14 +170,22 @@ export default function DoModule() {
     e.target.value = '';
   }
 
-  function onSaved(payload, sigDataUrl, queued, photoBase64) {
+  function onSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     setEntry(null);
     flash(queued ? t('do.savedOffline') : t('do.doSavedToast', { do: payload.do_number }));
     reload();
     setRefreshToken((x) => x + 1);
     const al = (als || []).find((r) => r.al_number === payload.al_number);
     if (al) setManageAL(al);
-    setTimeout(() => setPrintPrompt({ payload, sigDataUrl, photoBase64 }), 300);
+    const printJob = { payload, sigDataUrl, photoBase64 };
+    // A queued (offline) save has no server row yet to tick workers
+    // against, so it keeps the old flow straight to the print prompt — the
+    // row's own Workers button picks it up once the DO has actually synced.
+    if (!queued && savedRow) {
+      wt.openWorkerTick(savedRow, plotMap, () => setPrintPrompt(printJob));
+    } else {
+      setTimeout(() => setPrintPrompt(printJob), 300);
+    }
   }
 
   function doPrint(doRec, sigDataUrl = null, photoBase64 = null) {
@@ -271,9 +289,12 @@ export default function DoModule() {
           refreshToken={refreshToken}
           onAddDO={() => openChoice(manageAL)}
           onPrint={(doRec) => doPrint(doRec)}
+          onManageWorkers={(doRec) => wt.openWorkerTick(doRec, plotMap)}
           onClose={() => setManageAL(null)}
         />
       )}
+
+      <WorkerTickModal wt={wt} staffName={staffName} />
 
       {choiceAL && (
         <div className="modal-overlay open" onClick={() => setChoiceAL(null)}>

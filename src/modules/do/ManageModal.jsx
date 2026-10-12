@@ -4,8 +4,8 @@ import { loadDOsForAL, loadConsentsForAL, itemsFromRecord } from './data.js';
 
 // Manage DOs for one AL: shows AL details, issued DO records, signed consent
 // records, and an entry point to add a new DO.
-// props: al, plots, onAddDO(), onPrint(doRec), onClose, refreshToken
-export default function ManageModal({ al, plots, onAddDO, onPrint, onClose, refreshToken }) {
+// props: al, plots, onAddDO(), onPrint(doRec), onManageWorkers(doRec), onClose, refreshToken
+export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorkers, onClose, refreshToken }) {
   const { t } = useLang();
   const [dos, setDos] = useState(null);
   const [consents, setConsents] = useState(null);
@@ -97,6 +97,24 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onClose, refr
                               <button onClick={() => onPrint(d)} title="Print" className="w-10 h-10 rounded-lg border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 flex items-center justify-center cursor-pointer bg-slate-50 text-slate-400 hover:text-emerald-600">
                                 🖨️
                               </button>
+                              {onManageWorkers && (
+                                <button
+                                  onClick={() => onManageWorkers(d)}
+                                  title={t('do.workersButtonTitle')}
+                                  className={`relative w-10 h-10 rounded-lg border flex items-center justify-center cursor-pointer ${
+                                    d.worked_by_locked_at
+                                      ? 'border-slate-200 bg-slate-50 text-slate-400 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600'
+                                      : 'border-amber-200 bg-amber-50 text-amber-500 hover:border-amber-400 hover:bg-amber-100'
+                                  }`}
+                                >
+                                  👷
+                                  {d.worked_by_locked_at ? (
+                                    <span className="absolute -top-1 -right-1 text-[9px]">🔒</span>
+                                  ) : (
+                                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-amber-500 border border-white" />
+                                  )}
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
