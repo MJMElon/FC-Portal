@@ -2,7 +2,7 @@ import { fetchAllRows, supabase } from '../../lib/supabase.js';
 import { cacheBlocks, cachedBlocks } from './cullingOffline.js';
 import { isOnline } from '../../lib/outbox.js';
 import { batchKey, plotKey } from '../maintenance/plotBatches.js';
-import { nurseryOfPlot } from './data.js';
+import { nurseryOfPlot, todayStr } from './data.js';
 
 /**
  * Where the Culling Calculator's numbers come from.
@@ -209,6 +209,67 @@ export async function pengambilanPlots() {
     out.add(plotKey(String(r.plot_name || '').split('#')[0]));
   });
   return out;
+}
+
+/**
+ * Close the collecting status on a plot, so it leaves this screen.
+ *
+ * What the X in the plot picker does. It is NOT a delete: the log row is
+ * kept and given an end_date, exactly as PALMS does when a Field Conductor
+ * saves a day without that activity ticked. The period the plot really was
+ * at Pengambilan stays in the history where the board, the reports and
+ * anybody looking back can still see it. Deleting the row would take a real
+ * collecting period out of the record to tidy up a list.
+ *
+ * Why it is needed at all: an activity is closed as a side effect of saving
+ * THAT plot, and nothing else ever closes one. A plot nobody saves again
+ * keeps every open row open for ever — B4 sat on this screen reading
+ * Membesar on the board with a Pengambilan row open since June. Until now
+ * the only way out was to open PALMS and save a day for that plot.
+ *
+ * Online only, deliberately. This is office tidying on a record other
+ * people are reading, not field work with a bar of signal — and queueing it
+ * would mean an admin taps X, sees the plot go, and finds it back tomorrow
+ * because the send failed. Better to say so now.
+ *
+ * Returns how many rows were closed. 0 means the plot was already clear,
+ * which is worth telling apart from a failure.
+ */
+export async function closeCollectingStatus(plot) {
+  const want = plotKey(String(plot || '').split('#')[0]);
+  if (!want) throw new Error('no plot named');
+  if (!isOnline()) throw new Error('offline');
+
+  const stages = await supabase
+    .from('nops_plot_status_stages').select('name, sort_order').order('sort_order');
+  if (stages.error || !(stages.data || []).length) {
+    throw new Error((stages.error && stages.error.message) || 'no stage list');
+  }
+  const list = stages.data;
+  let acts = list.filter((x) => CULLING_STAGES.has(stageKey(x.name))).map((x) => x.sort_order);
+  if (!acts.length) acts = [list[list.length - 1].sort_order];
+
+  /* Read the ids first and match the plot HERE rather than with a pattern in
+     the query. A split plot logs against "B2#A", and a LIKE that caught it
+     would also catch B20 — closing a status on a plot nobody asked about. */
+  const open = await supabase
+    .from('fcportal_palms_plot_logs')
+    .select('id, plot_name, act_n')
+    .is('end_date', null)
+    .in('act_n', acts);
+  if (open.error) throw new Error(open.error.message);
+
+  const ids = (open.data || [])
+    .filter((r) => plotKey(String(r.plot_name || '').split('#')[0]) === want)
+    .map((r) => r.id);
+  if (!ids.length) return 0;
+
+  const res = await supabase
+    .from('fcportal_palms_plot_logs')
+    .update({ end_date: todayStr() })
+    .in('id', ids);
+  if (res.error) throw new Error(res.error.message);
+  return ids.length;
 }
 
 /* Whether the last loadPlots() answered from the device rather than the

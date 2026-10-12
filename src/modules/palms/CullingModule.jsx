@@ -2,7 +2,7 @@ import { useState } from 'react';
 import CullingTab from './CullingTab.jsx';
 import TopNav from '../../components/TopNav.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
-import { visibleNurseries } from '../../lib/access.js';
+import { visibleNurseries, isModuleAdmin } from '../../lib/access.js';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { NURSERIES } from './data.js';
 
@@ -21,6 +21,15 @@ export default function CullingModule() {
   // FC Scan Portal → User Access.
   // The calculator's own nursery list — set separately from PALMS.
   const nurseryKeys = visibleNurseries(permissions, Object.keys(NURSERIES), null, 'culling');
+  /* Who may close a collecting status from the plot picker. isModuleAdmin
+     fails CLOSED -- no permissions loaded yet is not consent -- which is the
+     right way round for a control that changes a record other people read.
+
+     Either admin counts. The button lives on the culling screen and acts on
+     a PALMS record, and an office account carries manage_users, which
+     isModuleAdmin already answers yes to. */
+  const canRemove = isModuleAdmin(permissions, 'palms')
+                 || isModuleAdmin(permissions, 'culling');
   const { t } = useLang();
 
   const [toast, setToast] = useState(null);
@@ -55,6 +64,7 @@ export default function CullingModule() {
           userId={session?.user?.id || null}
           flash={flash}
           nurseryKeys={nurseryKeys}
+          canRemove={canRemove}
         />
       </div>
 

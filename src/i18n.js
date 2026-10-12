@@ -60,6 +60,17 @@ const en = {
   'cull.left': 'Left',
   'cull.plot': 'Plot',
   'cull.pickPlot': 'Choose a plot',
+  /* The X on a plot row, for admins. It closes the collecting status that
+     is keeping the plot on this screen -- it does not delete anything, and
+     the wording says so, because "delete" on a plot would read as something
+     far bigger than it is. */
+  'cull.removeTitle':   'Close the collecting status on this plot',
+  'cull.removeAria':    'Close the collecting status on {plot}',
+  'cull.removeAsk':     'Take {plot} off this list?\n\nIts collecting status is closed with today date. The plot and its history are kept, and PALMS can put it back at Pengambilan whenever collecting starts again.',
+  'cull.removed':       '{plot} taken off the list',
+  'cull.removeNothing': '{plot} has no collecting status open — it will go on the next refresh',
+  'cull.removeOffline': 'This needs a line — the change has to reach the office, not sit on the phone',
+  'cull.removeFailed':  'Could not close it. Nothing was changed.',
   'cull.noPlots': 'No plot is at Pengambilan yet.',
   'cull.neverLoaded': 'Nothing has been loaded onto this phone yet — this is not "no plots to cull". Open this where there is signal, or press Sync, before going out.',
   'cull.showingCached': 'Figures loaded {when} — counting still saves.',

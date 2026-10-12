@@ -5,7 +5,7 @@ import { CULL_LIMIT, actionFor, caseBody } from './cullingActions.js';
 // Every figure on this screen comes from here.
 import {
   blocksCachedAt, diagnose, figuresBroken, figuresFor, hasFigures, lastLoadWasCached,
-  loadPlots, plantedNear, rateFor,
+  loadPlots, plantedNear, rateFor, closeCollectingStatus,
 } from './cullingSource.js';
 import { todayStr } from './data.js';
 import { agoText } from '../../lib/ago.js';
@@ -31,7 +31,7 @@ import { clearRefused, refusedCases, retryRefused, submitCase } from './cullingO
  * rather than doing it, closing it, and coming back to key the same result
  * into this screen as well.
  */
-export default function CullingTab({ t, staffName, userId, flash, nurseryKeys }) {
+export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, canRemove }) {
   const [tick, setTick] = useState(0);
   const refresh = () => setTick((n) => n + 1);
 
@@ -81,6 +81,37 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys })
   const [notSent, setNotSent] = useState(() => refusedCases());
   const [retrying, setRetrying] = useState(false);
   const reloadNotSent = () => setNotSent(refusedCases());
+
+  /* Take a plot off this screen by CLOSING its collecting status, which is
+     what the X in the picker does for an admin. Not a delete — see
+     closeCollectingStatus. The row goes from the list the moment the server
+     has taken it, so the admin is not left wondering whether it worked.
+
+     Confirmed first, and the question names the plot: this changes a record
+     other people are reading, and the picker is a list of similar-looking
+     rows under a thumb. */
+  const [removing, setRemoving] = useState(null);
+  async function removePlot(plot) {
+    if (!canRemove || removing) return;
+    if (!window.confirm(t('cull.removeAsk', { plot }))) return;
+    setRemoving(plot);
+    try {
+      const n = await closeCollectingStatus(plot);
+      if (n > 0) {
+        setRows((prev) => prev.filter((r) => r.plot !== plot));
+        if (plotId === plot) setPlotId(null);   // key IS the plot name
+        flash(t('cull.removed', { plot }));
+      } else {
+        /* Nothing open to close. Saying "done" would be a lie and saying
+           "failed" would send somebody looking for a fault. */
+        flash(t('cull.removeNothing', { plot }));
+      }
+    } catch (e) {
+      flash(e && e.message === 'offline' ? t('cull.removeOffline') : t('cull.removeFailed'));
+    } finally {
+      setRemoving(null);
+    }
+  }
 
   // Best effort: a read that fails leaves the screen empty rather than broken.
   useEffect(() => {
@@ -640,6 +671,8 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys })
           current={plotId}
           raised={raised}
           t={t}
+          canRemove={canRemove}
+          onRemove={removePlot}
           onPick={(p) => { setPlotId(p); setTerms([]); setTyping(''); setPicking(false); }}
           onClose={() => setPicking(false)}
         />
@@ -710,7 +743,7 @@ function Keypad({ onPress }) {
    step right after this one is where a Field Conductor tells the screen
    which block of it they actually mean, and a batch with a full balance and
    a 0% rate is one nobody has started on, not a fault to chase. */
-function PlotPicker({ plots, current, raised, t, onPick, onClose }) {
+function PlotPicker({ plots, current, raised, t, canRemove, onRemove, onPick, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onClick={onClose} />
@@ -763,17 +796,47 @@ function PlotPicker({ plots, current, raised, t, onPick, onClose }) {
                 </div>
                 {/* A minus balance is not a good rate, so it does not get a
                     green percentage. It gets named for what it is. */}
-                {broken ? (
-                  <div className="text-[9px] font-black uppercase tracking-wider text-amber-400 shrink-0 text-right leading-tight max-w-[86px]">
-                    {t('cull.checkStock')}
-                  </div>
-                ) : (
-                  <div className={`text-[13px] font-black tabular-nums shrink-0 ${
-                    rate > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
-                  }`}>
-                    {fmtPct(rate)}
-                  </div>
-                )}
+                <div className="flex items-center gap-2 shrink-0">
+                  {broken ? (
+                    <div className="text-[9px] font-black uppercase tracking-wider text-amber-400 text-right leading-tight max-w-[86px]">
+                      {t('cull.checkStock')}
+                    </div>
+                  ) : (
+                    <div className={`text-[13px] font-black tabular-nums ${
+                      rate > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
+                    }`}>
+                      {fmtPct(rate)}
+                    </div>
+                  )}
+                  {/* Admins only. A plot sits on this screen because a
+                      collecting status is open on it, and nothing closes one
+                      except saving that plot in PALMS — so a status left open
+                      months ago keeps the plot here for ever. This closes it.
+
+                      A span with a role, not a button: the row itself is a
+                      button and a button inside a button is not valid HTML,
+                      which browsers resolve by dropping one of them. The
+                      click is stopped here so pressing X never also picks the
+                      plot underneath it. */}
+                  {canRemove && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label={t('cull.removeAria', { plot: p.plot })}
+                      title={t('cull.removeTitle')}
+                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); onRemove(p.plot); }}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        e.stopPropagation(); e.preventDefault(); onRemove(p.plot);
+                      }}
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500
+                                 hover:text-rose-300 hover:bg-rose-500/15 text-[15px] leading-none
+                                 cursor-pointer transition-colors"
+                    >
+                      ×
+                    </span>
+                  )}
+                </div>
               </button>
             );
           })}
