@@ -12,7 +12,7 @@ const CONSENTS_CACHE = 'scan_consents';
 export const PROGRESS_KEY = 'mjm.scan.progress.v1';
 
 export function defaultProgress() {
-  return { seen: [], scans: [], unique: 0, over: 0, completedFired: false, overFired: false, completedAt: null, doIssued: false };
+  return { seen: [], scans: [], rejected: {}, unique: 0, over: 0, completedFired: false, overFired: false, completedAt: null, doIssued: false };
 }
 
 /* ── A SEAL IS COUNTED ONCE ───────────────────────────────────────────
@@ -116,6 +116,69 @@ export function addBarcodes(cur, codes, entryOf) {
     scans: [...entries.reverse(), ...(base.scans || [])],
     unique: held.size,
   };
+}
+
+/* ── AND IT IS COUNTED ON ONE ORDER ───────────────────────────────────
+   A seal carries ONE lot of seedlings, so once it has been counted onto
+   a customer's lorry it is spoken for. Scanning it again under the next
+   customer is not a second seal, it is the same one being counted twice
+   -- and the second order is then short by that much with nothing on
+   either screen to say where it went.
+
+   There are two ways to know, and the phone asks the quick one first:
+
+   - **What this phone already holds.** Every card's seen list is in
+     localStorage, so a seal taken on an earlier order is found with no
+     network at all, instantly, and it is the ordinary case: one
+     conductor, one phone, one order after another.
+   - **What the server knows**, for a seal another device took. That is a
+     round trip, so it stays in the background the way it always has --
+     the scan counts optimistically and is TAKEN BACK when the answer
+     comes. Fail open: no line, no answer, nothing removed.
+
+   A refusal is remembered on the card (`rejected`), so the seal is turned
+   away instantly the next time it is waved -- including after a take-back,
+   where the order that really owns it may not be on this phone at all. */
+export function findBarcodeLocally(progress, code, excludeIds) {
+  const want = barcodeKey(code);
+  if (!want) return null;
+  const skip = new Set((excludeIds || []).map(String));
+  for (const id of Object.keys(progress || {})) {
+    if (skip.has(String(id))) continue;
+    const p = progress[id] || {};
+    if ((p.seen || []).some((c) => barcodeKey(c) === want)) return id;
+  }
+  return null;
+}
+
+/* Takes a seal back off a card: out of the set, out of the log, and the
+   count derived again from what is left. The SAME object back when the
+   card never had it. */
+export function removeBarcode(cur, code) {
+  const want = barcodeKey(code);
+  const base = dedupeProgress(cur || defaultProgress());
+  if (!want || !(base.seen || []).some((c) => barcodeKey(c) === want)) return base;
+  const seen = (base.seen || []).filter((c) => barcodeKey(c) !== want);
+  return {
+    ...base,
+    seen,
+    scans: (base.scans || []).filter((s) => barcodeKey(s && s.code) !== want),
+    unique: seen.length,
+  };
+}
+
+/* Why it was turned away, kept so the next wave of the same seal is
+   refused at once instead of being counted and taken back again. */
+export function rememberElsewhere(cur, code, label) {
+  const want = barcodeKey(code);
+  if (!want) return cur;
+  return { ...cur, rejected: { ...(cur.rejected || {}), [want]: label || '' } };
+}
+
+export function rejectedLabel(cur, code) {
+  const want = barcodeKey(code);
+  const r = (cur || {}).rejected || {};
+  return Object.prototype.hasOwnProperty.call(r, want) ? (r[want] || '') : null;
 }
 
 export function loadProgress() {

@@ -15,6 +15,10 @@ import {
   cachedTodayALs,
   fetchTodayBookingALs,
   addBarcodes,
+  findBarcodeLocally,
+  removeBarcode,
+  rememberElsewhere,
+  rejectedLabel,
   loadProgress,
   saveProgress,
   defaultProgress,
@@ -289,6 +293,37 @@ export default function ScanModule() {
         flash(t('scan.duplicate', { code }), 'warn');
         return;
       }
+
+      /* A seal counted onto an earlier customer's lorry is spoken for, so
+         it is NOT counted here -- it is the same seedlings being counted
+         twice, and this order would be short by that much with nothing on
+         either screen saying where it went.
+
+         Asked of this phone first, which is the ordinary case and needs no
+         line: one conductor, one phone, one order after another. A seal
+         another DEVICE took is caught by the server check below and taken
+         back. */
+      const curP = progressRef.current[a.id] || defaultProgress();
+      const refusedBefore = rejectedLabel(curP, code);
+      const heldBy = refusedBefore === null
+        ? findBarcodeLocally(progressRef.current, code, a.memberIds || [a.id])
+        : null;
+      if (refusedBefore !== null || heldBy) {
+        const who = refusedBefore || labelOfConsent(heldBy);
+        if (heldBy) {
+          setProgress((prev) => {
+            const map = { ...prev, [a.id]: rememberElsewhere(prev[a.id] || defaultProgress(), code, who) };
+            saveProgress(map);
+            return map;
+          });
+        }
+        beepAlarm();
+        vibrate([120, 60, 120, 60, 200]);
+        setLastInfo({ key: 'scan.notCountedElsewhere', vars: { code, who } });
+        flash(t('scan.notCountedElsewhere', { code, who }), 'danger');
+        return;
+      }
+
       seenRef.current.add(code);
 
       // Write to server so other devices see this scan in real time. With no
@@ -311,8 +346,8 @@ export default function ScanModule() {
           const label = other
             ? other.customer + (other.al_number ? ' (' + other.al_number + ')' : '')
             : (hit.al_number || t('scan.anotherOrder'));
-          flagScanElsewhere(a.id, code, label);
-          flash(t('scan.sealReusedElsewhere', { code, who: label }), 'danger');
+          takeBackScan(a.id, code, label);
+          flash(t('scan.takenBackElsewhere', { code, who: label }), 'danger');
           beepAlarm();
           vibrate([120, 60, 120, 60, 200]);
         })
@@ -359,24 +394,43 @@ export default function ScanModule() {
     [flash, t]
   );
 
-  // Marks an already-recorded scan log entry with which OTHER order it
-  // turned out to belong to, once the background check in recordScan comes
-  // back positive. The scan itself is left counted — it really was scanned,
-  // same as an "over" scan stays counted rather than being erased — this
-  // only adds the warning so the office knows to go sort out which order
-  // the physical seal actually belongs to.
-  function flagScanElsewhere(consentId, code, label) {
+  // What the card calls another order, for the message that says where a
+  // seal has gone. A merged group answers to any of its member ids.
+  function labelOfConsent(consentId) {
+    const other = consentsRef.current.find((c) =>
+      (c.memberIds || [c.id]).map(String).includes(String(consentId))
+    );
+    if (!other) return t('scan.anotherOrder');
+    return other.customer + (other.al_number ? ' (' + other.al_number + ')' : '');
+  }
+
+  // TAKES A SEAL BACK OFF THIS ORDER once the background check says it was
+  // already counted on another one.
+  //
+  // It used to be left counted and only marked, so the office could go and
+  // sort out which order the physical seal belonged to. That was the wrong
+  // way round: a seal carries one lot of seedlings, so leaving it counted
+  // here means the same seedlings are counted on two orders and this one
+  // goes out over its quota on a seal it does not own. The office asked
+  // for it not to count, so it comes off — the count, the log and all.
+  //
+  // The refusal is remembered on the card, which matters most here: the
+  // order that really owns the seal may be on another phone entirely, so
+  // without it the next wave of the same seal would be counted and taken
+  // back all over again.
+  function takeBackScan(consentId, code, label) {
     setProgress((prev) => {
       const cur = prev[consentId];
       if (!cur) return prev;
-      const idx = cur.scans.findIndex((s) => s.code === code);
-      if (idx === -1) return prev;
-      const scans = cur.scans.slice();
-      scans[idx] = { ...scans[idx], elsewhere: label };
-      const map = { ...prev, [consentId]: { ...cur, scans } };
+      const qty = (consentsRef.current.find((c) => String(c.id) === String(consentId)) || {}).qty || 0;
+      const without = removeBarcode(cur, code);
+      const next = rememberElsewhere(without, code, label);
+      next.over = Math.max(0, next.unique - qty);
+      const map = { ...prev, [consentId]: next };
       saveProgress(map);
       return map;
     });
+    if (String(activeRef.current?.id) === String(consentId)) seenRef.current.delete(code);
   }
 
   async function openIssueDO(consent) {

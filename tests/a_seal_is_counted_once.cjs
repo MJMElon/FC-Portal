@@ -55,7 +55,7 @@ const ctx = {
   PERMANENT: 'permanent', flushOutbox: () => {}, looksOffline: () => false, queueJob: () => {},
 };
 vm.createContext(ctx);
-vm.runInContext(store + '\n;globalThis.__s = { defaultProgress, addBarcodes, dedupeProgress, dedupeScans, loadProgress, saveProgress, PROGRESS_KEY };', ctx);
+vm.runInContext(store + '\n;globalThis.__s = { defaultProgress, addBarcodes, dedupeProgress, dedupeScans, loadProgress, saveProgress, findBarcodeLocally, removeBarcode, rememberElsewhere, rejectedLabel, PROGRESS_KEY };', ctx);
 const S = vm.runInContext('__s', ctx);
 
 const line = (code, n, qty) => ({ code, time: '09:0' + n, over: n > qty });
@@ -118,7 +118,38 @@ const spaced = S.addBarcodes(S.defaultProgress(), ['  007 ', '007', '', null], (
 is([spaced.unique, spaced.seen], [1, ['007']],
    'the same number with a space round it is the same seal, and a blank is none');
 
-/* ── 8. Nobody writes the count by hand any more ─────────────────────── */
+/* ── 8. AND IT IS COUNTED ON ONE ORDER ────────────────────────────────
+   abc's lorry took seal 00001. The next customer, xyz, must not be able
+   to count the same seal: it is the same seedlings twice, and xyz's order
+   is then short by that much with nothing on either screen saying so. */
+const abc = S.addBarcodes(S.defaultProgress(), ['00001', '00002'], (c, n) => line(c, n, QTY));
+const phone = { abc: { ...abc, doIssued: true }, xyz: S.defaultProgress() };
+is(S.findBarcodeLocally(phone, '00001', ['xyz']), 'abc',
+   "a seal counted on abc's is found instantly, with no network at all");
+is(S.findBarcodeLocally(phone, '00003', ['xyz']), null, 'a seal nobody has taken is free');
+is(S.findBarcodeLocally(phone, '00001', ['abc', 'xyz']), null,
+   "and a card never finds its OWN seal -- a merged group answers for every member id");
+is(S.findBarcodeLocally(phone, ' 00001 ', ['xyz']), 'abc', 'spacing does not get a seal past it');
+
+/* The take-back, for a seal another DEVICE took: the answer comes after
+   the scan was counted, so it comes off again — count, log and all. */
+const counted = S.addBarcodes(S.defaultProgress(), ['00001', '00009'], (c, n) => line(c, n, QTY));
+const back = S.removeBarcode(counted, '00001');
+is([back.unique, back.seen, back.scans.map((x) => x.code)], [1, ['00009'], ['00009']],
+   'a seal taken back leaves the count, the set and the log together');
+is(S.removeBarcode(counted, '00404') === S.dedupeProgress(counted), true,
+   'taking back a seal the card never had changes nothing');
+
+/* And the refusal is REMEMBERED, because the order that owns the seal may
+   be on another phone entirely — without this the next wave of it would be
+   counted and taken back all over again. */
+const remembered = S.rememberElsewhere(back, '00001', 'abc (AL-1)');
+is(S.rejectedLabel(remembered, '00001'), 'abc (AL-1)', 'the card remembers who the seal belongs to');
+is(S.rejectedLabel(remembered, '00009'), null, 'and says nothing about a seal it holds');
+is(S.addBarcodes(remembered, ['00009'], (c, n) => line(c, n, QTY)).unique, 1,
+   'remembering a refusal does not disturb the count');
+
+/* ── 9. Nobody writes the count by hand any more ─────────────────────── */
 const SM = R('src/modules/scan/ScanModule.jsx');
 if (!/unique: *newUnique|const unique = cur\.unique \+ 1/.test(SM)) {
   ok('no path increments the count beside the set');
@@ -134,6 +165,24 @@ if (!/seen: \[\.\.\.cur\.seen/.test(SM)) {
   ok('and none of them builds the seen list of its own');
 } else {
   fail('a path still appends to seen directly, bypassing the filter');
+}
+if (/findBarcodeLocally\(progressRef\.current, code/.test(SM)) {
+  ok('the scanner asks this phone about the other orders BEFORE counting');
+} else {
+  fail('a seal already counted on another order is still counted here');
+}
+if (/takeBackScan\(a\.id, code, label\)/.test(SM) && !/flagScanElsewhere/.test(SM)) {
+  ok('and the server answer takes the seal back rather than only marking it');
+} else {
+  fail('the server answer still leaves a seal counted on two orders at once');
+}
+
+/* ── 10. Both languages say why it was refused ───────────────────────── */
+const I18N = R('src/i18n.js');
+for (const k of ['scan.notCountedElsewhere', 'scan.takenBackElsewhere']) {
+  const n = (I18N.match(new RegExp("'" + k.replace('.', '\\.') + "':", 'g')) || []).length;
+  if (n === 2) ok("'" + k + "' is in both languages");
+  else fail("'" + k + "' appears " + n + " times, wanted 2 (English and Malay)");
 }
 
 console.log('');
