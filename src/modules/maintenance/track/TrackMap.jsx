@@ -25,6 +25,18 @@ import {
 } from './track.js';
 import { cachedBoundaries, loadSiteBoundaries } from '../../../lib/siteBoundary.js';
 import { holdScreenAwake } from '../../../lib/screenWake.js';
+import { MAP_TRACK_KEY, clearParked, park, stillFresh, unpark } from './parked.js';
+
+/**
+ * What a parked walk has to be before it is offered back.
+ *
+ * ONE TEST, used by the state initialiser and by the line that says so, or the
+ * map comes up carrying a walk it never mentions — or mentions one it did not
+ * take. Shape first (a walk parked by an older version of this file must not
+ * be read half-understood), then age: see PARKED_GOOD_FOR_H in parked.js.
+ */
+const cameBackUsable = (x) =>
+  Array.isArray(x.points) && x.points.length > 0 && !!x.startedAt && stillFresh(x);
 
 /** Close enough to see a seedling bed, far enough to see the plot round it. */
 const WORK_ZOOM = 18;
@@ -137,9 +149,20 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
 
   const [ownFix, setOwnFix] = useState(null);      // the newest position, when watching for itself
   const fix = watchOwn ? ownFix : fedFix;
-  const [state, setState] = useState(() => (initial && initial.track
-    ? { points: initial.track, distance: initial.distance_m || 0, startedAt: initial.started_at }
-    : { points: [], distance: 0, startedAt: null }));
+  /* A walk already on the record wins. Otherwise look for one the browser
+     threw away mid-walk — see parked.js. It comes back STOPPED, so the gap
+     is the person's to close with Resume rather than something drawn across
+     silently. */
+  const [restored, setRestored] = useState(null);   // when it was parked
+  const [state, setState] = useState(() => {
+    if (initial && initial.track) {
+      return { points: initial.track, distance: initial.distance_m || 0, startedAt: initial.started_at };
+    }
+    if (viewOnly) return { points: [], distance: 0, startedAt: null };
+    const back = unpark(MAP_TRACK_KEY, cameBackUsable);
+    if (back) return { points: back.points, distance: back.distance || 0, startedAt: back.startedAt };
+    return { points: [], distance: 0, startedAt: null };
+  });
   const [recording, setRecording] = useState(false);
   const [compass, setCompass] = useState('off');   // off | follow | heading
   const [heading, setHeading] = useState(null);
@@ -277,6 +300,30 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
   // every time the page comes back: the browser takes the lock away the moment
   // the page is hidden and never offers it back. See lib/screenWake.js.
   useEffect(() => (recording ? holdScreenAwake() : undefined), [recording]);
+
+  /* ── Parked on every change ──
+     The walk used to live in React state inside this modal, so closing the
+     map, a reload, or the browser reclaiming the tab lost every metre of it.
+     Written down after every point instead; read back at the top of this
+     component. Nothing is parked in viewOnly, where the walk belongs to the
+     task row and this is only looking at it. */
+  useEffect(() => {
+    if (viewOnly) return;
+    if (!state.points.length) return;
+    park(MAP_TRACK_KEY, {
+      points: state.points, distance: state.distance,
+      startedAt: state.startedAt, parkedAt: new Date().toISOString(),
+    });
+  }, [viewOnly, state]);
+
+  /* Said once, on the way in, and only where one actually came back. */
+  useEffect(() => {
+    if (viewOnly || initial) return;
+    const back = unpark(MAP_TRACK_KEY, cameBackUsable);
+    if (!back) { clearParked(MAP_TRACK_KEY); return; }   // stale or unreadable: gone for good
+    setRestored(back.parkedAt || null);
+    flash(t('mt.trkCameBack', { n: back.points.length }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── draw the dot, the accuracy ring, and the line ──
   useEffect(() => {
@@ -423,6 +470,8 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
     setElapsed(0);
     setStalled(0);
     setWhy(null);
+    setRestored(null);
+    clearParked(MAP_TRACK_KEY);
     setState({ points: [], distance: 0, startedAt: new Date().toISOString() });
     setRecording(true);
     /* The screen lock is held by an effect on `recording`, not asked for here.
@@ -430,10 +479,28 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
        the page is hidden — which is how a walk came to record two fixes. */
   }
 
+  /* Carry on with the walk that came back, rather than starting a new one.
+     `t` on a point is seconds since the track STARTED, so the clock is set
+     back to the original start — otherwise every point after the gap would
+     claim a time it was not recorded at. */
+  function resumeRecording() {
+    if (!mayStart(fix) || !state.points.length) return;
+    startedAtMsRef.current = Date.parse(state.startedAt) || Date.now();
+    lastFixAtRef.current = Date.now();
+    setStalled(0);
+    setWhy(null);
+    setRestored(null);
+    setRecording(true);
+  }
+
   function stopRecording() {
     setRecording(false);
     const payload = trackPayload({ ...state, startedAt: state.startedAt });
     if (!payload) { flash(t('mt.trkNothingWalked')); return; }
+    /* Handed to the record, so there is nothing left to survive. A parked
+       walk left behind here would come back on the NEXT job and read as that
+       one — which is worse than losing it. */
+    clearParked(MAP_TRACK_KEY);
     onDone(payload);
   }
 
@@ -581,12 +648,37 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
           </div>
         ) : !recording ? (
           <>
+            {/* RESUME COMES FIRST where there is something to resume. A walk
+                that came back from a locked phone is the one somebody wants to
+                carry on with, and Start again — which throws it away — must
+                not be the button under their thumb. */}
+            {state.points.length > 0 && (
+              <button
+                onClick={resumeRecording}
+                disabled={!canStart}
+                className={`${btn} w-full py-4 ${canStart
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                  : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}
+              >
+                {t('mt.trkResume')}
+              </button>
+            )}
+            {restored && (
+              <div className="text-[11.5px] font-bold text-amber-400 text-center leading-snug">
+                {t('mt.trkGapWarning')}
+              </div>
+            )}
+            {/* Start again THROWS THE WALK AWAY, so where there is one to lose
+                it is the quiet secondary button under Resume, never the red
+                one. With nothing walked yet it is the only button there is and
+                keeps its own weight. */}
             <button
               onClick={startRecording}
               disabled={!canStart}
-              className={`${btn} w-full py-4 ${canStart
-                ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}
+              className={`${btn} w-full ${
+                !canStart ? 'py-4 bg-slate-700 text-slate-400 cursor-not-allowed'
+                  : state.points.length ? 'py-3 bg-slate-700 hover:bg-slate-600 text-slate-200'
+                    : 'py-4 bg-rose-600 hover:bg-rose-700 text-white'}`}
             >
               {state.points.length ? t('mt.trkStartAgain') : t('mt.trkStart')}
             </button>

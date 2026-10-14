@@ -419,6 +419,9 @@ const en = {
   'mt.trkWhyWeak': 'The fix is too rough to keep — walking out from under cover will pick it up again.',
   'mt.trkWhyJump': 'The last position jumped too far to believe, so it was left out.',
   'mt.trkWhyStill': 'Standing still — the line grows again as soon as you walk on.',
+  'mt.trkResume': 'Resume this walk',
+  'mt.trkCameBack': 'A walk of {n} points was still going when this page was last closed. It is here, stopped.',
+  'mt.trkGapWarning': 'Nothing was recorded while the phone was away, so there is a gap. Resume adds to the same walk.',
 
   // top nav / offline
 
@@ -1237,6 +1240,9 @@ const ms = {
   'mt.trkWhyWeak': 'Isyarat terlalu kasar untuk disimpan — keluar dari bawah teduhan dan ia akan kembali.',
   'mt.trkWhyJump': 'Posisi terakhir melompat terlalu jauh untuk dipercayai, jadi ia ditinggalkan.',
   'mt.trkWhyStill': 'Berdiri diam — garisan akan bertambah sebaik anda berjalan semula.',
+  'mt.trkResume': 'Sambung jejak ini',
+  'mt.trkCameBack': 'Jejak {n} titik masih berjalan ketika halaman ini ditutup. Ia ada di sini, berhenti.',
+  'mt.trkGapWarning': 'Tiada rekod ketika telefon tiada, jadi ada jurang. Sambung akan menambah pada jejak yang sama.',
 
   // top nav / offline
 
