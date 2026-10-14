@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { holdScreenAwake } from '../lib/screenWake.js';
 import { START_ACCURACY_M, mayStart } from '../modules/maintenance/track/track.js';
 import * as T from './taskTrack.js';
 
@@ -32,7 +33,6 @@ export function useWorkerTrack(watchIdle = false) {
   // Re-rendered once a second while running, so the clock on the row moves.
   const [, tick] = useState(0);
   const watchRef = useRef(null);
-  const wakeRef = useRef(null);
 
   const put = useCallback((next) => {
     setSession(next);
@@ -78,63 +78,12 @@ export function useWorkerTrack(watchIdle = false) {
     };
   }, [running, watchIdle]);
 
-  /* ── Keeping the screen awake ──────────────────────────────────────────
-   *
-   * A browser stops giving positions when the page is not on screen. Not
-   * throttles — stops. So a phone that locks itself mid-row is a phone that
-   * records nothing until it is woken, and the worker finds out at the end of
-   * the plot. There is no way to walk a track from a web app with the screen
-   * off; only a native app can do that.
-   *
-   * What CAN be done is stop the screen turning itself off, which is the case
-   * that actually happens: a worker starts a track, puts the phone in a
-   * pocket, and the timeout does the rest. The lock is held only while a walk
-   * is running, because holding one for the sake of a to-do list would be a
-   * battery spent on nothing.
-   *
-   * Re-asked whenever the page comes back into view: the browser releases the
-   * lock on its own the moment the page is hidden, and does not hand it back.
-   * Asking once is asking for the first time only.
-   *
-   * All of it best effort. The API is not on every phone, it can refuse, and
-   * a walk must still record on one where it does. */
-  useEffect(() => {
-    if (!running || typeof navigator === 'undefined') return undefined;
-    let dead = false;
-
-    const hold = async () => {
-      try {
-        if (!navigator.wakeLock || !navigator.wakeLock.request) return;
-        if (wakeRef.current || document.visibilityState !== 'visible') return;
-        const lock = await navigator.wakeLock.request('screen');
-        if (dead) { lock.release().catch(() => {}); return; }
-        wakeRef.current = lock;
-        lock.addEventListener('release', () => {
-          if (wakeRef.current === lock) wakeRef.current = null;
-        });
-      } catch (_) { /* a walk records without it, just not through a lock */ }
-    };
-
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') { hold(); return; }
-      /* Hidden: the browser has taken the lock back whether or not it told
-         us. Forgetting it here rather than waiting for the release event is
-         what makes the next hold() actually ask again — relying on the event
-         alone left the reference set, and the re-ask returned early. */
-      wakeRef.current = null;
-    };
-    hold();
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      dead = true;
-      document.removeEventListener('visibilitychange', onVisible);
-      if (wakeRef.current) {
-        wakeRef.current.release().catch(() => {});
-        wakeRef.current = null;
-      }
-    };
-  }, [running]);
+  /* Keeping the screen awake while a walk is running. The whole of the why
+     is in lib/screenWake.js, which is now the only copy of it — the FC Portal
+     track map had its own one-line version and was losing tracks to exactly
+     the case the comment there describes. Held only while running, because a
+     lock held for the sake of a to-do list is a battery spent on nothing. */
+  useEffect(() => (running ? holdScreenAwake() : undefined), [running]);
 
   // The clock. Only while running — a paused row's time is not moving.
   useEffect(() => {
