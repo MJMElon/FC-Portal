@@ -18,10 +18,13 @@ import {
   addFix,
   formatDistance,
   formatDuration,
+  isStalled,
   mayStart,
+  stalledFor,
   trackPayload,
 } from './track.js';
 import { cachedBoundaries, loadSiteBoundaries } from '../../../lib/siteBoundary.js';
+import { holdScreenAwake } from '../../../lib/screenWake.js';
 
 /** Close enough to see a seedling bed, far enough to see the plot round it. */
 const WORK_ZOOM = 18;
@@ -144,7 +147,11 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
   const [attr, setAttr] = useState(GOOGLE_ATTR);
   const [elapsed, setElapsed] = useState(0);
 
+  const [stalled, setStalled] = useState(0);       // seconds since the last fix
+  const [why, setWhy] = useState(null);            // why the last fix was not taken
+
   const stopHeadingRef = useRef(null);
+  const lastFixAtRef = useRef(null);
   const startedAtMsRef = useRef(null);
   const recordingRef = useRef(false);
   recordingRef.current = recording;
@@ -221,13 +228,23 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
           accuracy: c.accuracy == null ? null : Math.round(c.accuracy),
         };
         setOwnFix(next);
+        /* The moment a position ARRIVED, which is a different thing from the
+           moment one was kept: a fix dropped for being weak still proves the
+           phone is listening, and a line that stops because the screen slept
+           has neither. */
+        lastFixAtRef.current = Date.now();
+        setStalled(0);
         if (recordingRef.current) {
           const t0 = startedAtMsRef.current || Date.now();
           /* Spread over the old state, not straight from addFix. addFix
              answers about points and distance and nothing else — deliberately,
              so it stays a pure function with a test — and taking its return as
              the whole state threw `startedAt` away on the very first fix. */
-          setState((s) => ({ ...s, ...addFix(s, { ...next, t: (Date.now() - t0) / 1000 }) }));
+          setState((s) => {
+            const r = addFix(s, { ...next, t: (Date.now() - t0) / 1000 });
+            setWhy(r.added ? null : r.why);
+            return { ...s, ...r };
+          });
         }
       },
       (err) => flash(err && err.code === 1 ? t('mt.gpsDenied') : t('mt.gpsUnavailable')),
@@ -243,6 +260,23 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
       () => setElapsed((Date.now() - (startedAtMsRef.current || Date.now())) / 1000), 1000);
     return () => clearInterval(id);
   }, [recording]);
+
+  /* ── and the thing that says the line has stopped growing ──
+     A TRACK THAT QUIETLY STOPS IS THE WHOLE FAULT. The screen sleeps, the
+     browser stops handing out positions, and the map goes on looking exactly
+     like a map that is recording — so somebody walks a plot for nothing and
+     finds out at the end, from a line four metres long. Nothing can make the
+     fixes arrive; what it can do is stop pretending they are. */
+  useEffect(() => {
+    if (!recording) { setStalled(0); return undefined; }
+    const id = setInterval(() => setStalled(stalledFor(lastFixAtRef.current, Date.now())), 2000);
+    return () => clearInterval(id);
+  }, [recording]);
+
+  // Keep the screen on for as long as a walk is being recorded, and ASK AGAIN
+  // every time the page comes back: the browser takes the lock away the moment
+  // the page is hidden and never offers it back. See lib/screenWake.js.
+  useEffect(() => (recording ? holdScreenAwake() : undefined), [recording]);
 
   // ── draw the dot, the accuracy ring, and the line ──
   useEffect(() => {
@@ -385,14 +419,15 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
   function startRecording() {
     if (!mayStart(fix)) return;
     startedAtMsRef.current = Date.now();
+    lastFixAtRef.current = Date.now();
     setElapsed(0);
+    setStalled(0);
+    setWhy(null);
     setState({ points: [], distance: 0, startedAt: new Date().toISOString() });
     setRecording(true);
-    // A track is walked, and a phone that sleeps stops giving fixes. Best
-    // effort — the API is not everywhere, and it is not worth failing over.
-    if (navigator.wakeLock && navigator.wakeLock.request) {
-      navigator.wakeLock.request('screen').catch(() => {});
-    }
+    /* The screen lock is held by an effect on `recording`, not asked for here.
+       Asked here it was asked ONCE, and the browser hands it back the moment
+       the page is hidden — which is how a walk came to record two fixes. */
   }
 
   function stopRecording() {
@@ -404,6 +439,10 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
 
   const canStart = mayStart(fix);
   const acc = fix && fix.accuracy != null ? fix.accuracy : null;
+  /* `stalled` is set by the ticker above, so this is a plain read rather than
+     a second clock: two clocks disagreeing about whether a line has stopped is
+     a worse thing than the one being two seconds late. */
+  const stalledNow = recording && isStalled(Date.now() - stalled * 1000, Date.now());
 
   const btn = 'rounded-2xl font-black uppercase tracking-widest text-[12px] transition-colors';
 
@@ -487,6 +526,22 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
 
       {/* The bar with the one button that matters. */}
       <div className="shrink-0 bg-slate-900 px-3 pt-3 pb-5 space-y-2.5">
+        {/* THE LINE HAS STOPPED GROWING, said out loud. Red, above the figures,
+            because the figures themselves look perfectly healthy while this is
+            happening — they simply stop moving, and a map that is not recording
+            looks exactly like one that is. */}
+        {recording && stalledNow && (
+          <div className="rounded-xl bg-rose-600 px-3 py-2 text-[11.5px] font-black text-white">
+            {t('mt.trkStalled', { n: formatDuration(stalled) })}
+          </div>
+        )}
+        {recording && !stalledNow && why && (
+          <div className="rounded-xl bg-amber-500/90 px-3 py-2 text-[11.5px] font-bold text-slate-900">
+            {why === 'weak' ? t('mt.trkWhyWeak')
+             : why === 'jump' ? t('mt.trkWhyJump')
+             : t('mt.trkWhyStill')}
+          </div>
+        )}
         <div className="flex items-center gap-3 text-white">
           <div className="flex-1">
             <div className="text-[22px] font-black tabular-nums leading-none">

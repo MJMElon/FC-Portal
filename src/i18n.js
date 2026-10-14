@@ -415,6 +415,10 @@ const en = {
   'mt.trkHeadingNone': 'This phone has no compass.',
   'mt.trkHeadingRough': 'This compass is not a true one, so north may drift.',
   'mt.trkFellBack': 'The satellite imagery would not load, so a different one is being used.',
+  'mt.trkStalled': 'NO POSITION FOR {n} — the walk is NOT being recorded. Keep this screen on and in your hand.',
+  'mt.trkWhyWeak': 'The fix is too rough to keep — walking out from under cover will pick it up again.',
+  'mt.trkWhyJump': 'The last position jumped too far to believe, so it was left out.',
+  'mt.trkWhyStill': 'Standing still — the line grows again as soon as you walk on.',
 
   // top nav / offline
 
@@ -1225,6 +1229,10 @@ const ms = {
   'mt.trkHeadingNone': 'Telefon ini tiada kompas.',
   'mt.trkHeadingRough': 'Kompas ini bukan kompas sebenar, arah utara mungkin terpesong.',
   'mt.trkFellBack': 'Imej satelit tidak dapat dimuatkan, imej lain sedang digunakan.',
+  'mt.trkStalled': 'TIADA POSISI SELAMA {n} — jejak TIDAK sedang direkod. Biarkan skrin ini hidup dan di tangan.',
+  'mt.trkWhyWeak': 'Isyarat terlalu kasar untuk disimpan — keluar dari bawah teduhan dan ia akan kembali.',
+  'mt.trkWhyJump': 'Posisi terakhir melompat terlalu jauh untuk dipercayai, jadi ia ditinggalkan.',
+  'mt.trkWhyStill': 'Berdiri diam — garisan akan bertambah sebaik anda berjalan semula.',
 
   // top nav / offline
 
