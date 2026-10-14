@@ -27,6 +27,7 @@
  * is the honest drawing of what happened.
  */
 import { addFix, trackPayload } from '../modules/maintenance/track/track.js';
+import { park, unpark } from '../modules/maintenance/track/parked.js';
 
 /** Where a track in progress is kept, so locking the phone cannot lose it. */
 export const TRACK_KEY = 'mjm.worker.track';
@@ -105,24 +106,15 @@ export function elapsed(s, at = new Date()) {
  * Every read and write is wrapped — a phone with storage blocked must still be
  * able to walk a track, it just cannot survive being killed. */
 export function save(s) {
-  try {
-    if (s) localStorage.setItem(TRACK_KEY, JSON.stringify(s));
-    else localStorage.removeItem(TRACK_KEY);
-  } catch (_) { /* a track that cannot be parked is still a track */ }
+  park(TRACK_KEY, s);
 }
 
 export function load() {
-  try {
-    const raw = localStorage.getItem(TRACK_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw);
-    if (!s || !s.id || !s.startedAt || !Array.isArray(s.points)) return null;
-    /* Comes back PAUSED however it went away. The phone was not being
-       watched while the page was gone, so the minutes in between have no
-       fixes; resuming silently would draw a straight line across them and
-       call it walked. The worker presses Resume, and the gap is visible. */
-    return { ...s, status: 'paused' };
-  } catch (_) {
-    return null;
-  }
+  const s = unpark(TRACK_KEY,
+    (x) => !!x.id && !!x.startedAt && Array.isArray(x.points));
+  /* Comes back PAUSED however it went away. The phone was not being watched
+     while the page was gone, so the minutes in between have no fixes;
+     resuming silently would draw a straight line across them and call it
+     walked. The worker presses Resume, and the gap is visible. */
+  return s ? { ...s, status: 'paused' } : null;
 }

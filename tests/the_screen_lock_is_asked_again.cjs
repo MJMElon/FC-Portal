@@ -158,6 +158,92 @@ console.log('\n── 6. The stall rule: a line that has stopped growing says so
   is(stalledFor(null, now), 0, 'and before the first fix there is nothing to be quiet about');
 }
 
+console.log('\n── 7. A walk survives the page being thrown away ──');
+{
+  /* Nothing can keep RECORDING through a locked phone. What must not also
+     happen is losing the metres already walked, which is what the FC map did:
+     the walk lived in React state inside a modal. */
+  const psrc = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'modules', 'maintenance', 'track', 'parked.js'), 'utf8');
+  const grab = (mark) => {
+    const a = psrc.indexOf(mark);
+    if (a < 0) throw new Error('could not find ' + mark);
+    return psrc.slice(a, psrc.indexOf('\n}', a) + 2).replace('export function', 'function');
+  };
+  const store = {};
+  const localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; },
+  };
+  const hours = Number((psrc.match(/export const PARKED_GOOD_FOR_H = (\d+)/) || [])[1]);
+  const { park, unpark, clearParked, stillFresh } = new Function('localStorage',
+    'const PARKED_GOOD_FOR_H = ' + hours + ';\n' +
+    grab('export function park') + '\n' + grab('export function unpark') + '\n' +
+    grab('export function clearParked') + '\n' + grab('export function stillFresh') +
+    '\nreturn { park, unpark, clearParked, stillFresh };')(localStorage);
+
+  const walk = { points: [[114.1, 3.9, 0, 8], [114.1001, 3.9, 12, 7]], distance: 11,
+                 startedAt: '2026-10-14T01:00:00.000Z', parkedAt: '2026-10-14T01:05:00.000Z' };
+  park('mjm.fc.track', walk);
+  is(unpark('mjm.fc.track', (x) => Array.isArray(x.points) && x.points.length > 0), walk,
+    'the walk comes back exactly as it was parked');
+
+  /* It must come back only where it can be understood. A shape that changed
+     since it was parked is worse than nothing: half a walk read as a whole
+     one is a figure somebody writes down. */
+  park('mjm.fc.track', { points: [] });
+  is(unpark('mjm.fc.track', (x) => Array.isArray(x.points) && x.points.length > 0), null,
+    'an empty one is not offered back');
+  store['mjm.fc.track'] = '{ not json';
+  is(unpark('mjm.fc.track', () => true), null, 'and neither is a half-written one');
+
+  park('mjm.fc.track', walk);
+  clearParked('mjm.fc.track');
+  is(unpark('mjm.fc.track', () => true), null,
+    'handing the walk to the record clears it, so it cannot come back on the NEXT job');
+
+  /* A phone with storage blocked must still walk a track. */
+  const blocked = { getItem: () => { throw new Error('denied'); },
+                    setItem: () => { throw new Error('denied'); },
+                    removeItem: () => { throw new Error('denied'); } };
+  const B = new Function('localStorage',
+    grab('export function park') + '\n' + grab('export function unpark') +
+    '\nreturn { park, unpark };')(blocked);
+  let threw = null;
+  try { B.park('k', walk); is(B.unpark('k', () => true), null, 'and a blocked store reads as nothing'); }
+  catch (e) { threw = e.message; }
+  is(threw, null, 'storage refused is not a reason to lose the walk on screen');
+}
+
+console.log('\n── 8. …but only while it is still the walk somebody is finishing ──');
+{
+  /* A kill takes the FORM with it — the plot, the job, the quantity are all
+     gone — so the walk comes back into a form that has to be keyed again and
+     nothing in it says which job it was for. Within the shift that is obvious
+     to the person standing there; a walk parked last Tuesday is not, and
+     offering it against today's plot files N15 under B04. */
+  const psrc = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'modules', 'maintenance', 'track', 'parked.js'), 'utf8');
+  const hours = Number((psrc.match(/export const PARKED_GOOD_FOR_H = (\d+)/) || [])[1]);
+  const a = psrc.indexOf('export function stillFresh');
+  const stillFresh = new Function(
+    'const PARKED_GOOD_FOR_H = ' + hours + ';\n' +
+    psrc.slice(a, psrc.indexOf('\n}', a) + 2).replace('export function', 'function') +
+    '\nreturn stillFresh;')();
+
+  is(hours, 12, 'one working day and the night after it');
+  const now = Date.parse('2026-10-14T09:00:00.000Z');
+  const at = (iso) => stillFresh({ parkedAt: iso }, now);
+  is(at('2026-10-14T08:40:00.000Z'), true, 'parked twenty minutes ago is this morning walk');
+  is(at('2026-10-13T22:00:00.000Z'), true, 'and last night is still inside the window');
+  is(at('2026-10-07T09:00:00.000Z'), false, 'last Tuesday is not, and is dropped rather than shown');
+  is(at('2026-10-14T09:00:30.000Z'), true,
+    'a phone whose clock runs ahead parks in the future — that one is DEFINITELY still in the plot');
+  is(stillFresh({}, now), false, 'and something parked before this rule existed has no date to trust');
+  is(stillFresh(null, now), false, 'nothing parked is not fresh either');
+}
+
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'all good'));
 process.exit(bad ? 1 : 0);
 
