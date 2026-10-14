@@ -5,7 +5,7 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { printDO } from '../../lib/pdf.js';
-import { compressSeals, formatSealRanges, sealDigits, rangeQty, rangeHolding } from '../../lib/sealRanges.js';
+import { compressSeals, formatSealRanges, sealDigits, rangeQty, rangeHolding, SHOW_SEALS_ON_DO } from '../../lib/sealRanges.js';
 import EntryModal from '../do/EntryModal.jsx';
 import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
 import { useWorkerTick } from '../do/useWorkerTick.js';
@@ -678,7 +678,7 @@ export default function ScanModule() {
     }
 
     lines.push('', `*Total Qty: ${p.total_qty || 0}*`);
-    if (Array.isArray(p.seal_ranges) && p.seal_ranges.length) {
+    if (SHOW_SEALS_ON_DO && Array.isArray(p.seal_ranges) && p.seal_ranges.length) {
       lines.push(`Seal No: ${formatSealRanges(p.seal_ranges)}`, `Seal Qty: ${p.seal_qty || 0}`);
     }
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');

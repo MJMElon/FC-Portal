@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { formatSealRanges } from './sealRanges.js';
+import { formatSealRanges, SHOW_SEALS_ON_DO } from './sealRanges.js';
 
 // Company letterhead — same identity block the Sales Web proforma invoice
 // uses (admin-orders.js openProformaInvoice).
@@ -137,7 +137,7 @@ export function buildDOPdf(doRec, al = {}, staff = '—', sigDataUrl = null, pho
   // seals cannot push the signature boxes into the footer; the full list
   // is in the system. With five items and four lines the boxes still end
   // well above the footer rule at 280.
-  const seals = Array.isArray(doRec.seal_ranges) ? doRec.seal_ranges : [];
+  const seals = SHOW_SEALS_ON_DO && Array.isArray(doRec.seal_ranges) ? doRec.seal_ranges : [];
   if (seals.length) {
     y += 12;
     doc.setFont('helvetica', 'bold');

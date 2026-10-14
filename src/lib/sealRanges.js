@@ -74,3 +74,11 @@ export function rangeHolding(code, ranges) {
   if (n == null) return null;
   return (ranges || []).find((r) => n >= Number(r.start_no) && n <= Number(r.end_no)) || null;
 }
+
+// Seal numbers are kept OFF every DO a customer sees, for now (office,
+// 14 Oct 2026): the DO PDF, the WhatsApp text, the DO list on the signing
+// phone and the customer portal. They are still RECORDED on
+// shared_do_records.seal_ranges and still shown in the office DO record
+// (Manage DO on operation_delivery.html). Set true to show them again.
+// operation_delivery.html carries its own copy of this switch.
+export const SHOW_SEALS_ON_DO = false;
