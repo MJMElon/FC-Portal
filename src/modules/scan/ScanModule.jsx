@@ -104,6 +104,22 @@ export default function ScanModule() {
   const consents = useMemo(() => mergeConsents(serverConsents, progress), [serverConsents, progress]);
   consentsRef.current = consents;
   const active = consents.find((c) => c.id === activeId) || null;
+
+  /* How much has gone out on THIS card. activeDOs is every DO on the AL,
+     and it used to be compared whole against this one card's quantity, so
+     0HVUL3's 300 consent opened reading Fully Collected off the 700 DO
+     of the consent before it. It is this card's SHARE now, the same
+     oldest-first split the list uses (issuedShares). With no DOs read yet
+     the phone's own figure stands, and so does a higher one while a DO
+     for this AL is still waiting on the phone to be sent. */
+  function cardIssued(card) {
+    if (!card) return 0;
+    const local = progress[card.id]?.issuedQty || 0;
+    if (!activeDOs.length || !card.al_number || activeDOs[0].al_number !== card.al_number) return local;
+    const cards = consents.filter((c) => c.al_number === card.al_number);
+    const share = issuedShares(cards, issuedQtyByAL(activeDOs))[card.id] || 0;
+    return queuedDOALs().has(card.al_number) ? Math.max(local, share) : share;
+  }
   activeRef.current = active;
 
   const sync = useCallback(async () => {
@@ -534,9 +550,8 @@ export default function ScanModule() {
       loadBatchData().then(({ batchMap }) => setDoBatchMap(batchMap), () => {});
     }
     setIssuing(false);
-    // Use the higher of localStorage-tracked qty and server-derived qty from activeDOs.
-    const serverIssuedQty = activeDOs.reduce((sum, d) => sum + (d.total_qty || 0), 0);
-    const issuedQty = Math.max(progress[consent.id]?.issuedQty || 0, serverIssuedQty);
+    // This card's own share of what has gone out -- see cardIssued.
+    const issuedQty = cardIssued(consent);
     const newScans = Math.max(0, consent.unique - issuedQty);
     const remainingBalance = Math.max(0, consent.qty - issuedQty);
     const suggestQty = newScans > 0 ? newScans : remainingBalance;
@@ -677,6 +692,7 @@ export default function ScanModule() {
           lastInfo={lastInfo}
           issuing={issuing}
           activeDOs={activeDOs}
+          issuedQty={cardIssued(active)}
           sealAllocs={sealAllocs}
           onScan={recordScan}
           onBack={() => setActiveId(null)}
@@ -869,7 +885,7 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
 }
 
 // ── Scanner view ──────────────────────────────────────
-function Scanner({ consent, lastInfo, issuing, activeDOs, sealAllocs, onScan, onBack, onIssueDO }) {
+function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, onScan, onBack, onIssueDO }) {
   const { t } = useLang();
   const [scanning, setScanning] = useState(false);
   const [statusKey, setStatusKey] = useState('ready');
@@ -894,10 +910,9 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, sealAllocs, onScan, on
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
 
-  // Use the higher of localStorage-tracked qty and server-derived qty from activeDOs.
-  // This ensures the correct balance even when DOs were issued through the AI system.
-  const serverIssuedQty = activeDOs.reduce((sum, d) => sum + (d.total_qty || 0), 0);
-  const issuedQty = Math.max(consent.issuedQty || 0, serverIssuedQty);
+  // issuedQty is THIS card's share of the AL's DOs, worked out by the
+  // parent (cardIssued) -- never the AL total, which belongs to every
+  // consent on the order at once.
   // No floor here — a consent whose whole qty is already issued (balance 0)
   // has nothing left to scan for, and used to show a phantom "0/1, 1
   // remaining" from Math.max(1, ...) that let scanning carry on past a

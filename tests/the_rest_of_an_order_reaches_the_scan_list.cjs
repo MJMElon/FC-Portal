@@ -135,5 +135,20 @@ function oldRule(prev, cards, byAL) {
   is(S.mergeConsents([second, first], after).filter(onList).map((c) => c.id), [], 'once the 300 goes out too, the order leaves the list');
 }
 
+/* ── 7. OPENING the card: the scan screen and the DO form ─────────────
+   The list was right and the card it opened said Fully Collected: the
+   scan screen and the Issue DO form each added up EVERY DO on the AL and
+   held it against this one consent. Both now ask cardIssued, which is the
+   same share. Nothing in the file may add up the AL's DOs on its own. */
+{
+  is((scan.match(/activeDOs\.reduce\(/g) || []).length, 0, 'nothing adds up the whole AL against one card any more');
+  is(/issuedQty=\{cardIssued\(active\)\}/.test(scan), true, 'the scan screen is handed this card\'s share');
+  is(/const issuedQty = cardIssued\(consent\);/.test(scan), true, 'and so is the Issue DO form');
+  const cards = S.mergeConsents([second, first], progress);
+  const share = S.issuedShares(cards.filter((c) => c.al_number === AL), D.issuedQtyByAL(doRows)).c2;
+  const card = cards.find((c) => c.id === 'c2');
+  is([card.qty, share, Math.max(0, card.qty - share)], [300, 0, 300], 'the 300 card opens with 0 collected and 300 to scan, not Fully Collected');
+}
+
 console.log(failed ? '\n' + failed + ' FAILED' : '\nall good');
 process.exit(failed ? 1 : 0);
