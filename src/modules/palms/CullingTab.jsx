@@ -11,7 +11,7 @@ import { agoText } from '../../lib/ago.js';
 import { listJobs } from '../../lib/outbox.js';
 import { openCasePlots } from '../../lib/nelos.js';
 import { clearRefused, refusedCases, retryRefused, submitCase } from './cullingOffline.js';
-import { clearInang, loadInang, pruneInang, saveInang } from './cullingInang.js';
+import { clearInang, draftInang, loadInang, pruneInang, saveInang } from './cullingInang.js';
 import { cullingLines } from './cullingLines.js';
 
 /**
@@ -341,12 +341,18 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      from; `savedBy` is what the table starts filled with, so a selection
      made this morning is still on screen this afternoon. */
   const [saved, setSaved] = useState({ byBatch: {}, rounds: 0 });
+  /* Which plot the rows above actually belong to. The draft save waits for
+     it: writing before the read has landed would put an empty selection
+     over one somebody made this morning. */
+  const [loadedPlot, setLoadedPlot] = useState(null);
   /* A selection belongs to the plot it was made on, so changing plot drops
      what is on screen and loads that plot's own. */
   useEffect(() => {
     setTyping(''); setActive(null);
     setSaved({ byBatch: {}, rounds: 0 });
     setTermsBy({});
+    setLoadedPlot(null);
+    setDraftFailed(false);
     if (!plotId) return;
     let live = true;
     loadInang(plotId).then((got) => {
@@ -361,6 +367,7 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
         start[b] = r.terms && r.terms.length ? r.terms : (r.qty ? [r.qty] : []);
       });
       setTermsBy(start);
+      setLoadedPlot(plotId);
     });
     return () => { live = false; };
   }, [plotId]);
@@ -376,6 +383,39 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      would be no way to correct the figure that got it there. */
   const lines = useMemo(() => cullingLines(batches, termsBy, active, typing),
     [batches, termsBy, typing, active]);
+
+  /* ── SAVED AS IT IS KEYED ──────────────────────────────────────────
+     A count walked in a plot and typed on a phone is work that has been
+     done, and it used to live nowhere until a button was pressed: a phone
+     that died, a screen closed, a plot changed, and the walk had to be
+     walked again.
+
+     Within the second of the last keystroke, not on it — a write per digit
+     is three writes to key 250, on the signal a nursery has. The timer is
+     cleared and restarted by each change, so a run of keys is one save.
+
+     It writes only the FIGURE. The round and the figure that round was sent
+     with belong to the buttons; a draft is not a round, and counting it as
+     one would light the HQ button over a number nobody has sent anywhere.
+
+     Nothing is written until the plot's own rows have been READ, or the
+     first save would race the load and write an empty selection over one
+     somebody made this morning. */
+  const [draftFailed, setDraftFailed] = useState(false);
+  useEffect(() => {
+    if (!plotRow || !loadedPlot || loadedPlot !== plotRow.plot) return;
+    /* Only the blocks that have something to say: one that has never been
+       keyed and has no row needs none made for it. A block cleared back to
+       nought DOES have one — that is an answer too. */
+    const rows = lines.filter((l) => l.inang > 0 || saved.byBatch[l.batch]);
+    if (!rows.length) return;
+    const id = setTimeout(() => {
+      draftInang({ plot: plotRow.plot, nursery: plotRow.nursery, rows })
+        .then((okNow) => setDraftFailed(!okNow));
+    }, 800);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, plotRow && plotRow.plot, loadedPlot]);
 
   /* What the plot adds up to, for the line at the top. The worst batch is
      what the buttons answer to, so it is what the header shows. */
@@ -401,7 +441,12 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      percent. */
   const keyedThisRound = useMemo(() => lines.some((l) => {
     const was = saved.byBatch[l.batch];
-    return l.inang !== (was ? was.qty : 0);
+    /* Against what the figure was WHEN THE LAST ROUND WENT, never against
+       what is saved now — the draft is saved as it is keyed, so comparing
+       with that would answer no every time and the HQ button would never
+       light. */
+    const sent = was && was.sentQty != null ? was.sentQty : 0;
+    return l.inang !== sent;
   }), [lines, saved]);
 
   /* The three buttons, and each is a different question:
@@ -518,7 +563,8 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
     }
     setSaved((prev) => ({
       rounds: attempt,
-      byBatch: Object.fromEntries(lines.map((l) => [l.batch, { qty: l.inang, terms: l.terms, attempt }])),
+      byBatch: Object.fromEntries(lines.map((l) =>
+        [l.batch, { qty: l.inang, terms: l.terms, attempt, sentQty: l.inang }])),
     }));
     const action = act;
     // The case's own sentence, not the button's label: see caseTitle in
@@ -757,6 +803,15 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
           {anyBroken && (
             <div className="text-[10px] font-bold text-amber-500/80 leading-snug pt-1 px-1">
               {t('cull.negativeNote')}
+            </div>
+          )}
+          {/* THE DRAFT DID NOT LAND. Said once, in a line, rather than per
+              keystroke — and the figure stays on screen and is still
+              sendable, because the hard save under each button is the one
+              that has to land and it refuses out loud when it does not. */}
+          {draftFailed && (
+            <div data-draftfailed className="text-[10px] font-bold text-rose-400 leading-snug pt-1 px-1">
+              {t('cull.draftFailed')}
             </div>
           )}
         </div>

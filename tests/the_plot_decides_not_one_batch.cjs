@@ -231,6 +231,46 @@ is([line(L, '246').editable, line(L, '247').editable, line(L, '248').editable],
    [true, false, false],
    'only a batch over the line — one already under it has nothing to bring down, and one whose ledger does not add up has no rate at all');
 
+/* ── 8c. SAVED AS IT IS KEYED, AND A DRAFT IS NOT A ROUND ────────────
+   A count walked in a plot and typed on a phone is work that has been done,
+   so it is written within the second of the last keystroke. That makes the
+   two things the HQ button turns on impossible to tell apart unless they
+   are kept apart: the LIVE figure moves continuously, and the figure the
+   last round was SENT with does not. */
+/* The draft function ALONE — to the next export, or saveInang below it
+   would answer for it and the check would pass on a draft that did write a
+   round. */
+const DRAFT = (() => {
+  const from = STORE.indexOf('export async function draftInang');
+  const to = STORE.indexOf('\nexport ', from + 10);
+  return from < 0 ? '' : STORE.slice(from, to < 0 ? undefined : to);
+})();
+if (DRAFT && !/attempt|sent_qty/.test(DRAFT)) {
+  ok('the draft writes the figure and says nothing about rounds');
+} else {
+  fail('the draft writes a round — the HQ button would light over a figure nobody has sent');
+}
+if (/sent_qty: Math\.max/.test(STORE)) {
+  ok('and the hard save records what the round was sent with');
+} else {
+  fail('nothing records the figure a round went with, so a re-open reads as a re-count');
+}
+if (/const sent = was && was\.sentQty != null \? was\.sentQty : 0;/.test(TAB)) {
+  ok('and the HQ button compares against THAT, never against the live draft');
+} else {
+  fail('the HQ gate compares against the continuously-saved figure, so it can never light');
+}
+if (/if \(!plotRow \|\| !loadedPlot \|\| loadedPlot !== plotRow\.plot\) return;/.test(TAB)) {
+  ok('and nothing is written until the plot own rows have been read');
+} else {
+  fail('the draft can race the load and write an empty selection over a real one');
+}
+if (/setTimeout\(\(\) => \{\s*draftInang/.test(TAB)) {
+  ok('within the second of the last keystroke, not on every digit');
+} else {
+  fail('the draft is not debounced — three writes to key 250 on a nursery signal');
+}
+
 /* ── 9. The board the office drew, and the clear underneath it ───────── */
 if (!/'AC', 'AC'/.test(TAB) && !/key\('00'/.test(TAB)) {
   ok('four rows, and no AC or 00 — the keypad the office drew');

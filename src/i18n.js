@@ -120,6 +120,7 @@ const en = {
   'cull.finalBalance': 'Final balance',
   'cull.pickBatchFirst': 'Tap a batch to key its pokok inang',
   'cull.saveFailed': 'The selection could not be saved, so no case was raised. Try again.',
+  'cull.draftFailed': 'Not saved to the office yet — the count is on this phone and goes up when the line returns or when you press a button.',
 
   // PALMS
   // motion study
@@ -939,6 +940,7 @@ const ms = {
   'cull.finalBalance': 'Baki akhir',
   'cull.pickBatchFirst': 'Tekan satu batch untuk masukkan pokok inang',
   'cull.saveFailed': 'Pilihan tidak dapat disimpan, jadi tiada kes dibuka. Cuba lagi.',
+  'cull.draftFailed': 'Belum disimpan ke pejabat — kiraan ada pada telefon ini dan akan naik bila talian kembali atau bila anda tekan butang.',
   'cull.raisedBy': 'Dimohon oleh',
   'cull.raised': 'Kes {n} dibuka',
   'cull.alreadyOpen': 'Kes {n} sudah dibuka untuk plot ini',
