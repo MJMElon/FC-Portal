@@ -417,6 +417,30 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lines, plotRow && plotRow.plot, loadedPlot]);
 
+  /* SAVE, PRESSED ON PURPOSE.
+     The draft goes up by itself a second after the last keystroke, so this
+     changes nothing about what is recorded. What it changes is knowing: a
+     save that happens silently is one nobody can be sure of, and a Field
+     Conductor about to walk away from a plot wants to be told, not to
+     assume. So it writes the same draft, at once, and SAYS SO — which is
+     the whole of its job.
+
+     It is also the one way to make the save happen on a phone that has just
+     found a bar of signal, without keying another digit to trigger it. */
+  const [savingDraft, setSavingDraft] = useState(false);
+  const draftRows = () => lines.filter((l) => l.inang > 0 || saved.byBatch[l.batch]);
+  async function saveDraftNow() {
+    if (!plotRow || savingDraft || busy) return;
+    commit();
+    const rows = draftRows();
+    if (!rows.length) { flash(t('cull.nothingToSave')); return; }
+    setSavingDraft(true);
+    const landed = await draftInang({ plot: plotRow.plot, nursery: plotRow.nursery, rows });
+    setSavingDraft(false);
+    setDraftFailed(!landed);
+    flash(landed ? t('cull.saved') : t('cull.draftFailed'));
+  }
+
   /* What the plot adds up to, for the line at the top. The worst batch is
      what the buttons answer to, so it is what the header shows. */
   const worstNow   = lines.length ? Math.max(...lines.map((l) => (Number.isFinite(l.rate) ? l.rate : Infinity))) : NaN;
@@ -836,14 +860,30 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
             when nothing is: a keypad that quietly does nothing reads as a
             broken screen. */}
         <div className="bg-[#101013] rounded-2xl pt-1.5 pb-1.5 flex-1 min-h-0 flex flex-col">
-          <div className="px-4 text-right">
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-              {active ? `${t('cull.batch')} ${active}` : t('cull.pickBatchFirst')}
-            </div>
-            <div data-typing className="text-slate-500 text-[13px] font-mono min-h-[14px] truncate">
-              {active
-                ? ([...(termsBy[active] || []), ...(typing === '' ? [] : [typing])].join(' + ') || ' ')
-                : ' '}
+          <div className="px-3 flex items-start justify-between gap-2">
+            {/* Small and quiet, beside the keypad rather than below it: the
+                three buttons under this panel each raise a CASE, and a
+                fourth of that size would read as a fourth of those. This
+                one only writes down what is already on screen. */}
+            <button
+              data-save
+              onClick={saveDraftNow}
+              disabled={savingDraft || busy}
+              className="shrink-0 rounded-xl border border-[#2c2c2e] bg-[#1c1c1e] px-3 py-1.5
+                         text-[11px] font-black uppercase tracking-wider text-slate-200
+                         hover:border-slate-500 cursor-pointer disabled:opacity-50"
+            >
+              {savingDraft ? t('common.saving') : t('cull.save')}
+            </button>
+            <div className="text-right min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                {active ? `${t('cull.batch')} ${active}` : t('cull.pickBatchFirst')}
+              </div>
+              <div data-typing className="text-slate-500 text-[13px] font-mono min-h-[14px] truncate">
+                {active
+                  ? ([...(termsBy[active] || []), ...(typing === '' ? [] : [typing])].join(' + ') || ' ')
+                  : ' '}
+              </div>
             </div>
           </div>
           <Keypad onPress={press} />

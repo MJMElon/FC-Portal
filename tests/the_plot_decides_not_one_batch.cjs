@@ -271,6 +271,37 @@ if (/setTimeout\(\(\) => \{\s*draftInang/.test(TAB)) {
   fail('the draft is not debounced — three writes to key 250 on a nursery signal');
 }
 
+/* ── 8d. A SAVE SOMEBODY PRESSES ─────────────────────────────────────
+   The draft goes up by itself, so this changes nothing about what is
+   recorded. What it changes is KNOWING: a save that happens silently is one
+   nobody can be sure of, and a Field Conductor about to walk away wants to
+   be told rather than to assume. */
+if (/async function saveDraftNow/.test(TAB) && /data-save/.test(TAB)) {
+  ok('there is a Save button, and it writes the same draft');
+} else {
+  fail('no Save button');
+}
+if (/flash\(landed \? t\('cull\.saved'\) : t\('cull\.draftFailed'\)\)/.test(TAB)) {
+  ok('and it SAYS whether it landed, which is the whole of its job');
+} else {
+  fail('the Save button does not say whether the save landed');
+}
+if (/async function saveDraftNow[\s\S]{0,200}commit\(\);/.test(TAB)) {
+  ok('folding in what is on the keypad first, so it saves what is on screen');
+} else {
+  fail('Save does not commit the keypad, so it can write less than the screen shows');
+}
+if (/const landed = await draftInang\(/.test(TAB)) {
+  ok('and it is the DRAFT writer — pressing Save raises no case and counts no round');
+} else {
+  fail('the Save button writes through the round-counting save');
+}
+for (const k of ['cull.save', 'cull.saved', 'cull.nothingToSave']) {
+  const n = (I18N.match(new RegExp("'" + k.replace('.', '\\.') + "':", 'g')) || []).length;
+  if (n === 2) ok("'" + k + "' is in both languages");
+  else fail("'" + k + "' appears " + n + " times, wanted 2 (English and Malay)");
+}
+
 /* ── 9. The board the office drew, and the clear underneath it ───────── */
 if (!/'AC', 'AC'/.test(TAB) && !/key\('00'/.test(TAB)) {
   ok('four rows, and no AC or 00 — the keypad the office drew');
