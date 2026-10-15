@@ -247,6 +247,69 @@ export async function fetchTodayBookingALs() {
   return map;
 }
 
+/* ── WHAT HAS BEEN COLLECTED ON EACH CARD ─────────────────────────────
+   A DO names its AL and not the consent it was collected against, so the
+   server can only say how much has gone out on the WHOLE order. That
+   figure used to be written onto EVERY card of the AL. Order 0HVUL3 is
+   what that looks like: 1,000 ordered, a consent of 700 collected in
+   full, and then a consent for the other 300 -- which arrived already
+   reading 700 collected against a quantity of 300, so it was finished
+   before anybody scanned a seal, and never shown.
+
+   So the AL total is SHARED OUT, oldest card first, each taking no more
+   than its own quantity. Collection runs in the order the consents were
+   signed, so that is the honest reading of a figure that names no card.
+   Anything left over (a DO bigger than every consent on the AL) lands on
+   the newest card, so the total is never lost. */
+export function issuedShares(cards, issuedByAL) {
+  const byAL = new Map();
+  (cards || []).forEach((c) => {
+    if (!c.al_number || /^MANUAL-/i.test(c.al_number)) return;
+    if (!byAL.has(c.al_number)) byAL.set(c.al_number, []);
+    byAL.get(c.al_number).push(c);
+  });
+  const out = {};
+  byAL.forEach((list, al) => {
+    if (!(al in (issuedByAL || {}))) return;
+    let left = Number(issuedByAL[al]) || 0;
+    list.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    list.forEach((c, i) => {
+      const last = i === list.length - 1;
+      const share = last ? left : Math.min(c.qty || 0, left);
+      out[c.id] = share;
+      left -= share;
+    });
+  });
+  return out;
+}
+
+/* Write the shares onto the progress map. The server is the answer, in
+   BOTH directions -- a card the old rule had marked collected is put back
+   -- except while a DO for that AL is still waiting on this phone to be
+   sent: the server has not heard of it yet, so a lower server figure is
+   not news. Returns prev itself when nothing moved. */
+export function applyIssuedShares(prev, cards, shares, queuedALs) {
+  let changed = false;
+  const map = { ...prev };
+  (cards || []).forEach((c) => {
+    if (!(c.id in shares)) return;
+    const share = shares[c.id];
+    const cur = map[c.id] || defaultProgress();
+    const local = cur.issuedQty || 0;
+    if (local === share) return;
+    if (local > share && queuedALs && queuedALs.has(c.al_number)) return;
+    map[c.id] = { ...cur, issuedQty: share, doIssued: share > 0 };
+    if (share > 0) {
+      (c.memberIds || [c.id]).forEach((id) => {
+        if (id === c.id) return;
+        map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+      });
+    }
+    changed = true;
+  });
+  return changed ? map : prev;
+}
+
 export function statusOf(c) {
   if (c.unique > c.qty) return 'over';
   if (c.unique >= c.qty && c.qty > 0) return 'done';

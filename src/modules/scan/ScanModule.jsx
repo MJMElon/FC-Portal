@@ -7,7 +7,7 @@ import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { printDO } from '../../lib/pdf.js';
 import { compressSeals, formatSealRanges, sealDigits, rangeQty, rangeHolding, SHOW_SEALS_ON_DO } from '../../lib/sealRanges.js';
 import EntryModal from '../do/EntryModal.jsx';
-import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
+import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs, issuedQtyByAL, readDOQueue } from '../do/data.js';
 import { useWorkerTick } from '../do/useWorkerTick.js';
 import WorkerTickModal from '../do/WorkerTickModal.jsx';
 import {
@@ -24,6 +24,8 @@ import {
   saveProgress,
   defaultProgress,
   mergeConsents,
+  issuedShares,
+  applyIssuedShares,
   statusOf,
   saveScanRecord,
   flushScanRecords,
@@ -170,22 +172,13 @@ export default function ScanModule() {
     if (!navigator.onLine) return;
     loadDOsForAL(alNumber).then((dos) => {
       setActiveDOs(dos);
-      if (!consentId || !dos.length) return;
-      const serverIssuedQty = dos.reduce((sum, d) => sum + (d.total_qty || 0), 0);
+      if (!consentId) return;
+      // The AL total is shared over the AL's cards -- see issuedShares.
+      const cards = consentsRef.current.filter((c) => c.al_number === alNumber);
+      const shares = issuedShares(cards, { [alNumber]: issuedQtyByAL(dos)[alNumber] || 0 });
       setProgress((prev) => {
-        const cur = prev[consentId] || defaultProgress();
-        if ((cur.issuedQty || 0) >= serverIssuedQty) return prev;
-        const map = {
-          ...prev,
-          [consentId]: { ...cur, issuedQty: serverIssuedQty, doIssued: serverIssuedQty > 0 },
-        };
-        if (serverIssuedQty > 0) {
-          (active?.memberIds || [consentId]).forEach((id) => {
-            if (id === consentId) return;
-            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-          });
-        }
-        saveProgress(map);
+        const map = applyIssuedShares(prev, cards, shares, queuedDOALs());
+        if (map !== prev) saveProgress(map);
         return map;
       });
     }).catch(() => {});
@@ -204,26 +197,17 @@ export default function ScanModule() {
     )];
     if (!alNumbers.length) return;
     loadIssuedQtyByALs(alNumbers).then((byAL) => {
+      // Every AL asked about has an answer, nought included: an AL with no
+      // DO left standing is one whose cards have collected nothing.
+      const full = {};
+      alNumbers.forEach((al) => { full[al] = byAL[al] || 0; });
+      const cards = consentsRef.current;
+      const shares = issuedShares(cards, full);
       setProgress((prev) => {
-        let changed = false;
-        const map = { ...prev };
-        consentsRef.current.forEach((c) => {
-          const serverIssuedQty = byAL[c.al_number] || 0;
-          if (!serverIssuedQty) return;
-          const cur = map[c.id] || defaultProgress();
-          if ((cur.issuedQty || 0) >= serverIssuedQty) return;
-          map[c.id] = { ...cur, issuedQty: serverIssuedQty, doIssued: true };
-          // Same reason as onDoSaved: every member of a merged card has to
-          // carry doIssued, or the ones besides the anchor fall back out of
-          // the group and reappear as their own "Pending to Scan" cards.
-          (c.memberIds || [c.id]).forEach((id) => {
-            if (id === c.id) return;
-            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-          });
-          changed = true;
-        });
-        if (!changed) return prev;
-        saveProgress(map);
+        // applyIssuedShares also marks a merged card's other members, for
+        // the reason onDoSaved gives.
+        const map = applyIssuedShares(prev, cards, shares, queuedDOALs());
+        if (map !== prev) saveProgress(map);
         return map;
       });
     }).catch(() => {});
@@ -1503,4 +1487,15 @@ function sealRangesText(rows) {
     .slice()
     .sort((a, b) => Number(a.start_no) - Number(b.start_no))
     .map((r) => ({ start: r.start_code, end: r.end_code, qty: rangeQty(r.start_no, r.end_no) })));
+}
+
+/* ALs with a DO still waiting on this phone to be sent. Until it is, the
+   server figure for that AL is short by it, so it must not pull a card's
+   collected quantity DOWN (applyIssuedShares). */
+function queuedDOALs() {
+  try {
+    return new Set((readDOQueue() || []).map((j) => j && j.payload && j.payload.al_number).filter(Boolean));
+  } catch (_) {
+    return new Set();
+  }
 }
