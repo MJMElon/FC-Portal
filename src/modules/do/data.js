@@ -121,12 +121,24 @@ export async function loadIssuedQtyByALs(alNumbers) {
   if (!alNumbers || !alNumbers.length) return {};
   const { data, error } = await supabase
     .from('shared_do_records')
-    .select('al_number, total_qty')
+    .select('al_number, total_qty, status, remark')
     .in('al_number', alNumbers);
   if (error) throw error;
+  return issuedQtyByAL(data);
+}
+
+/* A cancelled DO took nothing away. Same test as the office Delivery page
+   (operation_delivery.html, its cumulMap), so the FC Portal and the AL
+   list agree on what has been collected -- they did not, and a cancelled
+   DO kept an order off the scan list while the office read a balance. */
+export function isCancelledDO(d) {
+  return !!d && (d.status === 'Cancelled' || String(d.remark || '').includes('[CANCELLED]'));
+}
+
+export function issuedQtyByAL(dos) {
   const map = {};
-  (data || []).forEach((d) => {
-    if (!d.al_number) return;
+  (dos || []).forEach((d) => {
+    if (!d || !d.al_number || isCancelledDO(d)) return;
     map[d.al_number] = (map[d.al_number] || 0) + (Number(d.total_qty) || 0);
   });
   return map;

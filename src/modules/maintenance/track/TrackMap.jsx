@@ -18,10 +18,25 @@ import {
   addFix,
   formatDistance,
   formatDuration,
+  isStalled,
   mayStart,
+  stalledFor,
   trackPayload,
 } from './track.js';
 import { cachedBoundaries, loadSiteBoundaries } from '../../../lib/siteBoundary.js';
+import { holdScreenAwake } from '../../../lib/screenWake.js';
+import { MAP_TRACK_KEY, clearParked, park, stillFresh, unpark } from './parked.js';
+
+/**
+ * What a parked walk has to be before it is offered back.
+ *
+ * ONE TEST, used by the state initialiser and by the line that says so, or the
+ * map comes up carrying a walk it never mentions — or mentions one it did not
+ * take. Shape first (a walk parked by an older version of this file must not
+ * be read half-understood), then age: see PARKED_GOOD_FOR_H in parked.js.
+ */
+const cameBackUsable = (x) =>
+  Array.isArray(x.points) && x.points.length > 0 && !!x.startedAt && stillFresh(x);
 
 /** Close enough to see a seedling bed, far enough to see the plot round it. */
 const WORK_ZOOM = 18;
@@ -134,9 +149,20 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
 
   const [ownFix, setOwnFix] = useState(null);      // the newest position, when watching for itself
   const fix = watchOwn ? ownFix : fedFix;
-  const [state, setState] = useState(() => (initial && initial.track
-    ? { points: initial.track, distance: initial.distance_m || 0, startedAt: initial.started_at }
-    : { points: [], distance: 0, startedAt: null }));
+  /* A walk already on the record wins. Otherwise look for one the browser
+     threw away mid-walk — see parked.js. It comes back STOPPED, so the gap
+     is the person's to close with Resume rather than something drawn across
+     silently. */
+  const [restored, setRestored] = useState(null);   // when it was parked
+  const [state, setState] = useState(() => {
+    if (initial && initial.track) {
+      return { points: initial.track, distance: initial.distance_m || 0, startedAt: initial.started_at };
+    }
+    if (viewOnly) return { points: [], distance: 0, startedAt: null };
+    const back = unpark(MAP_TRACK_KEY, cameBackUsable);
+    if (back) return { points: back.points, distance: back.distance || 0, startedAt: back.startedAt };
+    return { points: [], distance: 0, startedAt: null };
+  });
   const [recording, setRecording] = useState(false);
   const [compass, setCompass] = useState('off');   // off | follow | heading
   const [heading, setHeading] = useState(null);
@@ -144,7 +170,11 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
   const [attr, setAttr] = useState(GOOGLE_ATTR);
   const [elapsed, setElapsed] = useState(0);
 
+  const [stalled, setStalled] = useState(0);       // seconds since the last fix
+  const [why, setWhy] = useState(null);            // why the last fix was not taken
+
   const stopHeadingRef = useRef(null);
+  const lastFixAtRef = useRef(null);
   const startedAtMsRef = useRef(null);
   const recordingRef = useRef(false);
   recordingRef.current = recording;
@@ -221,13 +251,23 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
           accuracy: c.accuracy == null ? null : Math.round(c.accuracy),
         };
         setOwnFix(next);
+        /* The moment a position ARRIVED, which is a different thing from the
+           moment one was kept: a fix dropped for being weak still proves the
+           phone is listening, and a line that stops because the screen slept
+           has neither. */
+        lastFixAtRef.current = Date.now();
+        setStalled(0);
         if (recordingRef.current) {
           const t0 = startedAtMsRef.current || Date.now();
           /* Spread over the old state, not straight from addFix. addFix
              answers about points and distance and nothing else — deliberately,
              so it stays a pure function with a test — and taking its return as
              the whole state threw `startedAt` away on the very first fix. */
-          setState((s) => ({ ...s, ...addFix(s, { ...next, t: (Date.now() - t0) / 1000 }) }));
+          setState((s) => {
+            const r = addFix(s, { ...next, t: (Date.now() - t0) / 1000 });
+            setWhy(r.added ? null : r.why);
+            return { ...s, ...r };
+          });
         }
       },
       (err) => flash(err && err.code === 1 ? t('mt.gpsDenied') : t('mt.gpsUnavailable')),
@@ -243,6 +283,47 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
       () => setElapsed((Date.now() - (startedAtMsRef.current || Date.now())) / 1000), 1000);
     return () => clearInterval(id);
   }, [recording]);
+
+  /* ── and the thing that says the line has stopped growing ──
+     A TRACK THAT QUIETLY STOPS IS THE WHOLE FAULT. The screen sleeps, the
+     browser stops handing out positions, and the map goes on looking exactly
+     like a map that is recording — so somebody walks a plot for nothing and
+     finds out at the end, from a line four metres long. Nothing can make the
+     fixes arrive; what it can do is stop pretending they are. */
+  useEffect(() => {
+    if (!recording) { setStalled(0); return undefined; }
+    const id = setInterval(() => setStalled(stalledFor(lastFixAtRef.current, Date.now())), 2000);
+    return () => clearInterval(id);
+  }, [recording]);
+
+  // Keep the screen on for as long as a walk is being recorded, and ASK AGAIN
+  // every time the page comes back: the browser takes the lock away the moment
+  // the page is hidden and never offers it back. See lib/screenWake.js.
+  useEffect(() => (recording ? holdScreenAwake() : undefined), [recording]);
+
+  /* ── Parked on every change ──
+     The walk used to live in React state inside this modal, so closing the
+     map, a reload, or the browser reclaiming the tab lost every metre of it.
+     Written down after every point instead; read back at the top of this
+     component. Nothing is parked in viewOnly, where the walk belongs to the
+     task row and this is only looking at it. */
+  useEffect(() => {
+    if (viewOnly) return;
+    if (!state.points.length) return;
+    park(MAP_TRACK_KEY, {
+      points: state.points, distance: state.distance,
+      startedAt: state.startedAt, parkedAt: new Date().toISOString(),
+    });
+  }, [viewOnly, state]);
+
+  /* Said once, on the way in, and only where one actually came back. */
+  useEffect(() => {
+    if (viewOnly || initial) return;
+    const back = unpark(MAP_TRACK_KEY, cameBackUsable);
+    if (!back) { clearParked(MAP_TRACK_KEY); return; }   // stale or unreadable: gone for good
+    setRestored(back.parkedAt || null);
+    flash(t('mt.trkCameBack', { n: back.points.length }));
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── draw the dot, the accuracy ring, and the line ──
   useEffect(() => {
@@ -385,25 +466,50 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
   function startRecording() {
     if (!mayStart(fix)) return;
     startedAtMsRef.current = Date.now();
+    lastFixAtRef.current = Date.now();
     setElapsed(0);
+    setStalled(0);
+    setWhy(null);
+    setRestored(null);
+    clearParked(MAP_TRACK_KEY);
     setState({ points: [], distance: 0, startedAt: new Date().toISOString() });
     setRecording(true);
-    // A track is walked, and a phone that sleeps stops giving fixes. Best
-    // effort — the API is not everywhere, and it is not worth failing over.
-    if (navigator.wakeLock && navigator.wakeLock.request) {
-      navigator.wakeLock.request('screen').catch(() => {});
-    }
+    /* The screen lock is held by an effect on `recording`, not asked for here.
+       Asked here it was asked ONCE, and the browser hands it back the moment
+       the page is hidden — which is how a walk came to record two fixes. */
+  }
+
+  /* Carry on with the walk that came back, rather than starting a new one.
+     `t` on a point is seconds since the track STARTED, so the clock is set
+     back to the original start — otherwise every point after the gap would
+     claim a time it was not recorded at. */
+  function resumeRecording() {
+    if (!mayStart(fix) || !state.points.length) return;
+    startedAtMsRef.current = Date.parse(state.startedAt) || Date.now();
+    lastFixAtRef.current = Date.now();
+    setStalled(0);
+    setWhy(null);
+    setRestored(null);
+    setRecording(true);
   }
 
   function stopRecording() {
     setRecording(false);
     const payload = trackPayload({ ...state, startedAt: state.startedAt });
     if (!payload) { flash(t('mt.trkNothingWalked')); return; }
+    /* Handed to the record, so there is nothing left to survive. A parked
+       walk left behind here would come back on the NEXT job and read as that
+       one — which is worse than losing it. */
+    clearParked(MAP_TRACK_KEY);
     onDone(payload);
   }
 
   const canStart = mayStart(fix);
   const acc = fix && fix.accuracy != null ? fix.accuracy : null;
+  /* `stalled` is set by the ticker above, so this is a plain read rather than
+     a second clock: two clocks disagreeing about whether a line has stopped is
+     a worse thing than the one being two seconds late. */
+  const stalledNow = recording && isStalled(Date.now() - stalled * 1000, Date.now());
 
   const btn = 'rounded-2xl font-black uppercase tracking-widest text-[12px] transition-colors';
 
@@ -487,6 +593,22 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
 
       {/* The bar with the one button that matters. */}
       <div className="shrink-0 bg-slate-900 px-3 pt-3 pb-5 space-y-2.5">
+        {/* THE LINE HAS STOPPED GROWING, said out loud. Red, above the figures,
+            because the figures themselves look perfectly healthy while this is
+            happening — they simply stop moving, and a map that is not recording
+            looks exactly like one that is. */}
+        {recording && stalledNow && (
+          <div className="rounded-xl bg-rose-600 px-3 py-2 text-[11.5px] font-black text-white">
+            {t('mt.trkStalled', { n: formatDuration(stalled) })}
+          </div>
+        )}
+        {recording && !stalledNow && why && (
+          <div className="rounded-xl bg-amber-500/90 px-3 py-2 text-[11.5px] font-bold text-slate-900">
+            {why === 'weak' ? t('mt.trkWhyWeak')
+             : why === 'jump' ? t('mt.trkWhyJump')
+             : t('mt.trkWhyStill')}
+          </div>
+        )}
         <div className="flex items-center gap-3 text-white">
           <div className="flex-1">
             <div className="text-[22px] font-black tabular-nums leading-none">
@@ -526,12 +648,37 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
           </div>
         ) : !recording ? (
           <>
+            {/* RESUME COMES FIRST where there is something to resume. A walk
+                that came back from a locked phone is the one somebody wants to
+                carry on with, and Start again — which throws it away — must
+                not be the button under their thumb. */}
+            {state.points.length > 0 && (
+              <button
+                onClick={resumeRecording}
+                disabled={!canStart}
+                className={`${btn} w-full py-4 ${canStart
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                  : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}
+              >
+                {t('mt.trkResume')}
+              </button>
+            )}
+            {restored && (
+              <div className="text-[11.5px] font-bold text-amber-400 text-center leading-snug">
+                {t('mt.trkGapWarning')}
+              </div>
+            )}
+            {/* Start again THROWS THE WALK AWAY, so where there is one to lose
+                it is the quiet secondary button under Resume, never the red
+                one. With nothing walked yet it is the only button there is and
+                keeps its own weight. */}
             <button
               onClick={startRecording}
               disabled={!canStart}
-              className={`${btn} w-full py-4 ${canStart
-                ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}
+              className={`${btn} w-full ${
+                !canStart ? 'py-4 bg-slate-700 text-slate-400 cursor-not-allowed'
+                  : state.points.length ? 'py-3 bg-slate-700 hover:bg-slate-600 text-slate-200'
+                    : 'py-4 bg-rose-600 hover:bg-rose-700 text-white'}`}
             >
               {state.points.length ? t('mt.trkStartAgain') : t('mt.trkStart')}
             </button>

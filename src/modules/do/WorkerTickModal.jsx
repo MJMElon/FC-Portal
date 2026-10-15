@@ -46,7 +46,7 @@ export default function WorkerTickModal({ wt, staffName }) {
             </div>
           )}
 
-          {!wt.wtNurseries.length ? (
+          {!wt.wtNurseries.length && !wt.wtOtherNurseries.length ? (
             <div className="text-center py-8">
               <div className="text-3xl mb-2">🌱</div>
               <div className="text-[11px] font-black text-slate-300 uppercase tracking-widest">{t('do.whoLoadedNoNurseries')}</div>
@@ -55,12 +55,32 @@ export default function WorkerTickModal({ wt, staffName }) {
             wt.wtNurseries.map((key) => {
               const workers = wt.byNursery[key] || [];
               const picked = wt.wtPicked[key] || [];
+              const own = wt.wtOwn.includes(key);
               return (
                 <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                   <div className="flex justify-between items-center mb-2">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{key}</span>
-                    <span className="text-[10px] font-bold text-slate-400">
-                      {picked.length ? t('do.workersTicked') + ' · ' + picked.length : t('do.workersNotTicked')}
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                      {key}
+                      {!own && (
+                        <span className="ml-2 text-[9px] font-bold text-slate-400 normal-case tracking-normal">
+                          {t('do.whoLoadedAddedByHand')}
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-slate-400">
+                        {picked.length ? t('do.workersTicked') + ' · ' + picked.length : t('do.workersNotTicked')}
+                      </span>
+                      {!own && !wt.wtLocked && (
+                        <button
+                          type="button"
+                          title={t('do.whoLoadedRemoveNursery')}
+                          onClick={() => wt.removeNursery(key)}
+                          className="w-5 h-5 rounded-md bg-white border border-slate-200 text-slate-400 hover:text-slate-700 text-[11px] font-black leading-none flex items-center justify-center cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </span>
                   </div>
                   {!workers.length ? (
@@ -91,6 +111,29 @@ export default function WorkerTickModal({ wt, staffName }) {
                 </div>
               );
             })
+          )}
+
+          {/* ANOTHER NURSERY'S GANG. The seedlings stood in one nursery and
+              were loaded by another often enough that it cannot be an
+              edit-the-record job: every other nursery with workers on the
+              roster is one tap away, and tapping one opens its own list of
+              names underneath the DO's. */}
+          {!wt.wtLocked && wt.wtOtherNurseries.length > 0 && (
+            <div className="pt-1">
+              <div className="text-[10px] font-bold text-slate-400 mb-2">{t('do.whoLoadedOther')}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {wt.wtOtherNurseries.map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => wt.addNursery(key)}
+                    className="px-3 py-1.5 rounded-lg border border-dashed border-slate-300 bg-white text-[12px] font-black text-slate-500 uppercase tracking-widest hover:border-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    + {key}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 

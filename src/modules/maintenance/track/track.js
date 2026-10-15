@@ -42,6 +42,28 @@ export const MIN_STEP_M = 3;
  */
 export const MAX_STEP_M = 120;
 
+/**
+ * And this long without a fix, while recording, is not a quiet stretch — it is
+ * a line that has STOPPED GROWING, and the commonest reason is the screen
+ * going to sleep. The phone gives a position every second or two in the open;
+ * three quarters of a minute of nothing has never been the sky.
+ *
+ * It is a number rather than a feeling because the screen says it out loud:
+ * a track that quietly stops is how somebody walks a whole plot for nothing.
+ */
+export const STALL_AFTER_S = 45;
+
+/** How long the line has been standing still, in whole seconds. */
+export function stalledFor(lastFixAtMs, nowMs) {
+  if (!lastFixAtMs) return 0;
+  return Math.max(0, Math.round((nowMs - lastFixAtMs) / 1000));
+}
+
+/** Is that long enough to be worth saying? */
+export function isStalled(lastFixAtMs, nowMs) {
+  return stalledFor(lastFixAtMs, nowMs) >= STALL_AFTER_S;
+}
+
 const R = 6371000;                      // metres
 const rad = (d) => (d * Math.PI) / 180;
 

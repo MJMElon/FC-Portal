@@ -5,8 +5,9 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { printDO } from '../../lib/pdf.js';
+import { compressSeals, formatSealRanges, sealDigits, rangeQty, rangeHolding, SHOW_SEALS_ON_DO } from '../../lib/sealRanges.js';
 import EntryModal from '../do/EntryModal.jsx';
-import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
+import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs, issuedQtyByAL, readDOQueue } from '../do/data.js';
 import { useWorkerTick } from '../do/useWorkerTick.js';
 import WorkerTickModal from '../do/WorkerTickModal.jsx';
 import {
@@ -23,6 +24,8 @@ import {
   saveProgress,
   defaultProgress,
   mergeConsents,
+  issuedShares,
+  applyIssuedShares,
   statusOf,
   saveScanRecord,
   flushScanRecords,
@@ -30,6 +33,14 @@ import {
   subscribeScanRecords,
   unsubscribeScanRecords,
   findBarcodeElsewhere,
+  cachedSealAllocations,
+  fetchSealAllocations,
+  sealFeatureLive,
+  allocationsOf,
+  sealVerdict,
+  sealsForNextDO,
+  markSealsOnDO,
+  fetchSealsOnDO,
 } from './store.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
 
@@ -47,6 +58,14 @@ export default function ScanModule() {
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState(null);
   const [lastInfo, setLastInfo] = useState({ key: 'scan.waitingFirst' });
+  /* The seal ranges handed to each customer (see fetchSealAllocations).
+     null = never read, which is "no seal feature" everywhere it is asked. */
+  const [sealAllocs, setSealAllocs] = useState(() => cachedSealAllocations());
+  const sealAllocsRef = useRef(sealAllocs);
+  sealAllocsRef.current = sealAllocs;
+  /* The seals the DO being saved right now carries, so onDoSaved can mark
+     them as gone once the save (or the queue) has taken it. */
+  const doSealsRef = useRef(null);
 
   // Issue DO popup state (opens the DO entry form in-place, no navigation).
   const [doEntry, setDoEntry] = useState(null); // { al, suggestQty, scannedQty, consentId }
@@ -85,6 +104,22 @@ export default function ScanModule() {
   const consents = useMemo(() => mergeConsents(serverConsents, progress), [serverConsents, progress]);
   consentsRef.current = consents;
   const active = consents.find((c) => c.id === activeId) || null;
+
+  /* How much has gone out on THIS card. activeDOs is every DO on the AL,
+     and it used to be compared whole against this one card's quantity, so
+     0HVUL3's 300 consent opened reading Fully Collected off the 700 DO
+     of the consent before it. It is this card's SHARE now, the same
+     oldest-first split the list uses (issuedShares). With no DOs read yet
+     the phone's own figure stands, and so does a higher one while a DO
+     for this AL is still waiting on the phone to be sent. */
+  function cardIssued(card) {
+    if (!card) return 0;
+    const local = progress[card.id]?.issuedQty || 0;
+    if (!activeDOs.length || !card.al_number || activeDOs[0].al_number !== card.al_number) return local;
+    const cards = consents.filter((c) => c.al_number === card.al_number);
+    const share = issuedShares(cards, issuedQtyByAL(activeDOs))[card.id] || 0;
+    return queuedDOALs().has(card.al_number) ? Math.max(local, share) : share;
+  }
   activeRef.current = active;
 
   const sync = useCallback(async () => {
@@ -95,6 +130,11 @@ export default function ScanModule() {
       const [data, today] = await Promise.all([fetchConsents(), fetchTodayBookingALs().catch(() => null)]);
       setServerConsents(data);
       if (today) setTodayALs(today);
+      /* Best effort beside the list: a failure (no SQL yet, a flaky line)
+         leaves the cached ranges, or none, and scanning goes on as it was. */
+      fetchSealAllocations(data.map((c) => c.al_number))
+        .then(setSealAllocs)
+        .catch(() => {});
       flash(t('scan.synced', { n: data.length }), 'done');
     } catch (e) {
       flash(t('scan.syncFailed', { msg: e.message }), 'danger');
@@ -148,22 +188,13 @@ export default function ScanModule() {
     if (!navigator.onLine) return;
     loadDOsForAL(alNumber).then((dos) => {
       setActiveDOs(dos);
-      if (!consentId || !dos.length) return;
-      const serverIssuedQty = dos.reduce((sum, d) => sum + (d.total_qty || 0), 0);
+      if (!consentId) return;
+      // The AL total is shared over the AL's cards -- see issuedShares.
+      const cards = consentsRef.current.filter((c) => c.al_number === alNumber);
+      const shares = issuedShares(cards, { [alNumber]: issuedQtyByAL(dos)[alNumber] || 0 });
       setProgress((prev) => {
-        const cur = prev[consentId] || defaultProgress();
-        if ((cur.issuedQty || 0) >= serverIssuedQty) return prev;
-        const map = {
-          ...prev,
-          [consentId]: { ...cur, issuedQty: serverIssuedQty, doIssued: serverIssuedQty > 0 },
-        };
-        if (serverIssuedQty > 0) {
-          (active?.memberIds || [consentId]).forEach((id) => {
-            if (id === consentId) return;
-            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-          });
-        }
-        saveProgress(map);
+        const map = applyIssuedShares(prev, cards, shares, queuedDOALs());
+        if (map !== prev) saveProgress(map);
         return map;
       });
     }).catch(() => {});
@@ -182,26 +213,17 @@ export default function ScanModule() {
     )];
     if (!alNumbers.length) return;
     loadIssuedQtyByALs(alNumbers).then((byAL) => {
+      // Every AL asked about has an answer, nought included: an AL with no
+      // DO left standing is one whose cards have collected nothing.
+      const full = {};
+      alNumbers.forEach((al) => { full[al] = byAL[al] || 0; });
+      const cards = consentsRef.current;
+      const shares = issuedShares(cards, full);
       setProgress((prev) => {
-        let changed = false;
-        const map = { ...prev };
-        consentsRef.current.forEach((c) => {
-          const serverIssuedQty = byAL[c.al_number] || 0;
-          if (!serverIssuedQty) return;
-          const cur = map[c.id] || defaultProgress();
-          if ((cur.issuedQty || 0) >= serverIssuedQty) return;
-          map[c.id] = { ...cur, issuedQty: serverIssuedQty, doIssued: true };
-          // Same reason as onDoSaved: every member of a merged card has to
-          // carry doIssued, or the ones besides the anchor fall back out of
-          // the group and reappear as their own "Pending to Scan" cards.
-          (c.memberIds || [c.id]).forEach((id) => {
-            if (id === c.id) return;
-            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-          });
-          changed = true;
-        });
-        if (!changed) return prev;
-        saveProgress(map);
+        // applyIssuedShares also marks a merged card's other members, for
+        // the reason onDoSaved gives.
+        const map = applyIssuedShares(prev, cards, shares, queuedDOALs());
+        if (map !== prev) saveProgress(map);
         return map;
       });
     }).catch(() => {});
@@ -257,6 +279,23 @@ export default function ScanModule() {
         return map;
       });
     }).catch(() => {/* stay with localStorage */});
+
+    /* Seals another device already put on a DO for this card, so the next
+       DO here does not name them again. Only once the seal SQL is known to
+       be in -- the column it asks about does not exist before that. */
+    if (sealFeatureLive()) {
+      fetchSealsOnDO(scanIds).then((codes) => {
+        if (!codes.length) return;
+        setProgress((prev) => {
+          const cur = prev[activeId] || defaultProgress();
+          const next = markSealsOnDO(cur, codes);
+          if ((next.doSeals || []).length === (cur.doSeals || []).length && Array.isArray(cur.doSeals)) return prev;
+          const map = { ...prev, [activeId]: next };
+          saveProgress(map);
+          return map;
+        });
+      }).catch(() => {});
+    }
 
     // Subscribe to live INSERTs from other devices scanning the same consent.
     realtimeChannelRef.current = subscribeScanRecords(scanIds, (barcode) => {
@@ -321,6 +360,42 @@ export default function ScanModule() {
         vibrate([120, 60, 120, 60, 200]);
         setLastInfo({ key: 'scan.notCountedElsewhere', vars: { code, who } });
         flash(t('scan.notCountedElsewhere', { code, who }), 'danger');
+        return;
+      }
+
+      /* IS THIS SEAL THIS CUSTOMER'S? Only asked of an order whose consent
+         named seal ranges -- one signed before they existed has none, and
+         scans exactly as it always did. Answered off the cached
+         allocations, so it needs no line. A seal that slips past (a phone
+         that has not synced the newest consent) is caught by the database
+         when the scan arrives, and the case is raised there, not here. */
+      const verdict = sealVerdict(code, a, sealAllocsRef.current);
+      if (verdict && !verdict.ok) {
+        const current = a.customer + (a.al_number ? ' (' + a.al_number + ')' : '');
+        let key, vars;
+        if (verdict.kind === 'other') {
+          const o = verdict.other;
+          const who = (o.customer_name || t('scan.anotherOrder')) + (o.al_number ? ' (' + o.al_number + ')' : '');
+          key = 'scan.sealOtherCustomer';
+          vars = { code, customer: o.customer_name || t('scan.anotherOrder'), al: o.al_number || '—', current };
+          /* Remembered like any seal that is somebody else's, so it reads
+             as rejected the next time it is waved. */
+          setProgress((prev) => {
+            const map = { ...prev, [a.id]: rememberElsewhere(prev[a.id] || defaultProgress(), code, who) };
+            saveProgress(map);
+            return map;
+          });
+        } else {
+          /* Not remembered: the remembered message says whose a seal is,
+             and this one is nobody's. The check is instant and needs no
+             line, so the next wave is refused the same way anyway. */
+          key = 'scan.sealNotOnConsent';
+          vars = { code, ranges: sealRangesText(allocationsOf(a, sealAllocsRef.current)) };
+        }
+        beepAlarm();
+        vibrate([120, 60, 120, 60, 200]);
+        setLastInfo({ key, vars });
+        flash(t(key, vars), 'danger');
         return;
       }
 
@@ -475,9 +550,8 @@ export default function ScanModule() {
       loadBatchData().then(({ batchMap }) => setDoBatchMap(batchMap), () => {});
     }
     setIssuing(false);
-    // Use the higher of localStorage-tracked qty and server-derived qty from activeDOs.
-    const serverIssuedQty = activeDOs.reduce((sum, d) => sum + (d.total_qty || 0), 0);
-    const issuedQty = Math.max(progress[consent.id]?.issuedQty || 0, serverIssuedQty);
+    // This card's own share of what has gone out -- see cardIssued.
+    const issuedQty = cardIssued(consent);
     const newScans = Math.max(0, consent.unique - issuedQty);
     const remainingBalance = Math.max(0, consent.qty - issuedQty);
     const suggestQty = newScans > 0 ? newScans : remainingBalance;
@@ -493,14 +567,45 @@ export default function ScanModule() {
     setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
   }
 
+  /* THE SEALS THAT WENT OUT ON THIS DO: everything scanned on the card
+     since its last DO. Added here and not in EntryModal, because the DO
+     module's own DOs are keyed with no scanner and carry no seals.
+
+     The keys are put on the payload ONLY when there is a seal to name AND
+     this phone has read seal_allocations at least once. That read is the
+     proof the seal SQL is in: before it, shared_do_records has no
+     seal_ranges column, and a DO naming one would be refused -- online, and
+     then from the offline queue on every sync after. A DO with no seals
+     carries no keys at all, which is what it looked like before.
+
+     The payload is queued as it stands, so an offline DO takes its seals
+     with it. */
+  function withSeals(args, consentId) {
+    doSealsRef.current = null;
+    if (!consentId) return args;
+    const codes = sealsForNextDO(progressRef.current[consentId] || defaultProgress());
+    doSealsRef.current = { consentId, codes };
+    const seals = codes.filter((c) => sealDigits(c) != null);
+    if (!seals.length || !sealFeatureLive()) return args;
+    const ranges = compressSeals(seals);
+    return {
+      ...args,
+      payload: { ...args.payload, seal_ranges: ranges, seal_qty: ranges.reduce((n, r) => n + r.qty, 0) },
+    };
+  }
+
   function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     const al = doEntry?.al || {};
     const consentId = doEntry?.consentId;
     const memberIds = doEntry?.memberIds || (consentId ? [consentId] : []);
+    const sealsOut = doSealsRef.current && doSealsRef.current.consentId === consentId ? doSealsRef.current.codes : [];
+    doSealsRef.current = null;
     setDoEntry(null);
     if (consentId) {
       setProgress((prev) => {
-        const cur = prev[consentId] || defaultProgress();
+        /* Marked as gone whether or not the DO could name them -- they went
+           out on this lorry either way, and must not reappear on the next. */
+        const cur = markSealsOnDO(prev[consentId] || defaultProgress(), sealsOut);
         const map = {
           ...prev,
           [consentId]: {
@@ -572,6 +677,9 @@ export default function ScanModule() {
     }
 
     lines.push('', `*Total Qty: ${p.total_qty || 0}*`);
+    if (SHOW_SEALS_ON_DO && Array.isArray(p.seal_ranges) && p.seal_ranges.length) {
+      lines.push(`Seal No: ${formatSealRanges(p.seal_ranges)}`, `Seal Qty: ${p.seal_qty || 0}`);
+    }
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
   }
 
@@ -584,6 +692,8 @@ export default function ScanModule() {
           lastInfo={lastInfo}
           issuing={issuing}
           activeDOs={activeDOs}
+          issuedQty={cardIssued(active)}
+          sealAllocs={sealAllocs}
           onScan={recordScan}
           onBack={() => setActiveId(null)}
           onIssueDO={() => openIssueDO(active)}
@@ -602,7 +712,7 @@ export default function ScanModule() {
           initialQty={doEntry.suggestQty}
           scannedQty={doEntry.scannedQty}
           toast={(m) => flash(m, 'warn')}
-          onSubmit={(args) => persistDO({ ...args, staff: staffName })}
+          onSubmit={(args) => persistDO({ ...withSeals(args, doEntry.consentId), staff: staffName })}
           onSaved={onDoSaved}
           onClose={() => setDoEntry(null)}
         />
@@ -775,7 +885,7 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
 }
 
 // ── Scanner view ──────────────────────────────────────
-function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssueDO }) {
+function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, onScan, onBack, onIssueDO }) {
   const { t } = useLang();
   const [scanning, setScanning] = useState(false);
   const [statusKey, setStatusKey] = useState('ready');
@@ -800,10 +910,9 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
 
-  // Use the higher of localStorage-tracked qty and server-derived qty from activeDOs.
-  // This ensures the correct balance even when DOs were issued through the AI system.
-  const serverIssuedQty = activeDOs.reduce((sum, d) => sum + (d.total_qty || 0), 0);
-  const issuedQty = Math.max(consent.issuedQty || 0, serverIssuedQty);
+  // issuedQty is THIS card's share of the AL's DOs, worked out by the
+  // parent (cardIssued) -- never the AL total, which belongs to every
+  // consent on the order at once.
   // No floor here — a consent whose whole qty is already issued (balance 0)
   // has nothing left to scan for, and used to show a phantom "0/1, 1
   // remaining" from Math.max(1, ...) that let scanning carry on past a
@@ -819,6 +928,13 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
     : Math.max(0, consent.unique - issuedQty);
   const remain = Math.max(0, sessionQty - sessionUnique);
   const st = statusOf(consent);
+  /* The seals the customer was given on the consent, so the conductor
+     knows what to expect on the lorry -- and how many of them are in. */
+  const ownSeals = allocationsOf(consent, sealAllocs);
+  const ownSealQty = ownSeals.reduce((n, r) => n + rangeQty(r.start_no, r.end_no), 0);
+  const inRangeCount = ownSeals.length
+    ? (consent.seen || []).filter((c) => rangeHolding(c, ownSeals)).length
+    : 0;
   const pct = sessionQty > 0 ? Math.min(100, (sessionUnique / sessionQty) * 100) : 0;
   const statusText = scanning
     ? st === 'over'
@@ -1062,6 +1178,12 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
               : `${t('scan.qty')} ${consent.qty}`}
             {consent.al_number && !/^MANUAL-/i.test(consent.al_number) ? ` · ${consent.al_number}` : ''}
           </div>
+          {ownSeals.length > 0 && (
+            <div className="font-mono text-[11px] text-sky-300 mt-0.5 break-words">
+              {t('scan.sealRangesLine', { ranges: sealRangesText(ownSeals), n: ownSealQty })}
+              {' · '}{t('scan.sealInRange', { x: inRangeCount, y: ownSealQty })}
+            </div>
+          )}
         </div>
         <div className={`ml-auto font-mono text-[11px] tracking-wider ${st === 'over' ? 'text-red-400' : st === 'done' ? 'text-amber-300' : scanning ? 'text-emerald-400' : 'text-slate-400'}`}>
           {statusText}
@@ -1372,4 +1494,23 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
       )}
     </div>
   );
+}
+
+/* A card's allocation rows written the way the DO prints seal runs. */
+function sealRangesText(rows) {
+  return formatSealRanges((rows || [])
+    .slice()
+    .sort((a, b) => Number(a.start_no) - Number(b.start_no))
+    .map((r) => ({ start: r.start_code, end: r.end_code, qty: rangeQty(r.start_no, r.end_no) })));
+}
+
+/* ALs with a DO still waiting on this phone to be sent. Until it is, the
+   server figure for that AL is short by it, so it must not pull a card's
+   collected quantity DOWN (applyIssuedShares). */
+function queuedDOALs() {
+  try {
+    return new Set((readDOQueue() || []).map((j) => j && j.payload && j.payload.al_number).filter(Boolean));
+  } catch (_) {
+    return new Set();
+  }
 }
