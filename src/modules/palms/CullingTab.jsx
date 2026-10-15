@@ -689,55 +689,69 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
             has nothing to bring down, so a cell inviting a count there is a
             count nobody needed to walk. */}
         <div data-batches className="bg-[#101013] rounded-2xl px-2 py-2 overflow-y-auto">
-          <table className="w-full text-[12px] tabular-nums">
+          {/* THE FIGURES ARE READ AT ARM'S LENGTH, IN THE SUN, so they are
+              set at a size that can be. What that costs is width, and the
+              answer is to WRAP rather than to shrink: a heading that reads
+              over two lines is a heading; one squeezed to fit a column is
+              a thing somebody has to lean in to. The rate goes UNDER its
+              figure for the same reason — the two together will not sit on
+              one line at this size on a phone, and the number is what the
+              eye lands on. */}
+          {/* CENTRED ACROSS AND DOWN, which is the office own layout and is
+              also what a wrapped column wants: a heading over two lines and
+              a figure with its rate under it are both blocks, and a block
+              ragged to one edge reads as a column that has slipped. */}
+          <table className="w-full tabular-nums table-fixed text-center">
             <thead>
-              <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500">
-                <th className="text-left font-black pb-1 px-1">{t('cull.batch')}</th>
-                <th className="text-right font-black pb-1 px-1">{t('cull.balance')}</th>
-                <th className="text-right font-black pb-1 px-1">{t('cull.selected')}</th>
-                <th className="text-right font-black pb-1 px-1">{t('cull.finalBalance')}</th>
+              <tr className="text-[11px] font-black uppercase tracking-wide text-slate-400 align-middle">
+                <th className="text-center font-black pb-1.5 px-1 w-[18%] whitespace-normal break-words leading-tight">{t('cull.batch')}</th>
+                <th className="text-center font-black pb-1.5 px-1 w-[27%] whitespace-normal break-words leading-tight">{t('cull.balance')}</th>
+                <th className="text-center font-black pb-1.5 px-1 w-[27%] whitespace-normal break-words leading-tight">{t('cull.selected')}</th>
+                <th className="text-center font-black pb-1.5 px-1 w-[28%] whitespace-normal break-words leading-tight">{t('cull.finalBalance')}</th>
               </tr>
             </thead>
             <tbody>
               {lines.map((l) => (
                 <tr key={l.batch} data-batch={l.batch} className="border-t border-[#1f2a38]">
-                  <td className="text-left py-1.5 px-1 font-bold text-slate-200">{l.batch || '—'}</td>
-                  <td className="text-right py-1.5 px-1 text-slate-300">
+                  <td className="text-center align-middle py-2 px-1 font-black text-[16px] text-slate-100 whitespace-normal break-words leading-tight">
+                    {l.batch || '—'}
+                  </td>
+                  <td className="text-center align-middle py-2 px-1 text-slate-200 text-[16px] leading-tight">
                     {l.known || l.broken ? fmtNum(l.balance) : '—'}
                     {/* A minus balance is not a good rate, so it is named
                         rather than given a green percentage. */}
-                    <span data-rate className={`ml-1 font-black ${
+                    <div data-rate className={`text-[13px] font-black leading-tight whitespace-normal break-words ${
                       l.broken || !Number.isFinite(l.rate) ? 'text-amber-400'
                         : l.rate > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
                     }`}>
-                      {Number.isFinite(l.rate) ? `(${fmtPct(l.rate)})` : `(${t('cull.checkStock')})`}
-                    </span>
+                      {Number.isFinite(l.rate) ? `(${fmtPct(l.rate)})` : t('cull.checkStock')}
+                    </div>
                   </td>
-                  <td className="text-right py-1.5 px-1">
+                  <td className="text-center align-middle py-2 px-1">
                     {l.editable ? (
                       <button
                         data-select={l.batch}
                         onClick={() => { if (active !== l.batch) { setTyping(''); setActive(l.batch); } }}
-                        className={`min-w-[44px] rounded-lg px-2 py-0.5 font-bold cursor-pointer border transition-colors ${
+                        className={`min-w-[52px] rounded-lg px-2 py-1 font-black text-[16px] leading-tight cursor-pointer border transition-colors ${
                           active === l.batch
                             ? 'bg-amber-500/20 border-amber-400 text-amber-200'
-                            : 'bg-[#1c1c1e] border-[#2c2c2e] text-slate-200 hover:border-slate-500'
+                            : 'bg-[#1c1c1e] border-[#2c2c2e] text-slate-100 hover:border-slate-500'
                         }`}
                       >
                         {fmtNum(l.inang)}
                       </button>
                     ) : (
-                      <span className="text-slate-600">{fmtNum(l.inang)}</span>
+                      <span className="text-slate-600 text-[16px]">{fmtNum(l.inang)}</span>
                     )}
                   </td>
-                  <td className="text-right py-1.5 px-1 text-slate-300">
+                  <td className="text-center align-middle py-2 px-1 text-slate-200 text-[16px] leading-tight">
                     {l.known ? fmtNum(l.finalBalance) : '—'}
-                    <span data-final className={`ml-1 font-black ${
+                    <div data-final className={`text-[13px] font-black leading-tight whitespace-normal break-words ${
                       !Number.isFinite(l.finalRate) ? 'text-amber-400'
                         : l.finalRate > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
                     }`}>
-                      {Number.isFinite(l.finalRate) ? `(${fmtPct(l.finalRate)})` : `(${t('cull.checkStock')})`}
-                    </span>
+                      {Number.isFinite(l.finalRate) ? `(${fmtPct(l.finalRate)})` : t('cull.checkStock')}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -862,27 +876,50 @@ function Keypad({ onPress }) {
   const grey = 'bg-[#333336] hover:bg-[#4a4a4d] text-white';
   const dark = 'bg-[#1c1c1e] hover:bg-[#2c2c2e] text-white';
   const amber = 'bg-amber-500 hover:bg-amber-400 text-white';
-  const key = (label, k, cls, span) => (
+  const key = (label, k, cls, span, extra) => (
     <button
       key={k}
       onClick={() => onPress(k)}
       aria-label={typeof label === 'string' ? undefined : 'delete'}
+      {...(extra || {})}
       className={`${cls} ${span || ''} grid place-items-center rounded-2xl text-[22px] font-medium tabular-nums transition-colors cursor-pointer active:scale-95`}
     >
       {label}
     </button>
   );
+  /* THE OFFICE DREW THIS ONE TOO, so it is four rows and not five: the
+     digits, + and = down the orange column, and the whole bottom row given
+     to 0 and the delete key.
+
+     AC AND 00 ARE GONE WITH IT, and the clear is not lost with them —
+     HOLDING the delete key clears the lot. A calculator with no way back to
+     nothing is one somebody has to tap six times to correct a mis-key, and
+     a long press is where every phone keypad already puts it. Nothing on
+     screen changes, which is the point: the board is the one the office
+     drew, and the shortcut is underneath it. */
+  const holdToClear = (() => {
+    let timer = null;
+    const start = () => { timer = setTimeout(() => { timer = null; onPress('AC'); }, 550); };
+    const stop = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    return {
+      onPointerDown: start,
+      onPointerUp: stop,
+      onPointerLeave: stop,
+      onPointerCancel: stop,
+      /* A long press has already cleared, so the click that follows it must
+         not delete a digit as well. */
+      onContextMenu: (e) => e.preventDefault(),
+    };
+  })();
   return (
-    <div className="grid grid-cols-4 grid-rows-5 gap-1.5 px-2 pb-1 pt-1.5 flex-1 min-h-0">
-      {key('AC', 'AC', grey, 'col-span-2')}
-      {key(<Backspace />, 'DEL', grey, 'col-span-2')}
+    <div className="grid grid-cols-4 grid-rows-4 gap-1.5 px-2 pb-1 pt-1.5 flex-1 min-h-0">
       {['7', '8', '9'].map((d) => key(d, d, dark))}
       {key('+', '+', amber, 'row-span-2')}
       {['4', '5', '6'].map((d) => key(d, d, dark))}
       {['1', '2', '3'].map((d) => key(d, d, dark))}
       {key('=', '=', amber, 'row-span-2')}
-      {key('0', '0', dark, 'col-span-2')}
-      {key('00', '00', dark)}
+      {key('0', '0', dark)}
+      {key(<Backspace />, 'DEL', grey, 'col-span-2', holdToClear)}
     </div>
   );
 }

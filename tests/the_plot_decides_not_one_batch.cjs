@@ -159,7 +159,34 @@ if (/export async function saveInang/.test(STORE) && /if \(error\) throw error;/
   fail('saveInang swallows a refusal');
 }
 
-/* ── 9. The SQL the office has to run ────────────────────────────────── */
+/* ── 9. The board the office drew, and the clear underneath it ───────── */
+if (!/'AC', 'AC'/.test(TAB) && !/key\('00'/.test(TAB)) {
+  ok('four rows, and no AC or 00 — the keypad the office drew');
+} else {
+  fail('the keypad still carries AC or 00');
+}
+if (/grid-cols-4 grid-rows-4/.test(TAB)) {
+  ok('four columns by four rows');
+} else {
+  fail('the keypad is not the four-by-four board');
+}
+if (/onPress\('AC'\)/.test(TAB) && /onPointerDown: start/.test(TAB)) {
+  ok('and holding delete still clears the lot — the function survived the row that carried it');
+} else {
+  fail('AC went and nothing replaced it, so there is no way back to nothing');
+}
+if ((TAB.match(/text-center align-middle/g) || []).length === 4) {
+  ok('every figure is centred across and down');
+} else {
+  fail('the table is not centred in all four columns');
+}
+if ((TAB.match(/whitespace-normal break-words/g) || []).length >= 6) {
+  ok('and the headings and figures WRAP rather than being squeezed');
+} else {
+  fail('a column still squeezes its text instead of wrapping it');
+}
+
+/* ── 10. The SQL the office has to run ───────────────────────────────── */
 const SQL = R('../mjm-ai-system/shared/RUN_ME_culling_inang.sql');
 is(/CREATE UNIQUE INDEX IF NOT EXISTS fcportal_culling_inang_block[\s\S]{0,80}\(plot, batch\)/.test(SQL), true,
    'the table carries the unique index the upsert names');
