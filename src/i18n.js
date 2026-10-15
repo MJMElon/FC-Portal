@@ -101,7 +101,7 @@ const en = {
   'cull.estRate': 'Estimated rate',
   'cull.inangCounted': 'Pokok inang counted',
   'cull.enterCount': 'Key in the count',
-  'cull.actRecheck': 'Request final check for pokok inang',
+  'cull.actRecheck': 'Request final pokok inang selection',
   'cull.raisedBy': 'Raised by',
   'cull.raised': 'Case {n} raised',
   'cull.alreadyOpen': 'Case {n} is already open for this plot',
@@ -116,6 +116,10 @@ const en = {
   'cull.batchField': 'Batch',
   'cull.negativeNote': 'More has been culled and sold off this plot than was transplanted in. No rate until the stock ledger is corrected.',
   'cull.actDrone': 'Request drone flight',
+  'cull.actHq': 'Request HQ verification',
+  'cull.finalBalance': 'Final balance',
+  'cull.pickBatchFirst': 'Tap a batch to key its pokok inang',
+  'cull.saveFailed': 'The selection could not be saved, so no case was raised. Try again.',
 
   // PALMS
   // motion study
@@ -916,7 +920,11 @@ const ms = {
   'cull.estRate': 'Anggaran kadar',
   'cull.inangCounted': 'Pokok inang dikira',
   'cull.enterCount': 'Masukkan bilangan',
-  'cull.actRecheck': 'Mohon semakan akhir pokok inang',
+  'cull.actRecheck': 'Mohon pemilihan akhir pokok inang',
+  'cull.actHq': 'Mohon pengesahan HQ',
+  'cull.finalBalance': 'Baki akhir',
+  'cull.pickBatchFirst': 'Tekan satu batch untuk masukkan pokok inang',
+  'cull.saveFailed': 'Pilihan tidak dapat disimpan, jadi tiada kes dibuka. Cuba lagi.',
   'cull.raisedBy': 'Dimohon oleh',
   'cull.raised': 'Kes {n} dibuka',
   'cull.alreadyOpen': 'Kes {n} sudah dibuka untuk plot ini',
