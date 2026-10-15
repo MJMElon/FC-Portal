@@ -125,10 +125,24 @@ if (/const canFinal = anyOver && saved\.rounds < 1;/.test(TAB)
 } else {
   fail('the HQ button is not gated on a second round');
 }
-if (/editable: Number\.isFinite\(rate\) && rate > CULL_LIMIT/.test(TAB)) {
-  ok('only a batch over the line can be keyed into');
+if (/cullingLines\(batches, termsBy, active, typing\)/.test(TAB)
+ && !/editable: Number\.isFinite/.test(TAB)) {
+  ok('the screen builds its lines through the one helper and keeps no copy');
 } else {
-  fail('the Select cell is offered on a batch that has nothing to bring down');
+  fail('the line arithmetic is back inside the screen, where it cannot be driven');
+}
+/* THE TAP THAT USED TO LOSE THE COUNT. Switching batch commits what was
+   keyed into the one being left; without it, 52 keyed into 246 vanished the
+   moment the next batch was touched. */
+if (/if \(active !== l\.batch\) \{ commit\(\); setActive\(l\.batch\); \}/.test(TAB)) {
+  ok('tapping another batch COMMITS the count on the one being left');
+} else {
+  fail('switching batch throws away what was being typed into the last one');
+}
+if (/commit\(\);\n    setBusy\(true\);/.test(TAB)) {
+  ok('and so does raising a case, so the screen does not drop it when the keypad clears');
+} else {
+  fail('raising a case clears the keypad without folding in what was on it');
 }
 if (/await saveInang\(/.test(TAB) && TAB.indexOf('await saveInang(') < TAB.indexOf('await submitCase(')) {
   ok('the selection is written down BEFORE the case is raised');
@@ -158,6 +172,64 @@ if (/export async function saveInang/.test(STORE) && /if \(error\) throw error;/
 } else {
   fail('saveInang swallows a refusal');
 }
+
+/* ── 8b. WHAT IS BEING TYPED IS PART OF THE COUNT ────────────────────
+   The fault this section exists for: 52 keyed into batch 246 brought it
+   from red to green, the Field Conductor tapped the next batch, and the 52
+   was gone — the row back to red with nothing saying why. The count being
+   typed lived outside the saved list until + or = was pressed.
+
+   The real function, driven over the real batches. */
+const lctx = { console };
+vm.createContext(lctx);
+vm.runInContext(
+  R('src/modules/palms/cullingLines.js')
+    .replace(/^import .*$/gm, '')
+    .replace(/^export /gm, '')
+  + `
+    const CULL_LIMIT = 0.1;
+    const rateFor = ({ balance, transplant, inang }) =>
+      (transplant > 0 ? (balance - (inang || 0)) / transplant : NaN);
+    const hasFigures = (r) => !!r && r.transplant > 0 && r.balance >= 0;
+    const figuresBroken = (b) => !!b && b.transplant > 0 && b.balance < 0;
+    ;globalThis.__L = cullingLines;`, lctx);
+const cullingLines = vm.runInContext('__L', lctx);
+
+const BATCHES = [
+  { batch: '246', balance: 120, transplant: 1000 },   // 12% — over
+  { batch: '247', balance: 60,  transplant: 1000 },   // 6%  — clear
+  { batch: '248', balance: -5,  transplant: 1000 },   // the ledger does not add up
+];
+const line = (ls, b) => ls.find((l) => l.batch === b);
+
+/* 52 on the keypad, nothing committed, 246 active. */
+let L = cullingLines(BATCHES, {}, '246', '52');
+is(line(L, '246').inang, 52, 'what is being typed counts at once — no + and no = needed');
+is(line(L, '246').finalBalance, 68, 'and the final balance follows it');
+is(line(L, '246').finalRate <= 0.1, true, 'which is what takes the row from red to green');
+is(line(L, '247').inang, 0, 'and it counts for the ACTIVE batch only');
+
+/* The tap on the next batch, which is what used to lose it: the screen
+   commits first, so the 52 is in the saved list by the time 247 is live. */
+L = cullingLines(BATCHES, { 246: [52] }, '247', '');
+is(line(L, '246').inang, 52, 'moving to the next batch keeps the 52 on 246');
+is(line(L, '246').finalRate <= 0.1, true, 'so it stays green');
+
+/* Keyed in several goes, which is how a plot is walked. */
+L = cullingLines(BATCHES, { 246: [30, 15] }, '246', '7');
+is(line(L, '246').inang, 52, 'the goes add up, the one in flight included');
+is(line(L, '246').terms, [30, 15, 7],
+   'and the SEPARATE counts are what gets saved — a walk in three goes is not one figure of 52');
+
+/* A nought keyed is an answer: I looked and there are none. */
+is(line(cullingLines(BATCHES, {}, '246', '0'), '246').inang, 0, 'nought keyed is nought');
+is(line(cullingLines(BATCHES, {}, '246', ''), '246').terms, [],
+   'and nothing keyed is nothing — it is the empty string that means untouched, never the value');
+
+/* Who may be keyed into. */
+is([line(L, '246').editable, line(L, '247').editable, line(L, '248').editable],
+   [true, false, false],
+   'only a batch over the line — one already under it has nothing to bring down, and one whose ledger does not add up has no rate at all');
 
 /* ── 9. The board the office drew, and the clear underneath it ───────── */
 if (!/'AC', 'AC'/.test(TAB) && !/key\('00'/.test(TAB)) {

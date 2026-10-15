@@ -12,6 +12,7 @@ import { listJobs } from '../../lib/outbox.js';
 import { openCasePlots } from '../../lib/nelos.js';
 import { clearRefused, refusedCases, retryRefused, submitCase } from './cullingOffline.js';
 import { clearInang, loadInang, pruneInang, saveInang } from './cullingInang.js';
+import { cullingLines } from './cullingLines.js';
 
 /**
  * The Culling Calculator.
@@ -373,24 +374,8 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      a cell that invites a count there is a count nobody needed to walk. A
      batch brought under the line by a selection stays editable, or there
      would be no way to correct the figure that got it there. */
-  const lines = useMemo(() => batches.map((b) => {
-    const terms = termsBy[b.batch] || [];
-    const inang = terms.reduce((a, n) => a + n, 0)
-                + (active === b.batch && typing !== '' ? Number(typing) : 0);
-    const rate = rateFor({ balance: b.balance, transplant: b.transplant, inang: 0 });
-    const finalRate = rateFor({ balance: b.balance, transplant: b.transplant, inang });
-    return {
-      ...b,
-      terms,
-      inang,
-      rate,
-      finalRate,
-      finalBalance: hasFigures(b) ? b.balance - inang : 0,
-      known: hasFigures(b),
-      broken: figuresBroken(b),
-      editable: Number.isFinite(rate) && rate > CULL_LIMIT,
-    };
-  }), [batches, termsBy, typing, active]);
+  const lines = useMemo(() => cullingLines(batches, termsBy, active, typing),
+    [batches, termsBy, typing, active]);
 
   /* What the plot adds up to, for the line at the top. The worst batch is
      what the buttons answer to, so it is what the header shows. */
@@ -513,6 +498,12 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      under a case that never went is a round counted for nothing. */
   async function raise(act) {
     if (!act || !plotRow || busy) return;
+    /* Fold what is on the keypad into the batch it belongs to BEFORE
+       anything else. `lines` already counts it, so the figures saved and
+       the case raised are right either way — but the screen clears the
+       keypad at the end, and without this the figure on screen would drop
+       by whatever was being typed the moment the case went. */
+    commit();
     setBusy(true);
     const attempt = (saved.rounds || 0) + 1;
     try {
@@ -731,7 +722,13 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
                     {l.editable ? (
                       <button
                         data-select={l.batch}
-                        onClick={() => { if (active !== l.batch) { setTyping(''); setActive(l.batch); } }}
+                        /* MOVING TO ANOTHER BATCH KEEPS WHAT WAS KEYED
+                           INTO THIS ONE. It used to throw it away: 52 keyed
+                           into one batch, tap the next, and the 52 was
+                           gone with the row back to red. Committed first,
+                           so the count lands on the block it was walked
+                           in. */
+                        onClick={() => { if (active !== l.batch) { commit(); setActive(l.batch); } }}
                         className={`min-w-[52px] rounded-lg px-2 py-1 font-black text-[16px] leading-tight cursor-pointer border transition-colors ${
                           active === l.batch
                             ? 'bg-amber-500/20 border-amber-400 text-amber-200'
