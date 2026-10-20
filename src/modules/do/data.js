@@ -197,6 +197,31 @@ export async function uploadDOPhoto(base64, alNumber, doNumber) {
   }
 }
 
+// Upload the customer's signature to the `documents` bucket, same shape as
+// uploadDOPhoto — a reusable public URL rather than the signature living
+// only inside the one-off PDF attachDOToOrder generates. Without this, the
+// office's own DO print (operation_delivery.html) has no signature to show
+// even for a DO the FC Portal issued and signed minutes earlier: the pad's
+// data URL was never written onto the shared_do_records row at all.
+export async function uploadDOSignature(base64, alNumber, doNumber) {
+  try {
+    const filePath = `do_signatures/${alNumber}/${doNumber}_${Date.now()}.png`;
+    const b64 = base64.split(',')[1];
+    const bytes = atob(b64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blob = new Blob([arr], { type: 'image/png' });
+    const { error } = await supabase.storage
+      .from('documents')
+      .upload(filePath, blob, { contentType: 'image/png', upsert: true });
+    if (error) return base64;
+    const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
+    return data?.publicUrl || base64;
+  } catch (e) {
+    return base64;
+  }
+}
+
 // Insert a DO record and deduct the AL balance. Returns { row, balance } — row
 // is the inserted record (with its id, needed to open the Who Loaded This DO
 // step against it) and balance is the new AL balance (or null when there is
@@ -273,6 +298,7 @@ export async function persistDO({ payload, photoBase64, al, sigDataUrl, staff })
     try {
       const finalPayload = { ...payload };
       if (photoBase64) finalPayload.image_url = await uploadDOPhoto(photoBase64, al.al_number, payload.do_number);
+      if (sigDataUrl) finalPayload.signature_url = await uploadDOSignature(sigDataUrl, al.al_number, payload.do_number);
       const { row } = await saveDORecord(finalPayload, al);
       await attachDOToOrder({ payload: finalPayload, al, staff, sigDataUrl, photoBase64 });
       return { queued: false, payload: finalPayload, savedRow: row || null };
@@ -342,6 +368,9 @@ export async function flushDOQueue() {
       }
       if (item.photoBase64) {
         payload.image_url = await uploadDOPhoto(item.photoBase64, payload.al_number, payload.do_number);
+      }
+      if (item.sigDataUrl) {
+        payload.signature_url = await uploadDOSignature(item.sigDataUrl, payload.al_number, payload.do_number);
       }
       const { error } = await supabase.from('shared_do_records').insert([payload]);
       if (error) {
