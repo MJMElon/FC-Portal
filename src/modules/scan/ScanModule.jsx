@@ -997,26 +997,68 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     };
 
-    const adv = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    /* html5-qrcode's own cameraIdOrConfig validation only accepts a
+       deviceId string, or an object with EXACTLY ONE key -- facingMode or
+       deviceId (createVideoConstraints in the library). `{facingMode:
+       {ideal:'environment'}, ...adv}` carried THREE keys (facingMode,
+       width, height) and `true` is neither a string nor an object, so
+       both threw synchronously before ever touching the camera -- "Camera
+       error: Invalid type of 'cameraIdOrConfig' = boolean" is the
+       library's own validator refusing the LAST attempt in this list, not
+       a real camera failure. Three of the four attempts never worked;
+       only the two plain facingMode ones ever got as far as asking the
+       OS for a camera, and whichever real error those hit (permission
+       denied, no camera) was always masked by this one.
+
+       The resolution hint belongs in `config.videoConstraints` instead --
+       the library uses that in place of cameraIdOrConfig entirely when
+       it is a valid MediaTrackConstraints object, so it can carry
+       facingMode AND width/height together without hitting the
+       one-key rule. And the real "try anything" last resort is
+       `Html5Qrcode.getCameras()`, which asks the OS to list cameras
+       rather than guessing a shape the library will accept. */
+    const hdHint = { width: { ideal: 1920 }, height: { ideal: 1080 } };
     const attempts = [
-      { facingMode: { ideal: 'environment' }, ...adv },
-      { facingMode: 'environment' },
-      { facingMode: 'user' },
-      true,
+      { cam: { facingMode: 'environment' }, videoConstraints: { facingMode: 'environment', ...hdHint } },
+      { cam: { facingMode: 'environment' } },
+      { cam: { facingMode: 'user' } },
     ];
 
     let started = false;
     let lastErr = null;
-    for (const cam of attempts) {
+    for (const a of attempts) {
       const qr = new Html5Qrcode('reader', { verbose: false });
       try {
-        await qr.start(cam, config, onScan, () => {});
+        const cfg = a.videoConstraints ? { ...config, videoConstraints: a.videoConstraints } : config;
+        await qr.start(a.cam, cfg, onScan, () => {});
         qrRef.current = qr;
         started = true;
         break;
       } catch (e) {
         lastErr = e;
         try { await qr.clear(); } catch (_) { /* ignore */ }
+      }
+    }
+    // Last resort: ask the OS what cameras exist at all, rather than
+    // guessing facingMode values it may not recognise. A device whose
+    // only camera answers to neither 'environment' nor 'user' still has
+    // a device id this finds.
+    if (!started) {
+      try {
+        const cams = await Html5Qrcode.getCameras();
+        if (cams && cams.length) {
+          const qr = new Html5Qrcode('reader', { verbose: false });
+          try {
+            await qr.start(cams[0].id, config, onScan, () => {});
+            qrRef.current = qr;
+            started = true;
+          } catch (e) {
+            lastErr = e;
+            try { await qr.clear(); } catch (_) { /* ignore */ }
+          }
+        }
+      } catch (e) {
+        lastErr = lastErr || e;
       }
     }
     if (!started) {
