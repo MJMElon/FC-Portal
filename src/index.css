@@ -201,6 +201,12 @@ body {
 }
 .btn-open:hover { background: #10b981; color: white; border-color: #10b981; }
 
+/* ── Segmented tabs -- same definition as the Admin Portal's own
+   src/styles/index.css, so a tab row looks identical on both. ── */
+.tab-row { display: flex; gap: 4px; background: #e2e8f0; border-radius: 14px; padding: 4px; }
+.tab-btn { flex: 1; padding: 9px 10px; border: none; background: none; border-radius: 10px; font-size: 10px; font-weight: 900; cursor: pointer; color: #64748b; text-transform: uppercase; letter-spacing: .06em; transition: all .2s; }
+.tab-btn.active { background: white; color: #065f46; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+
 /* ── The MJM coin ──
    ONE turn, then a long rest. The whole cycle is forty seconds and the turn
    itself is the first tenth of it — under four seconds — so the coin is
