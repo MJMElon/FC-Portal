@@ -132,10 +132,20 @@ function Locomotive() {
 
 /* ---------- the day's draft ----------
    A plain map of storage key -> activity numbers, seeded from whatever is
-   running. Nothing touches the log until the whole nursery is saved. */
+   running. Nothing touches the log until the whole nursery is saved.
+
+   ACTIVITY NUMBERS, so a stage open TWICE is one of them. A plot can end up
+   with two entries open on the same act_n — sync.js describes one route in
+   its own comment, where a phone pushes an entry back that the office had
+   closed. Mapping the rows straight across put that number in the draft
+   twice, and the draft is what MAX_CONCURRENT counts: the plot then read as
+   already running the maximum two with ONE stage ticked, so the Field
+   Conductor could not start the second real one and nothing said why.
+   applyDailySelection has always written a Set — this reads one.
+   The office side is openActivities in shared/shared_palms.js: same rule,
+   change one and change the other. */
 function savedActs(db, key) {
-  return currentEntries(db, key)
-    .map((e) => e.actN)
+  return [...new Set(currentEntries(db, key).map((e) => e.actN))]
     .sort((a, b) => a - b);
 }
 function seedDraft(db, keys) {
