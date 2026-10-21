@@ -21,9 +21,13 @@ function fmtWhen(at) {
   }
 }
 
-/* The Sync card, sitting under the Culling Calculator in the module grid.
-   One press before walking into the field: queued work up, fresh data down,
-   and the stamp only moves when EVERY step succeeded — see syncAll.js. */
+/* The Sync bar, first thing on the page, above even Today's Collection —
+   this is the one press a Field Conductor wants before walking into
+   the field with no signal, so it comes before anything else asks to
+   be read. A thin full-width ribbon rather than a square tile: it is
+   one action, not a module, and does not need a tile's worth of room
+   to say so. The stamp only moves when EVERY step succeeded — see
+   syncAll.js. */
 let syncNoteTimer = null;
 
 function SyncCard() {
@@ -51,18 +55,18 @@ function SyncCard() {
     <button
       onClick={press}
       disabled={busy}
-      className="bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:-translate-y-0.5 hover:border-emerald-500 transition-all p-4 flex items-center gap-3.5 text-left cursor-pointer disabled:cursor-default"
+      className="w-full bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:border-emerald-500 transition-all px-4 py-2.5 flex items-center gap-3 text-left cursor-pointer disabled:cursor-default"
     >
-      <div className="w-12 h-12 bg-sky-100 rounded-xl flex items-center justify-center shrink-0 text-sky-600">
-        <Icon name="refresh" className={`w-6 h-6 ${busy ? 'animate-spin' : ''}`} />
+      <div className="w-9 h-9 bg-sky-100 rounded-lg flex items-center justify-center shrink-0 text-sky-600">
+        <Icon name="refresh" className={`w-4.5 h-4.5 ${busy ? 'animate-spin' : ''}`} />
       </div>
-      <div className="flex-1 min-w-0">
-        <h3 className="text-[15px] font-black text-slate-800 uppercase tracking-wide leading-tight">
+      <div className="flex-1 min-w-0 flex items-center gap-2.5">
+        <h3 className="text-[13px] font-black text-slate-800 uppercase tracking-wide leading-tight shrink-0">
           {t('dash.syncTitle')}
         </h3>
-        <div className="mt-1.5">
+        <div className="min-w-0 truncate">
           {note ? (
-            <span className="text-[10px] font-black text-amber-600 uppercase tracking-wider leading-snug block">
+            <span className="text-[10px] font-black text-amber-600 uppercase tracking-wider">
               {note}
             </span>
           ) : busy ? (
@@ -71,7 +75,7 @@ function SyncCard() {
             </span>
           ) : stamp ? (
             <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest inline-flex items-center gap-1">
-              <Icon name="check" className="w-3 h-3" /> {t('dash.syncLast', { when: fmtWhen(stamp.at) })}
+              <Icon name="check" className="w-3 h-3 shrink-0" /> {t('dash.syncLast', { when: fmtWhen(stamp.at) })}
             </span>
           ) : (
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -87,10 +91,10 @@ function SyncCard() {
 
 /* One row of module tiles. A component of its own, declared at module scope
    rather than inside Dashboard — a component type recreated on every render
-   would remount its children on every Dashboard re-render, and SyncCard
-   (passed in as `children` below) holds state of its own that must survive
-   that. */
-function ModuleGrid({ items, children }) {
+   would remount its children on every Dashboard re-render, which would cost
+   SyncCard its state back when it lived in here. It has its own ribbon now,
+   so this grid is only ever the module tiles. */
+function ModuleGrid({ items }) {
   const { t } = useLang();
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -115,7 +119,6 @@ function ModuleGrid({ items, children }) {
           <div className="text-slate-300 font-black text-lg shrink-0">›</div>
         </Link>
       ))}
-      {children}
     </div>
   );
 }
@@ -156,6 +159,11 @@ export default function Dashboard() {
     <div className="min-h-screen bg-slate-100 fade-enter">
       <TopNav title="MJM Nursery" subtitle="FC Portal" user={staffName} book />
       <div className="max-w-[900px] mx-auto px-3 sm:px-6 py-4 sm:py-6">
+        {/* Sync, first thing on the page — see SyncCard's own comment for why. */}
+        <div className="mb-4">
+          <SyncCard />
+        </div>
+
         {/* "TV" board: who is coming today to collect seedlings */}
         <CollectionBoard />
 
@@ -174,13 +182,9 @@ export default function Dashboard() {
         {canMaintain(permissions, 'view') && <MaintenanceBoard />}
 
         {/* Maintenance + Culling Calculator — both read off plot work, so
-            they sit under Maintenance Status. SyncCard rides along at the
-            end, for everyone — syncing a phone is nobody's privilege to
-            lack. */}
+            they sit under Maintenance Status. */}
         <div className="mb-4">
-          <ModuleGrid items={maintModules}>
-            <SyncCard />
-          </ModuleGrid>
+          <ModuleGrid items={maintModules} />
         </div>
 
         {/* What was done and never signed for: a delivery order whose loading
