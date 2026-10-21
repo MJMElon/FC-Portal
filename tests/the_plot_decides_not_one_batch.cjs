@@ -265,7 +265,8 @@ if (/if \(!plotRow \|\| !loadedPlot \|\| loadedPlot !== plotRow\.plot\) return;/
 } else {
   fail('the draft can race the load and write an empty selection over a real one');
 }
-if (/setTimeout\(\(\) => \{\s*draftInang/.test(TAB)) {
+if (/const id = setTimeout\(\(\) => \{[\s\S]{0,240}draftInang\(/.test(TAB)
+ && /return \(\) => clearTimeout\(id\);/.test(TAB)) {
   ok('within the second of the last keystroke, not on every digit');
 } else {
   fail('the draft is not debounced — three writes to key 250 on a nursery signal');
@@ -337,6 +338,74 @@ is(/'From Culling Calculator - Request HQ Verification'/.test(SQL), true,
    'and the HQ category is spelled the same there as in the code');
 is(/to_module, updated_by\)[\s\S]{0,200}'nursery_ops'/.test(SQL), true,
    'routed to HQ Operation');
+
+/* ── 11. A FIGURE CAN BE TAKEN OFF AGAIN, SAVED OR NOT ───────────────
+   The delete key reached what was being TYPED and nothing else, so the
+   moment a count settled -- on =, on +, on the tap to the next batch, or on
+   being loaded back off a save -- it went dead. A saved 122 was a saved 122
+   for ever: the only way back was to hold the key, which clears the whole
+   batch and which nothing on screen says. */
+if (/if \(k === 'DEL'\) \{\s*\n\s*if \(typing !== ''\) \{ setTyping/.test(TAB)
+ && /setTermsBy\(\(m\) => \{\s*\n\s*const was = m\[active\] \|\| \[\];\s*\n\s*return was\.length \? \{ \.\.\.m, \[active\]: was\.slice\(0, -1\) \} : m;/.test(TAB)) {
+  ok('delete takes back the last GO once nothing is being typed — a saved figure comes off');
+} else {
+  fail('the delete key still only reaches the keypad, so a settled figure cannot be taken off');
+}
+if (/onPress\('AC'\)/.test(TAB)) {
+  ok('and holding it still clears the whole batch at once');
+} else {
+  fail('the hold-to-clear went with it');
+}
+
+/* AND THE CLEAR HAS TO LEAVE THE PHONE. The draft writes only the blocks
+   worth a row, and a block cleared back to nought reads as one with nothing
+   to say -- so without the set of blocks already written, the deletion
+   never goes up and the figure stands in the database for ever. */
+if (/const wrote = useRef\(new Set\(\)\);/.test(TAB)
+ && /\|\| wrote\.current\.has\(l\.batch\)/.test(TAB)
+ && /rows\.forEach\(\(r\) => wrote\.current\.add\(r\.batch\)\);/.test(TAB)) {
+  ok('a block this session has written a row for keeps getting one, so nought reaches the server');
+} else {
+  fail('a block cleared back to nought drops out of the draft and its old figure survives');
+}
+if (/wrote\.current = new Set\(\);/.test(TAB)) {
+  ok('and the set belongs to the plot, so changing plot does not carry it');
+} else {
+  fail('the written-blocks set outlives its plot');
+}
+
+/* The cell has to be reachable at all. A batch whose own rate has since
+   dropped under the line -- the ledger moved -- would otherwise sit there
+   with a selection against it, no way in, and the figure still coming off
+   the final balance. */
+const MOVED = [{ batch: '250', balance: 60, transplant: 1000 }];   // 6% — under the line
+is(line(cullingLines(MOVED, { 250: [20] }, null, ''), '250').editable, true,
+   'a batch carrying a figure stays reachable whatever its own rate now reads');
+is(line(cullingLines(MOVED, {}, null, ''), '250').editable, false,
+   'and one carrying none is still left alone');
+
+/* ── 12. Red is red ──────────────────────────────────────────────────
+   Green is a plot that got there, red is one that did not and is being
+   handed to somebody. The final selection was amber, which reads as a third
+   state between the two and is not one: it is the first of the two red
+   answers, and HQ is the second. */
+const btn = (mark) => {
+  const i = TAB.indexOf(mark);
+  return i < 0 ? '' : TAB.slice(i, i + 700);
+};
+const finalBtn = btn('data-final-selection');
+const hqBtn = btn('data-hq');
+const droneBtn = btn('data-drone');
+is(/canFinal\s*\n?\s*\?\s*'bg-rose-600 hover:bg-rose-500 text-white/.test(finalBtn), true,
+   'Request Final Pokok Inang Selection is red');
+is(/canHq\s*\n?\s*\?\s*'bg-rose-600 hover:bg-rose-500 text-white/.test(hqBtn), true,
+   'Request HQ Verification is the same red');
+is(/bg-emerald-600 hover:bg-emerald-500/.test(droneBtn), true,
+   'and the drone flight is still the green one, so the three are not one colour');
+is(/bg-amber-500/.test(finalBtn) || /bg-amber-500/.test(hqBtn), false,
+   'no amber left on either');
+is(/bg-\[#1c1c1e\] text-slate-600/.test(finalBtn) && /bg-\[#1c1c1e\] text-slate-600/.test(hqBtn), true,
+   'and a button nobody may press is still grey — a dead red button reads as live');
 
 console.log('');
 console.log(failed ? failed + ' FAILED' : 'all good');

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtNum, fmtPct } from './cullingData.js';
 import { CULL_LIMIT, HQ_ACTION, actionForPlot, caseBody } from './cullingActions.js';
 // Every figure on this screen comes from here.
@@ -353,6 +353,7 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
     setTermsBy({});
     setLoadedPlot(null);
     setDraftFailed(false);
+    wrote.current = new Set();
     if (!plotId) return;
     let live = true;
     loadInang(plotId).then((got) => {
@@ -402,14 +403,29 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      first save would race the load and write an empty selection over one
      somebody made this morning. */
   const [draftFailed, setDraftFailed] = useState(false);
+  /* WHICH BLOCKS THIS SESSION HAS ALREADY WRITTEN A ROW FOR.
+
+     The filter below exists so a block nobody has touched gets no row made
+     for it. A block CLEARED back to nought is the opposite of that and must
+     still be written, or the deletion never leaves the phone — and a block
+     keyed and then cleared again in one sitting has a row on the server
+     from its own draft, written eight hundred milliseconds after the first
+     digit, which `saved` was read before and knows nothing about. Without
+     this it drops out of the list the moment it reads nought and the figure
+     stands in the database for ever.
+
+     A ref and not state: it must not itself cause the draft to re-run. */
+  const wrote = useRef(new Set());
+  /* Every block worth a row: one with a figure, one the last round left a
+     row for, and one this session has written. */
+  const draftRows = () => lines.filter((l) => l.inang > 0 || saved.byBatch[l.batch]
+    || wrote.current.has(l.batch));
   useEffect(() => {
     if (!plotRow || !loadedPlot || loadedPlot !== plotRow.plot) return;
-    /* Only the blocks that have something to say: one that has never been
-       keyed and has no row needs none made for it. A block cleared back to
-       nought DOES have one — that is an answer too. */
-    const rows = lines.filter((l) => l.inang > 0 || saved.byBatch[l.batch]);
+    const rows = draftRows();
     if (!rows.length) return;
     const id = setTimeout(() => {
+      rows.forEach((r) => wrote.current.add(r.batch));
       draftInang({ plot: plotRow.plot, nursery: plotRow.nursery, rows })
         .then((okNow) => setDraftFailed(!okNow));
     }, 800);
@@ -428,13 +444,13 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      It is also the one way to make the save happen on a phone that has just
      found a bar of signal, without keying another digit to trigger it. */
   const [savingDraft, setSavingDraft] = useState(false);
-  const draftRows = () => lines.filter((l) => l.inang > 0 || saved.byBatch[l.batch]);
   async function saveDraftNow() {
     if (!plotRow || savingDraft || busy) return;
     commit();
     const rows = draftRows();
     if (!rows.length) { flash(t('cull.nothingToSave')); return; }
     setSavingDraft(true);
+    rows.forEach((r) => wrote.current.add(r.batch));
     const landed = await draftInang({ plot: plotRow.plot, nursery: plotRow.nursery, rows });
     setSavingDraft(false);
     setDraftFailed(!landed);
@@ -496,7 +512,25 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
   const press = (k) => {
     if (!active) return;
     if (k === 'AC') { setTermsBy((m) => ({ ...m, [active]: [] })); setTyping(''); return; }
-    if (k === 'DEL') { setTyping((s) => s.slice(0, -1)); return; }
+    /* A DIGIT WHILE ONE IS BEING KEYED, OTHERWISE THE LAST GO.
+       The delete key used to reach `typing` and nothing else, so the moment
+       a count settled — on =, on + , on the tap to another batch, or on
+       being loaded back off a save — it went dead. A figure already written
+       down could not be taken off at all: the one way back was to hold the
+       key, which clears the whole batch and which nothing on screen says.
+       So a saved 122 was a saved 122 for ever.
+
+       The GO is the unit, not the digit. "98 + 24" is a block walked in two
+       goes, so one press takes back one go and the cell drops to 98 — the
+       same thing the + key did, undone. Holding still clears the lot. */
+    if (k === 'DEL') {
+      if (typing !== '') { setTyping((s) => s.slice(0, -1)); return; }
+      setTermsBy((m) => {
+        const was = m[active] || [];
+        return was.length ? { ...m, [active]: was.slice(0, -1) } : m;
+      });
+      return;
+    }
     if (k === '+') { commit(); return; }
     if (k === '=') {
       // Fold what is being typed into the list. The total is the same either
@@ -893,7 +927,15 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
             everything that could be selected off it, so somebody goes and
             makes the final selection. Same case as before, under the same
             category — only the wording on the button has changed, because
-            the category is what Nelos routes on. */}
+            the category is what Nelos routes on.
+
+            BOTH OF THESE ARE RED, and the drone flight above them is green.
+            That is the whole of what the colours say on this screen: green
+            is a plot that got there, red is one that did not and is being
+            handed to somebody. The final selection used to be amber, which
+            read as a third state between the two and is not one — it is the
+            first of the two red answers, and HQ is the second. The office
+            asked for the pair to match. */}
         <div className="grid grid-cols-2 gap-1.5">
           <button
             data-final-selection
@@ -901,7 +943,7 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
             disabled={!canFinal || busy}
             className={`rounded-2xl py-2.5 px-2 font-black text-[11px] uppercase tracking-wider leading-tight transition-colors ${
               canFinal
-                ? 'bg-amber-500 hover:bg-amber-400 text-black cursor-pointer'
+                ? 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
                 : 'bg-[#1c1c1e] text-slate-600 cursor-default'
             }`}
           >

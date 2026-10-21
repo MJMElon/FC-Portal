@@ -27,6 +27,7 @@ import { tintOf } from '../modules/maintenance/tints.js';
 import { makeCapacity, makeCoverage, weekUsage } from '../modules/maintenance/usage.js';
 import ProgressDial from '../modules/maintenance/ProgressDial.jsx';
 import WorkIcon from '../modules/maintenance/WorkIcons.jsx';
+import Icon from './Icon.jsx';
 
 /* v3: the cached shape gained usageByWeek. An older cache would simply have
    no figures, which is survivable — but a new key means the first load after
@@ -203,8 +204,8 @@ export default function MaintenanceBoard() {
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4 shadow-[0_4px_16px_rgba(0,0,0,.06)]">
       <div className="px-4 py-2.5 border-b border-slate-200 bg-teal-50">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate">
-            🛠️ {t('mtb.title')}
+          <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate flex items-center gap-1.5">
+            <Icon name="tool" className="w-3.5 h-3.5 shrink-0" /> {t('mtb.title')}
           </span>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] font-black text-teal-700">{month}</span>
@@ -287,9 +288,9 @@ export default function MaintenanceBoard() {
                     {total ? (
                       <>
                         <span className={clear ? 'text-emerald-600' : 'text-slate-700'}>
-                          {clear ? '✓' : doneN}
+                          {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : doneN.toLocaleString()}
                         </span>
-                        {!clear && `/${total}`}
+                        {!clear && `/${total.toLocaleString()}`}
                       </>
                     ) : (
                       t('mtb.none')
@@ -360,9 +361,9 @@ function SchedulePopover({ t, lang, month, week, usage, totals, onClose }) {
           <button
             onClick={onClose}
             aria-label={t('common.cancel')}
-            className="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-500 text-xl leading-none cursor-pointer shrink-0"
+            className="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer shrink-0"
           >
-            ×
+            <Icon name="close" className="w-4 h-4" />
           </button>
         </div>
         <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">
@@ -385,7 +386,7 @@ function SchedulePopover({ t, lang, month, week, usage, totals, onClose }) {
                       {workTypeLabel(wt, lang)}
                     </span>
                     <span className="ml-auto text-[10px] font-black tabular-nums text-slate-400 shrink-0">
-                      {t('mtb.plotsN', { n: due })}
+                      {t('mtb.plotsN', { n: due.toLocaleString() })}
                     </span>
                   </div>
                   <div className="divide-y divide-slate-100">

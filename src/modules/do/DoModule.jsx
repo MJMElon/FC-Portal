@@ -21,6 +21,7 @@ import { useWorkerTick } from './useWorkerTick.js';
 import ManageModal from './ManageModal.jsx';
 import EntryModal from './EntryModal.jsx';
 import WorkerTickModal from './WorkerTickModal.jsx';
+import Icon from '../../components/Icon.jsx';
 
 export default function DoModule() {
   const { staffName } = useAuth();
@@ -43,6 +44,11 @@ export default function DoModule() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
+  // Which of the two ordinary groups to show -- 'all' | 'ready' | 'pending'.
+  // A search ignores this entirely (see groups below), same rule the Admin
+  // Portal's own Issue Collection DO tabs follow: the tab only narrows the
+  // unsearched browse view.
+  const [activeTab, setActiveTab] = useState('ready');
 
   const [manageAL, setManageAL] = useState(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -149,16 +155,16 @@ export default function DoModule() {
       else pending.push(r);
     });
     const g = [];
-    if (lower.length >= 1 && matched.length) g.push({ key: 'match', label: t('do.groupMatch'), rows: matched, theme: 'amber' });
-    if (signed.length) g.push({ key: 'signed', label: t('do.groupSigned'), rows: signed, theme: 'emerald' });
-    if (pending.length) g.push({ key: 'pending', label: t('do.groupPending'), rows: pending, theme: 'blue' });
+    if (lower.length >= 1 && matched.length) g.push({ key: 'match', icon: 'search', label: t('do.groupMatch'), rows: matched, theme: 'amber' });
+    if ((activeTab === 'all' || activeTab === 'ready') && signed.length) g.push({ key: 'signed', icon: 'checkCircle', label: t('do.groupSigned'), rows: signed, theme: 'emerald' });
+    if ((activeTab === 'all' || activeTab === 'pending') && pending.length) g.push({ key: 'pending', icon: 'clipboard', label: t('do.groupPending'), rows: pending, theme: 'red' });
     return g;
   })();
 
   const themeMap = {
     amber: { head: 'bg-amber-50 text-amber-700 border-amber-200', bal: 'text-amber-700' },
     emerald: { head: 'bg-emerald-50 text-emerald-700 border-emerald-200', bal: 'text-emerald-700' },
-    blue: { head: 'bg-blue-50 text-blue-700 border-blue-200', bal: 'text-blue-700' },
+    red: { head: 'bg-red-50 text-red-700 border-red-200', bal: 'text-red-700' },
   };
 
   function openChoice(al) {
@@ -209,15 +215,17 @@ export default function DoModule() {
       <TopNav title={t('do.headerTitle')} back="/dashboard" user={staffName} />
       <div className="max-w-[1100px] mx-auto px-4 sm:px-6 py-8 space-y-5">
         <div className="dash-card bg-white rounded-[20px] border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] p-5 sm:p-6">
-          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">{t('do.searchLabel')}</div>
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5"><Icon name="search" className="w-3.5 h-3.5" /> {t('do.searchLabel')}</div>
           <div className="flex gap-3 mb-5">
             <input value={query} onChange={(e) => setQuery(e.target.value)} className="search-input" placeholder={t('do.searchPlaceholder')} />
           </div>
 
-          <div className="flex flex-wrap gap-3 mb-5">
-            <Legend color="bg-amber-400" text={t('do.legendMatch')} tone="text-amber-700" />
-            <Legend color="bg-emerald-500" text={t('do.legendSigned')} tone="text-emerald-700" />
-            <Legend color="bg-blue-400" text={t('do.legendPending')} tone="text-blue-700" />
+          {/* Which of the two ordinary groups to browse -- a search box
+              above is not scoped to this, see the comment on `groups`. */}
+          <div className="tab-row mb-5">
+            <button className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>{t('do.tabAll')}</button>
+            <button className={`tab-btn ${activeTab === 'ready' ? 'active' : ''}`} onClick={() => setActiveTab('ready')}>{t('do.tabReady')}</button>
+            <button className={`tab-btn ${activeTab === 'pending' ? 'active' : ''}`} onClick={() => setActiveTab('pending')}>{t('do.tabPending')}</button>
           </div>
 
           {error && <div className="text-center py-4 text-red-400 text-xs font-bold">{error}</div>}
@@ -226,7 +234,7 @@ export default function DoModule() {
             <div className="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">{t('common.loading')}</div>
           ) : groups.length === 0 ? (
             <div className="text-center py-12">
-              <div className="text-4xl mb-3">📭</div>
+              <Icon name="inboxEmpty" className="w-10 h-10 mx-auto mb-3 text-slate-300" />
               <div className="text-[11px] font-black text-slate-300 uppercase tracking-widest">{t('do.noALs')}</div>
             </div>
           ) : (
@@ -243,7 +251,8 @@ export default function DoModule() {
                       return (
                         <FragmentRows
                           key={g.key}
-                          label={`${g.label} (${g.rows.length})`}
+                          icon={g.icon}
+                          label={`${g.label} (${t('do.recordsCount', { n: g.rows.length })})`}
                           headClass={tm.head}
                           balClass={tm.bal}
                           rows={g.rows}
@@ -263,8 +272,8 @@ export default function DoModule() {
                   const tm = themeMap[g.theme];
                   return (
                     <div key={g.key}>
-                      <div className={`text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-xl border mb-2 ${tm.head}`}>
-                        {g.label} ({g.rows.length})
+                      <div className={`text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-xl border mb-2 flex items-center gap-1.5 ${tm.head}`}>
+                        <Icon name={g.icon} className="w-3 h-3" /> {g.label} ({t('do.recordsCount', { n: g.rows.length })})
                       </div>
                       <div className="space-y-2">
                         {g.rows.map((r) => (
@@ -272,13 +281,17 @@ export default function DoModule() {
                             <div className="font-black text-slate-800">{r.al_number || '—'}</div>
                             <div className="text-sm font-bold text-slate-600 mt-0.5 break-words">{r.customer_name || '—'}</div>
                             <div className="text-[11px] font-bold text-slate-400 mt-2 leading-relaxed">
-                              📋 {t('do.colOrder')}: <span className="text-slate-600">{r.order_number || '—'}</span><br />
-                              {t('do.colQtyOrdered')}: <span className="text-slate-600">{r.quantity_ordered ?? '—'}</span> &nbsp;·&nbsp;
-                              {t('do.colBalance')}: <span className={`font-black ${tm.bal}`}>{r.balance_quantity ?? '—'}</span>
+                              <Icon name="clipboard" className="w-3 h-3 inline-block align-[-1px]" /> {t('do.colOrder')}: <span className="text-slate-600">{r.order_number || '—'}</span><br />
+                              {t('do.colQtyOrdered')}: <span className="text-slate-600">{r.quantity_ordered != null ? r.quantity_ordered.toLocaleString() : '—'}</span> &nbsp;·&nbsp;
+                              {t('do.colBalance')}: <span className={`font-black ${tm.bal}`}>{r.balance_quantity != null ? r.balance_quantity.toLocaleString() : '—'}</span>
                             </div>
                             <div className="flex gap-2 mt-3">
-                              <button onClick={() => setManageAL(r)} className="btn-open flex-1 text-center">{t('do.manageDOs')}</button>
-                              <button onClick={() => openChoice(r)} title="Add DO" className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border-none cursor-pointer">📷</button>
+                              <button onClick={() => setManageAL(r)} title={t('do.manageDOs')} aria-label={t('do.manageDOs')} className="btn-open flex-1 flex items-center justify-center">
+                                <Icon name="clipboard" className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => openChoice(r)} title="Add DO" className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border-none cursor-pointer">
+                                <Icon name="camera" className="w-4 h-4" />
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -309,17 +322,17 @@ export default function DoModule() {
       {choiceAL && (
         <div className="modal-overlay open" onClick={() => setChoiceAL(null)}>
           <div className="bg-white rounded-3xl p-7 w-full max-w-sm shadow-2xl text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="text-3xl mb-2">📋</div>
+            <Icon name="clipboard" className="w-9 h-9 mx-auto mb-2 text-slate-400" />
             <div className="font-black text-slate-800 text-lg uppercase tracking-wide mb-1">{t('do.addNewDO')}</div>
             <div className="text-xs font-bold text-slate-400 mb-1">{choiceAL.al_number} · {choiceAL.customer_name}</div>
             <div className="text-[11px] font-bold text-slate-300 mb-6">{t('do.orderLabel', { x: choiceAL.order_number || '—' })}</div>
             <div className="grid grid-cols-2 gap-3 mb-5">
               <button onClick={() => cameraRef.current?.click()} className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 hover:border-blue-500 transition-all cursor-pointer">
-                <span className="text-3xl">📷</span>
+                <Icon name="camera" className="w-8 h-8 text-blue-600" />
                 <span className="text-[11px] font-black text-blue-700 uppercase tracking-wide">{t('do.takePhoto')}<br /><span className="text-[9px] font-bold text-blue-400 normal-case">{t('do.aiScanDoc')}</span></span>
               </button>
               <button onClick={() => { const al = choiceAL; setChoiceAL(null); setEntry({ al, photoBase64: null }); }} className="flex flex-col items-center gap-3 p-5 rounded-2xl bg-slate-50 hover:bg-slate-100 border-2 border-slate-200 hover:border-slate-400 transition-all cursor-pointer">
-                <span className="text-3xl">✏️</span>
+                <Icon name="pen" className="w-8 h-8 text-slate-500" />
                 <span className="text-[11px] font-black text-slate-600 uppercase tracking-wide">{t('do.keyInManually')}<br /><span className="text-[9px] font-bold text-slate-400 normal-case">{t('do.fillFormDirectly')}</span></span>
               </button>
             </div>
@@ -345,12 +358,14 @@ export default function DoModule() {
       {printPrompt && (
         <div className="modal-overlay open" onClick={() => setPrintPrompt(null)}>
           <div className="bg-white rounded-3xl p-7 w-full max-w-sm shadow-2xl text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="text-4xl mb-3">🖨️</div>
+            <Icon name="printer" className="w-10 h-10 mx-auto mb-3 text-slate-400" />
             <div className="font-black text-slate-800 text-lg uppercase tracking-wide mb-1">{t('do.doSavedTitle')}</div>
             <div className="text-sm font-bold text-slate-500 mb-1">{printPrompt.payload.do_number}</div>
             <div className="text-xs font-bold text-slate-400 mb-6">{t('do.printPrompt')}</div>
             <div className="flex flex-col gap-3">
-              <button onClick={() => { doPrint(printPrompt.payload, printPrompt.sigDataUrl, printPrompt.photoBase64); setPrintPrompt(null); }} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] uppercase tracking-widest rounded-xl border-none cursor-pointer">{t('do.yesPrint')}</button>
+              <button onClick={() => { doPrint(printPrompt.payload, printPrompt.sigDataUrl, printPrompt.photoBase64); setPrintPrompt(null); }} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] uppercase tracking-widest rounded-xl border-none cursor-pointer flex items-center justify-center gap-1.5">
+                <Icon name="printer" className="w-4 h-4" /> {t('do.yesPrint')}
+              </button>
               <button onClick={() => setPrintPrompt(null)} className="w-full py-2.5 text-[10px] font-black text-slate-500 hover:text-slate-800 uppercase tracking-widest bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">{t('do.maybeLater')}</button>
             </div>
           </div>
@@ -361,36 +376,36 @@ export default function DoModule() {
 
       {toast && (
         <div className="fixed bottom-6 right-6 text-white px-5 py-3.5 rounded-xl text-[13px] font-bold z-[999] shadow-lg flex items-center gap-2" style={{ background: 'linear-gradient(135deg,#064e3b,#10b981)' }}>
-          ✅ {toast}
+          <Icon name="checkCircle" className="w-4 h-4 shrink-0" /> {toast}
         </div>
       )}
     </div>
   );
 }
 
-function Legend({ color, text, tone }) {
-  return (
-    <span className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider ${tone}`}>
-      <span className={`w-3 h-3 rounded ${color} inline-block`} />
-      {text}
-    </span>
-  );
-}
-
-function FragmentRows({ label, headClass, balClass, rows, manageLabel, onManage, onCamera }) {
+function FragmentRows({ icon, label, headClass, balClass, rows, manageLabel, onManage, onCamera }) {
   return (
     <>
-      <tr><td colSpan={6} className={`py-2 px-4 text-[9px] font-black uppercase tracking-widest border-b ${headClass}`}>{label}</td></tr>
+      <tr><td colSpan={6} className={`py-2 px-4 text-[9px] font-black uppercase tracking-widest border-b ${headClass}`}><Icon name={icon} className="w-3 h-3 inline-block align-[-2px]" /> {label}</td></tr>
       {rows.map((r) => (
         <tr key={r.id}>
           <td><span className="font-black text-slate-800">{r.al_number || '—'}</span></td>
           <td>{r.order_number || '—'}</td>
           <td>{r.customer_name || '—'}</td>
-          <td>{r.quantity_ordered ?? '—'}</td>
-          <td><span className={`font-black ${balClass}`}>{r.balance_quantity ?? '—'}</span></td>
+          <td>{r.quantity_ordered != null ? r.quantity_ordered.toLocaleString() : '—'}</td>
+          <td><span className={`font-black ${balClass}`}>{r.balance_quantity != null ? r.balance_quantity.toLocaleString() : '—'}</span></td>
           <td className="whitespace-nowrap">
-            <button onClick={() => onManage(r)} className="btn-open mr-1">{manageLabel}</button>
-            <button onClick={() => onCamera(r)} title="Add DO" className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border-none cursor-pointer align-middle">📷</button>
+            <button
+              onClick={() => onManage(r)}
+              title={manageLabel}
+              aria-label={manageLabel}
+              className="btn-open mr-1 inline-flex items-center justify-center align-middle"
+            >
+              <Icon name="clipboard" className="w-4 h-4" />
+            </button>
+            <button onClick={() => onCamera(r)} title="Add DO" className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-blue-600 hover:bg-blue-700 text-white border-none cursor-pointer align-middle">
+              <Icon name="camera" className="w-4 h-4" />
+            </button>
           </td>
         </tr>
       ))}

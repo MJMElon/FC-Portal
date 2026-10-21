@@ -9,6 +9,7 @@ import { absoluteDay } from './RecordCard.jsx';
 import { batchesIn } from './plotBatches.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
+import Icon from '../../components/Icon.jsx';
 
 /* Leaflet is most of a megabyte, and a conductor who never opens a track
    never downloads a byte of it. Same lazy import GpsTrack uses. */
@@ -292,11 +293,11 @@ export default function VerifyHub({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,.06)]">
       <div className="px-4 py-2.5 border-b border-slate-200 bg-emerald-50 flex items-center justify-between gap-2">
-        <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-emerald-800 truncate">
-          ✓ {t('mt.verifyHub')}
+        <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-emerald-800 truncate flex items-center gap-1.5">
+          <Icon name="check" className="w-3.5 h-3.5 shrink-0" /> {t('mt.verifyHub')}
         </span>
         <span className="text-[10px] font-black text-emerald-700 shrink-0 tabular-nums">
-          {setupNeeded ? '—' : t('mt.verifyLeft', { n: queue.length })}
+          {setupNeeded ? '—' : t('mt.verifyLeft', { n: queue.length.toLocaleString() })}
         </span>
       </div>
 
@@ -310,7 +311,7 @@ export default function VerifyHub({
           <div className="text-[13px] font-black text-emerald-700">{t('mt.verifyAllDone')}</div>
           {(done.ok || done.back) > 0 && (
             <div className="text-[11px] font-bold text-slate-400 mt-1">
-              {t('mt.verifyTally', { ok: done.ok, back: done.back })}
+              {t('mt.verifyTally', { ok: done.ok.toLocaleString(), back: done.back.toLocaleString() })}
             </div>
           )}
         </div>
@@ -368,7 +369,7 @@ export default function VerifyHub({
               className="w-[56px] h-[56px] rounded-full bg-white border border-slate-200 shadow-lg
                          text-rose-600 text-[24px] font-black grid place-items-center
                          hover:bg-rose-50 active:scale-95 transition cursor-pointer">
-              ✕
+              <Icon name="close" className="w-6 h-6" />
             </button>
             <button onClick={() => top && approve(top)} aria-label={t('mt.approve')}
               disabled={!top || needsBatch(top)}
@@ -377,7 +378,7 @@ export default function VerifyHub({
                          text-emerald-600 text-[24px] font-black grid place-items-center
                          disabled:opacity-40 disabled:cursor-not-allowed
                          hover:bg-emerald-50 active:scale-95 transition cursor-pointer">
-              ✓
+              <Icon name="check" className="w-6 h-6" />
             </button>
             <button onClick={skip} aria-label={t('mt.skip')}
               disabled={!top || queue.length < 2}
@@ -609,8 +610,8 @@ function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatc
                                 : () => window.open(mapUrl, '_blank', 'noopener')}
               className="w-full flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50
                          hover:bg-slate-100 px-3.5 py-2.5 transition-colors text-left cursor-pointer">
-              <span className="w-9 h-9 rounded-xl bg-white grid place-items-center shrink-0 text-[18px]">
-                {hasTrack ? '🛰️' : '📍'}
+              <span className="w-9 h-9 rounded-xl bg-white grid place-items-center shrink-0 text-slate-600">
+                <Icon name={hasTrack ? 'map' : 'pin'} className="w-4 h-4" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[12.5px] font-black text-slate-700 truncate">
@@ -619,8 +620,8 @@ function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatc
                 </span>
                 <span className="block text-[11px] font-bold text-slate-400">
                   {[
-                    r.gps_distance_m != null ? t('mt.walked', { m: Math.round(r.gps_distance_m) }) : null,
-                    r.gps_points != null ? t('mt.fixes', { n: r.gps_points }) : null,
+                    r.gps_distance_m != null ? t('mt.walked', { m: Math.round(r.gps_distance_m).toLocaleString() }) : null,
+                    r.gps_points != null ? t('mt.fixes', { n: Number(r.gps_points).toLocaleString() }) : null,
                   ].filter(Boolean).join(' · ') || t('mt.openMap')}
                 </span>
               </span>

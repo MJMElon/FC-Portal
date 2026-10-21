@@ -1,4 +1,5 @@
 import { useLang } from '../../context/LanguageContext.jsx';
+import Icon from '../../components/Icon.jsx';
 
 /* "Who Loaded This DO" — one toggle-button section per nursery the DO's
    items touch, same picker style as WhoDidIt.jsx. Rendered by both the DO
@@ -33,7 +34,7 @@ export default function WorkerTickModal({ wt, staffName }) {
             onClick={() => !wt.wtSaving && wt.skipWorkerTick()}
             className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-black text-lg flex items-center justify-center shrink-0 ml-4"
           >
-            ✕
+            <Icon name="close" className="w-4 h-4" />
           </button>
         </div>
 
@@ -48,7 +49,7 @@ export default function WorkerTickModal({ wt, staffName }) {
 
           {!wt.wtNurseries.length && !wt.wtOtherNurseries.length ? (
             <div className="text-center py-8">
-              <div className="text-3xl mb-2">🌱</div>
+              <Icon name="seedling" className="w-9 h-9 mx-auto mb-2 text-slate-400" />
               <div className="text-[11px] font-black text-slate-300 uppercase tracking-widest">{t('do.whoLoadedNoNurseries')}</div>
             </div>
           ) : (
@@ -78,7 +79,7 @@ export default function WorkerTickModal({ wt, staffName }) {
                           onClick={() => wt.removeNursery(key)}
                           className="w-5 h-5 rounded-md bg-white border border-slate-200 text-slate-400 hover:text-slate-700 text-[11px] font-black leading-none flex items-center justify-center cursor-pointer"
                         >
-                          ✕
+                          <Icon name="close" className="w-3 h-3" />
                         </button>
                       )}
                     </span>
@@ -101,7 +102,7 @@ export default function WorkerTickModal({ wt, staffName }) {
                                 : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                             }`}
                           >
-                            {on && <span className="mr-1" aria-hidden="true">✓</span>}
+                            {on && <Icon name="check" className="w-3 h-3 inline-block mr-1" />}
                             {w.full_name}
                           </button>
                         );

@@ -6,6 +6,7 @@ import { callGemini, compressImage, DO_SCAN_PROMPT } from '../../lib/gemini.js';
 import { generateDONumber, offlineDONumber, loadPlotBreeds, loosePlot } from './data.js';
 import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
 import { rowQty, lineCount, totalQty as sumQty, scanTally, applyScannedQty } from './qty.js';
+import Icon from '../../components/Icon.jsx';
 
 /* picks is the batches chosen on this row, each with its OWN quantity:
    [{ batch, breed, qty }]. One delivery order line per batch, because
@@ -320,17 +321,17 @@ const MAX_LINES = 5;
       <div className="modal-box" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
         <div className="p-5 rounded-t-[24px] flex justify-between items-start" style={{ background: 'linear-gradient(135deg,#0f172a,#1e293b)' }}>
           <div>
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
-              {photoBase64 ? t('do.aiScanLabel') : t('do.manualLabel')}
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+              {photoBase64 ? (<><Icon name="camera" className="w-3.5 h-3.5" /> {t('do.aiScanLabel')}</>) : (<><Icon name="pen" className="w-3.5 h-3.5" /> {t('do.manualLabel')}</>)}
             </div>
             <div className="text-lg font-black text-white">{t('do.newDeliveryOrder')}</div>
             <div className="text-[11px] font-bold text-slate-400 mt-1">
               <span className="text-white font-black">{al?.al_number || '—'}</span>
-              <span className="text-amber-400 mx-2">✶</span>
+              <span className="text-amber-400 mx-2">&middot;</span>
               <span className="text-slate-300">{al?.customer_name || '—'}</span>
             </div>
           </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-black text-lg flex items-center justify-center shrink-0 ml-4">✕</button>
+          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-black text-lg flex items-center justify-center shrink-0 ml-4"><Icon name="close" className="w-4 h-4" /></button>
         </div>
 
         <div className="p-4 sm:p-5 space-y-4">
@@ -342,7 +343,7 @@ const MAX_LINES = 5;
 
           {aiState === 'loading' && (
             <div className="text-center py-8">
-              <div className="text-4xl mb-3">🤖</div>
+              <Icon name="sparkles" className="w-10 h-10 mx-auto mb-3 text-slate-400" />
               <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest">{t('do.aiReading')}</div>
             </div>
           )}
@@ -351,12 +352,12 @@ const MAX_LINES = 5;
             <>
               {aiState === 'failed' && (
                 <div className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                  {t('do.aiFailed')}
+                  <Icon name="warning" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('do.aiFailed')}
                 </div>
               )}
               {aiState === 'done' && (
                 <div className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 uppercase tracking-wider">
-                  {t('do.aiComplete')}
+                  <Icon name="sparkles" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('do.aiComplete')}
                 </div>
               )}
 
@@ -377,7 +378,7 @@ const MAX_LINES = 5;
                   <input value={customer} onChange={(e) => setCustomer(e.target.value)} className="search-input text-sm flex-1" style={{ padding: '9px 12px' }} />
                   {customer.trim() && (
                     <div className={`shrink-0 text-[10px] font-black px-3 py-2 rounded-xl border ${customerMatch ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>
-                      {customerMatch ? t('do.match') : t('do.mismatch')}
+                      {customerMatch ? (<><Icon name="check" className="w-3 h-3 inline-block align-[-2px]" /> {t('do.match')}</>) : (<><Icon name="warning" className="w-3 h-3 inline-block align-[-2px]" /> {t('do.mismatch')}</>)}
                     </div>
                   )}
                 </div>
@@ -407,7 +408,7 @@ const MAX_LINES = 5;
                       {scan.auto
                         ? t('do.scanOneLine')
                         : scan.left === 0
-                          ? t('do.scanTallies')
+                          ? (<><Icon name="check" className="w-3 h-3 inline-block align-[-2px]" /> {t('do.scanTallies')}</>)
                           : scan.left > 0
                             ? t('do.scanShort', { n: scan.left })
                             : t('do.scanOver', { n: -scan.left })}
@@ -422,7 +423,7 @@ const MAX_LINES = 5;
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             {t('do.itemLabel')} {i + 1}
-                            {r.ai && <span className="ml-2 text-emerald-600 normal-case">✨ AI</span>}
+                            {r.ai && <span className="ml-2 text-emerald-600 normal-case inline-flex items-center gap-0.5"><Icon name="sparkles" className="w-2.5 h-2.5" /> AI</span>}
                           </span>
                           {rows.length > 1 && (
                             <button
@@ -561,14 +562,14 @@ const MAX_LINES = 5;
                   })}
                 </div>
                 <div className="text-[10px] font-bold text-slate-400 mt-2 text-right">
-                  {t('do.totalQtyLabel')} <span className="font-black text-slate-700">{totalQty}</span>
-                  &nbsp;·&nbsp; {t('do.balanceLabel')} <span className={`font-black ${remain < 0 ? 'text-red-600' : 'text-blue-700'}`}>{remain}</span>
+                  {t('do.totalQtyLabel')} <span className="font-black text-slate-700">{totalQty.toLocaleString()}</span>
+                  &nbsp;·&nbsp; {t('do.balanceLabel')} <span className={`font-black ${remain < 0 ? 'text-red-600' : 'text-blue-700'}`}>{remain.toLocaleString()}</span>
                 </div>
               </div>
 
               {/* Photo: customer car plate with loaded seedlings */}
               <div className="border-t border-slate-100 pt-4">
-                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('do.photoTitle')}</div>
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Icon name="camera" className="w-3.5 h-3.5" /> {t('do.photoTitle')}</div>
                 <input ref={photoInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhotoPicked} />
                 {capturedPhoto ? (
                   <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-200 bg-slate-50">
@@ -577,7 +578,7 @@ const MAX_LINES = 5;
                       onClick={() => photoInputRef.current?.click()}
                       className="absolute bottom-2 right-2 text-[10px] font-black uppercase tracking-widest text-white bg-black/60 px-3 py-2 rounded-xl border-none cursor-pointer"
                     >
-                      📷 {t('do.retakePhoto')}
+                      <Icon name="camera" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('do.retakePhoto')}
                     </button>
                   </div>
                 ) : (
@@ -585,14 +586,14 @@ const MAX_LINES = 5;
                     onClick={() => photoInputRef.current?.click()}
                     className="w-full py-4 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50 text-emerald-700 font-black text-xs uppercase tracking-widest cursor-pointer flex items-center justify-center gap-2"
                   >
-                    📷 {t('do.takePhoto')}
+                    <Icon name="camera" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('do.takePhoto')}
                   </button>
                 )}
                 <p className="text-[10px] font-bold text-slate-300 mt-1.5">{t('do.photoHint')}</p>
               </div>
 
               <div className="border-t border-slate-100 pt-4">
-                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('do.sigTitle')}</div>
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5"><Icon name="pen" className="w-3.5 h-3.5" /> {t('do.sigTitle')}</div>
                 <p className="text-[10px] font-bold text-slate-300 mb-3">{t('do.sigNote')}</p>
                 <SignaturePad ref={sigRef} height={160} />
               </div>
@@ -600,7 +601,7 @@ const MAX_LINES = 5;
               <div className="flex gap-3 justify-end pt-1 border-t border-slate-100">
                 <button onClick={onClose} className="text-[10px] font-black text-slate-500 hover:text-slate-800 uppercase tracking-widest bg-slate-50 px-5 py-2.5 rounded-full border border-slate-200 cursor-pointer">{t('common.cancel')}</button>
                 <button onClick={save} disabled={saving} className="text-[10px] font-black text-white uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 px-7 py-2.5 rounded-xl border-none cursor-pointer disabled:opacity-60">
-                  {saving ? t('do.saving') : t('do.saveSign')}
+                  {saving ? t('do.saving') : (<><Icon name="save" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('do.saveSign')}</>)}
                 </button>
               </div>
             </>

@@ -43,6 +43,7 @@ import {
   fetchSealsOnDO,
 } from './store.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
+import Icon from '../../components/Icon.jsx';
 
 const DEDUPE_DEBOUNCE_MS = 800;
 const OVER_REPEAT_MS = 1200;
@@ -468,7 +469,7 @@ export default function ScanModule() {
           lastOverRef.current = now;
         }
         vibrate([120, 60, 120, 60, 200]);
-        flash(t('scan.overQuota', { u: unique, q: a.qty }), 'danger');
+        flash(t('scan.overQuota', { u: unique.toLocaleString(), q: a.qty.toLocaleString() }), 'danger');
         next.overFired = true;
       } else {
         setLastInfo({ key: 'scan.latest', vars: { code } });
@@ -480,7 +481,7 @@ export default function ScanModule() {
         next.completedAt = Date.now();
         beepComplete();
         vibrate([80, 60, 80, 60, 200]);
-        flash(t('scan.targetReached', { q: a.qty }), 'done');
+        flash(t('scan.targetReached', { q: a.qty.toLocaleString() }), 'done');
       }
 
       setProgress((prev) => {
@@ -747,17 +748,17 @@ export default function ScanModule() {
       {printPrompt && (
         <div className="modal-overlay open" onClick={() => setPrintPrompt(null)}>
           <div className="bg-white rounded-3xl p-7 w-full max-w-sm shadow-2xl text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="text-4xl mb-3">✅</div>
+            <Icon name="checkCircle" className="w-10 h-10 mx-auto mb-3 text-emerald-500" />
             <div className="font-black text-slate-800 text-lg uppercase tracking-wide mb-1">{t('do.doSavedTitle')}</div>
             <div className="text-sm font-bold text-slate-500 mb-1">{printPrompt.payload.do_number}</div>
             <div className="text-xs font-bold text-slate-400 mb-5">{t('do.printPrompt')}</div>
             <div className="flex flex-col gap-3">
               <button
                 onClick={() => { shareWhatsApp(printPrompt); setPrintPrompt(null); }}
-                className="w-full py-3 text-white font-black text-[11px] uppercase tracking-widest rounded-xl border-none cursor-pointer"
+                className="w-full py-3 text-white font-black text-[11px] uppercase tracking-widest rounded-xl border-none cursor-pointer flex items-center justify-center gap-1.5"
                 style={{ background: '#25D366' }}
               >
-                {t('scan.shareWhatsApp')}
+                <Icon name="share" className="w-4 h-4" /> {t('scan.shareWhatsApp')}
               </button>
               <button
                 onClick={() => { doPrint(printPrompt); setPrintPrompt(null); }}
@@ -780,7 +781,7 @@ export default function ScanModule() {
 
       {toast && (
         <div
-          className={`fixed left-1/2 bottom-6 -translate-x-1/2 px-5 py-3 rounded-xl font-mono text-xs tracking-wider z-50 border bg-[#111821] ${
+          className={`fixed left-1/2 bottom-6 -translate-x-1/2 px-5 py-3 rounded-xl font-mono text-xs tracking-wider z-50 border bg-[#111821] flex items-center gap-2 ${
             toast.kind === 'danger'
               ? 'border-red-500 text-red-400'
               : toast.kind === 'warn'
@@ -790,6 +791,10 @@ export default function ScanModule() {
               : 'border-slate-600 text-slate-200'
           }`}
         >
+          <Icon
+            name={toast.kind === 'danger' ? 'blocked' : toast.kind === 'warn' ? 'warning' : toast.kind === 'done' ? 'checkCircle' : 'sparkles'}
+            className="w-4 h-4 shrink-0"
+          />
           {toast.text}
         </div>
       )}
@@ -871,7 +876,7 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
                   <div className="min-w-0">
                     {bookedToday(c) && (
                       <span className="inline-block bg-amber-400 text-[#0a0f14] text-[9px] font-black rounded px-1.5 py-0.5 uppercase tracking-wider mb-1">
-                        📅 {t('scan.today')} {todayALs[c.al_number]}
+                        <Icon name="calendar" className="w-2.5 h-2.5 inline-block align-[-1px]" /> {t('scan.today')} {todayALs[c.al_number]}
                       </span>
                     )}
                     <div className="font-semibold text-base break-words">{c.customer}</div>
@@ -887,8 +892,8 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
                     {c.unique > collected ? t('scan.pendingIssueDO') : t('scan.pendingToScan')}
                   </span>
                   {collected > 0 && balance > 0
-                    ? <>{t('scan.qty')} {c.qty} · Collected <b className="text-emerald-300">{collected}</b> · Balance <b className="text-amber-300">{balance}</b></>
-                    : <>{t('scan.qty')} <b className="text-slate-200">{c.qty}</b> · {t('scan.scanned')} <b className="text-slate-200">{c.unique}</b></>
+                    ? <>{t('scan.qty')} {c.qty.toLocaleString()} · Collected <b className="text-emerald-300">{collected.toLocaleString()}</b> · Balance <b className="text-amber-300">{balance.toLocaleString()}</b></>
+                    : <>{t('scan.qty')} <b className="text-slate-200">{c.qty.toLocaleString()}</b> · {t('scan.scanned')} <b className="text-slate-200">{c.unique.toLocaleString()}</b></>
                   }
                   {c.over ? (
                     <>
@@ -1284,14 +1289,14 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
           <h2 className="text-lg font-bold leading-tight break-words">{consent.customer}</h2>
           <div className="font-mono text-[11px] text-slate-400">
             {issuedQty > 0
-              ? `${t('scan.qty')} ${consent.qty} · Collected ${issuedQty} · Balance ${consent.qty - issuedQty}`
-              : `${t('scan.qty')} ${consent.qty}`}
+              ? `${t('scan.qty')} ${consent.qty.toLocaleString()} · Collected ${issuedQty.toLocaleString()} · Balance ${(consent.qty - issuedQty).toLocaleString()}`
+              : `${t('scan.qty')} ${consent.qty.toLocaleString()}`}
             {consent.al_number && !/^MANUAL-/i.test(consent.al_number) ? ` · ${consent.al_number}` : ''}
           </div>
           {ownSeals.length > 0 && (
             <div className="font-mono text-[11px] text-sky-300 mt-0.5 break-words">
-              {t('scan.sealRangesLine', { ranges: sealRangesText(ownSeals), n: ownSealQty })}
-              {' · '}{t('scan.sealInRange', { x: inRangeCount, y: ownSealQty })}
+              {t('scan.sealRangesLine', { ranges: sealRangesText(ownSeals), n: ownSealQty.toLocaleString() })}
+              {' · '}{t('scan.sealInRange', { x: inRangeCount.toLocaleString(), y: ownSealQty.toLocaleString() })}
             </div>
           )}
         </div>
@@ -1302,7 +1307,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
 
       {fullyCollected ? (
         <div className="bg-[#0f1620] border border-emerald-600/40 rounded-2xl p-6 mb-3 flex flex-col items-center text-center gap-1.5">
-          <div className="text-3xl">✅</div>
+          <Icon name="checkCircle" className="w-8 h-8 text-emerald-500" />
           <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider">{t('scan.fullyCollected')}</div>
           <div className="font-mono text-[11px] text-slate-400">{t('scan.fullyCollectedHint')}</div>
         </div>
@@ -1321,7 +1326,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
               </span>
-              <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider">🔗 {t('scan.hwTitle')}</div>
+              <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5"><Icon name="refresh" className="w-3.5 h-3.5" /> {t('scan.hwTitle')}</div>
               <div className="font-mono text-[11px] text-slate-400">{t('scan.hwReady')}</div>
             </div>
           )}
@@ -1336,9 +1341,9 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                   try { localStorage.removeItem('mjm_hw_scanner'); } catch (e) { /* ignore */ }
                   setTimeout(() => startCamera().catch((e) => { setStatusKey('error'); alert(t('scan.cameraError', { msg: e?.message || e })); }), 50);
                 }}
-                className="flex-1 bg-[#111821] border border-[#1f2a38] text-slate-200 font-mono font-bold text-xs uppercase tracking-wider rounded-lg py-3.5"
+                className="flex-1 bg-[#111821] border border-[#1f2a38] text-slate-200 font-mono font-bold text-xs uppercase tracking-wider rounded-lg py-3.5 flex items-center justify-center gap-1.5"
               >
-                {t('scan.hwUseCamera')}
+                <Icon name="camera" className="w-3.5 h-3.5" /> {t('scan.hwUseCamera')}
               </button>
             ) : (
               <>
@@ -1353,7 +1358,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                     onClick={refocus}
                     className="shrink-0 bg-[#111821] border border-[#1f2a38] text-emerald-400 font-mono font-bold text-xs uppercase tracking-wider rounded-lg px-4 py-3.5"
                   >
-                    🎯 {t('scan.refocus')}
+                    <Icon name="search" className="w-3 h-3 inline-block align-[-2px]" /> {t('scan.refocus')}
                   </button>
                 )}
               </>
@@ -1368,21 +1373,21 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       <div className={`bg-[#0f1620] border rounded-2xl px-5 py-4 text-center mb-3 ${st === 'over' ? 'border-red-500' : 'border-[#1f2a38]'}`}>
         <div className="font-mono text-[10px] tracking-[0.3em] text-slate-400 uppercase mb-1.5">{t('scan.sealsScanned')}</div>
         <div className={`font-mono text-[56px] font-extrabold leading-none ${st === 'over' ? 'text-red-500' : st === 'done' ? 'text-amber-400' : 'text-emerald-400'}`}>
-          {sessionUnique}
-          <span className="text-[22px] text-slate-500 ml-1">/{sessionQty}</span>
+          {sessionUnique.toLocaleString()}
+          <span className="text-[22px] text-slate-500 ml-1">/{sessionQty.toLocaleString()}</span>
         </div>
         <div className="h-1.5 bg-[#0a0f14] rounded-full overflow-hidden mt-2.5 border border-[#1f2a38]">
           <div className={`h-full ${st === 'over' ? 'bg-red-500' : st === 'done' ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: pct + '%' }} />
         </div>
         {st === 'over' && (
           <div className="mt-3 bg-red-500/10 border border-red-500 text-red-400 rounded-lg p-3 font-mono text-xs">
-            {t('scan.overBanner', { u: sessionUnique, q: sessionQty, e: sessionUnique - sessionQty })}
+            {t('scan.overBanner', { u: sessionUnique.toLocaleString(), q: sessionQty.toLocaleString(), e: (sessionUnique - sessionQty).toLocaleString() })}
           </div>
         )}
         <div className="grid mt-2.5">
           <div className="bg-[#0a0f14] border border-[#1f2a38] rounded-lg px-3 py-2 flex justify-between items-center">
             <span className="font-mono text-[10px] tracking-widest text-slate-400 uppercase">{t('scan.remaining')}</span>
-            <span className={`font-mono text-lg font-bold ${sessionUnique > sessionQty ? 'text-red-400' : 'text-slate-100'}`}>{remain}</span>
+            <span className={`font-mono text-lg font-bold ${sessionUnique > sessionQty ? 'text-red-400' : 'text-slate-100'}`}>{remain.toLocaleString()}</span>
           </div>
         </div>
         <div className={`mt-2 font-mono text-xs break-all ${st === 'over' ? 'text-red-400' : 'text-slate-400'}`}>{t(lastInfo.key, lastInfo.vars)}</div>
@@ -1392,7 +1397,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
         <div className="flex justify-between items-center mb-3">
           <div className="font-mono text-[11px] tracking-[0.3em] text-slate-400 uppercase">{t('scan.scanLog')}</div>
           <div className="flex items-center gap-3">
-            <div className="font-mono text-[11px] text-emerald-400">{t('scan.entries', { n: consent.scans.length })}</div>
+            <div className="font-mono text-[11px] text-emerald-400">{t('scan.entries', { n: consent.scans.length.toLocaleString() })}</div>
             {/* Off on a card with nothing left to collect, the same as the
                 camera -- there is no seal to key against a finished order. */}
             <button
@@ -1512,7 +1517,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
         }}
         className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-mono font-bold text-sm uppercase tracking-wider rounded-xl py-4 mb-3 flex items-center justify-center gap-2"
       >
-        📋 {issuing ? t('do.saving') : t('scan.issueDO')}
+        <Icon name="clipboard" className="w-4 h-4" /> {issuing ? t('do.saving') : t('scan.issueDO')}
       </button>
 
       {activeDOs.length > 0 && (
@@ -1568,7 +1573,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                     viewDO.worked_by_locked_at ? 'bg-[#1f2a38] text-slate-300 hover:text-white' : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
                   }`}
                 >
-                  👷
+                  <Icon name="worker" className="w-4 h-4" />
                   {!viewDO.worked_by_locked_at && (
                     <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400" />
                   )}
@@ -1577,7 +1582,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                   onClick={closeViewDO}
                   className="w-8 h-8 rounded-xl bg-[#1f2a38] text-slate-300 hover:text-white font-bold flex items-center justify-center shrink-0"
                 >
-                  ✕
+                  <Icon name="close" className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -1606,7 +1611,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
               {/* Signed DO photo */}
               {viewDO.image_url && (
                 <div>
-                  <div className="font-mono text-[9px] tracking-[0.3em] text-slate-400 uppercase mb-2">📄 Signed DO</div>
+                  <div className="font-mono text-[9px] tracking-[0.3em] text-slate-400 uppercase mb-2 flex items-center gap-1"><Icon name="document" className="w-3 h-3" /> Signed DO</div>
                   <a
                     href={viewDO.image_url}
                     target="_blank"
@@ -1619,14 +1624,14 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                       className="w-full object-contain"
                       style={{ maxHeight: '200px' }}
                     />
-                    <div className="text-center font-mono text-[9px] text-slate-500 py-1.5">Tap to open full size ↗</div>
+                    <div className="text-center font-mono text-[9px] text-slate-500 py-1.5">Tap to open full size</div>
                   </a>
                 </div>
               )}
 
               {/* Signed consent */}
               <div>
-                <div className="font-mono text-[9px] tracking-[0.3em] text-slate-400 uppercase mb-2">✍️ Signed Consent</div>
+                <div className="font-mono text-[9px] tracking-[0.3em] text-slate-400 uppercase mb-2 flex items-center gap-1"><Icon name="pen" className="w-3 h-3" /> Signed Consent</div>
                 {loadingConsents || viewConsents === null ? (
                   <div className="font-mono text-[10px] text-slate-500 text-center py-3">Loading…</div>
                 ) : viewConsents.length === 0 ? (
@@ -1640,12 +1645,12 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                             ? new Date(c.created_at).toLocaleString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                             : '—'}
                         </div>
-                        <span className="font-mono text-[10px] font-bold text-emerald-400">{(c.consent_qty || 0)} seedlings</span>
+                        <span className="font-mono text-[10px] font-bold text-emerald-400">{(c.consent_qty || 0).toLocaleString()} seedlings</span>
                       </div>
                       {/* Sticker photo */}
                       {c.photo_url && (
                         <div className="mb-2">
-                          <div className="font-mono text-[8px] text-slate-500 uppercase tracking-widest mb-1">📷 Sticker Photo</div>
+                          <div className="font-mono text-[8px] text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1"><Icon name="camera" className="w-2.5 h-2.5" /> Sticker Photo</div>
                           <a
                             href={c.photo_url}
                             target="_blank"
@@ -1664,7 +1669,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                       {/* Signature */}
                       {c.signature_data && (
                         <div>
-                          <div className="font-mono text-[8px] text-slate-500 uppercase tracking-widest mb-1">✍️ Customer Signature</div>
+                          <div className="font-mono text-[8px] text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1"><Icon name="pen" className="w-2.5 h-2.5" /> Customer Signature</div>
                           <div className="bg-white rounded-xl p-2">
                             <img
                               src={c.signature_data}
