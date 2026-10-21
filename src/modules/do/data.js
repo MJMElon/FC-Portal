@@ -465,7 +465,12 @@ export async function saveDOWorkers(doId, workedByByNursery, lockedBy) {
   if (error) throw error;
 }
 
-// Extract item rows (nursery/breed/qty) from a DO record's plot_n columns.
+// Extract item rows (plot/nursery/breed/qty) from a DO record's plot_n columns.
+/* `plot` is the column AS KEYED and `nursery` is it resolved -- two different
+   answers, and the screens want different ones. plot_N holds the plot where
+   one was chosen on the entry form and the NURSERY name where one was not
+   (EntryModal falls back), so the raw column is "what the DO says the
+   seedlings came off", which is what somebody standing at the lorry reads. */
 export function itemsFromRecord(d, plotMap = {}) {
   const lines = [];
   for (let i = 1; i <= 5; i++) {
@@ -473,8 +478,37 @@ export function itemsFromRecord(d, plotMap = {}) {
     const breed = d[`breed_${i}`];
     const qty = parseInt(d[`qty_${i}`]) || 0;
     if (plot || breed || qty > 0) {
-      lines.push({ nursery: plotMap[plot] || plot || '—', breed: breed || '—', qty });
+      lines.push({ plot: plot || '', nursery: plotMap[plot] || plot || '—', breed: breed || '—', qty });
     }
   }
   return lines;
+}
+
+/* The plots a DO names, in the order they were keyed and without repeats.
+   Read off itemsFromRecord rather than walking plot_1..plot_5 again, because
+   two loops over the same five columns is two rules the day one of them
+   grows a sixth. */
+export function plotsOfDO(d) {
+  const out = [];
+  itemsFromRecord(d || {}).forEach((l) => {
+    const name = String(l.plot || '').trim();
+    if (name && !out.includes(name)) out.push(name);
+  });
+  return out;
+}
+
+/* WHO THE DO IS FOR, which is not a column on every DO.
+
+   This portal writes the customer into `remark` -- EntryModal's payload is
+   `remark: al.customer_name` and names no customer column at all -- while a
+   DO raised elsewhere carries `customer_name`. Asking only for the column
+   therefore fell through to the AL NUMBER on every DO the FC Portal has
+   ever issued, and an AL number is a reference, not a name. The AL number
+   stays as the last resort, because a DO with nothing else on it still has
+   to say which order it came off. */
+export function customerOfDO(d) {
+  const r = d || {};
+  return [r.customer_name, r.remark, r.al_number]
+    .map((v) => String(v == null ? '' : v).trim())
+    .find(Boolean) || '';
 }

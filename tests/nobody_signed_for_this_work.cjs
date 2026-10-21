@@ -173,6 +173,24 @@ yes(/\}, \[mayDo, doTick\]\);/.test(board),
 yes(!/openWorkerTick\([^)]*,\s*\(\)\s*=>/.test(board),
     'never through the after-callback, which fires on skip as well as on save');
 
+/* A DO NUMBER IS NOT A THING ANYBODY RECOGNISES. The card and the popup
+   both have to say which delivery, off which plot, of how many -- the
+   person ticking a gang cannot answer from a reference number. Both read
+   the SAME two rules out of do/data.js, which
+   tests/another_nursery_can_load_the_do.cjs drives; here it is only that
+   they are wired to them. */
+const tick = R('src/modules/do/WorkerTickModal.jsx');
+yes(/customerOfDO\(doCard\)/.test(board) && /plotsOfDO\(doCard\)/.test(board),
+    'the card names the customer and the plot');
+yes(!/doCard\.customer_name/.test(board),
+    'and never customer_name on its own, which read out the AL number on every DO this portal issued');
+yes(/customerOfDO\(wt\.wtDO\)/.test(tick), 'the popup names the customer too');
+yes(/itemsFromRecord\(wt\.wtDO/.test(tick), 'and lists the plots it was loaded off');
+yes(/wt\.wtDO\.total_qty\) \|\| lines\.reduce/.test(tick),
+    'with the DO own total, falling back to the lines only where it has none');
+yes(/setWtPlotMap\(plotMap \|\| \{\}\)/.test(R('src/modules/do/useWorkerTick.js')),
+    'the plot map rides into the popup, so a DO that names a nursery still resolves');
+
 /* TRANSPLANTING HAS LEFT MAINTENANCE -- button, sheet and the state behind
    them. A half-removal that leaves the import is the kind that comes back. */
 yes(!/TransplantSheet/.test(maint), 'the Transplanting sheet is gone from the Maintenance module');

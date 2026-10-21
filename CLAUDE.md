@@ -146,10 +146,43 @@ of them spelt in full — *"Lining & Arranging Polybag 15" × 18""* among them
 on it. Which jobs are missing is the first thing the sheet says anyway, one
 tap away.
 
+**A DO NUMBER IS NOT A THING ANYBODY RECOGNISES.** The card and the popup
+both opened on `03682` and little else, and the question being asked —
+which gang carried this — cannot be answered from a reference. Both now
+name the CUSTOMER, the PLOT and the QUANTITY, off the same two rules in
+`do/data.js` so the card and the popup cannot drift: the popup lists the
+DO line by line (plot, and its nursery where the two differ) with the DO
+own `total_qty` under them, falling back to the sum of the lines only
+where it has none — a total worked out here that disagreed with the row
+this popup was opened from would be the worse answer.
+
+**The customer is NOT `customer_name`.** This portal writes it into the
+REMARK — `EntryModal`s payload is `remark: al.customer_name` and names no
+customer column at all — so reading the column fell through to the AL
+number on every DO the FC Portal has ever issued, which is what the office
+was looking at: `C2A729` where a name belongs. `customerOfDO` asks for the
+column, then the remark, then the AL number, in that order, and the AL
+number stays last because a DO with nothing else on it still has to say
+which order it came off.
+
 **Colours are written out, never built from a variable.** Tailwind scans the
 source, so `` `border-${tone}-200` `` is a class that is never generated and
 a border that never appears. `TONE` is the explicit map; the test forbids
 the interpolated form.
+
+**The two halves are scoped DIFFERENTLY, and that is inherited rather than
+chosen.** Transplanting reads only the conductor own nurseries
+(`allowedNurseries(permissions, 'maintenance')`, matched through
+`nurseryKey`), the same scoping the Maintenance module uses — and open to
+everything for a login nobody has configured, because access fails open.
+The loading half is NOT scoped: it shows every DO missing its gang,
+whatever nursery, which is what the DO module beside it has always done —
+nothing under `src/modules/do/` calls `allowedNurseries`. Scope one and not
+the other and the split reads as a bug later; the day somebody wants the
+DO half narrowed, a DO can span nurseries (`plot_1`..`plot_5`) so the test
+is *any of its plots is mine*, and a DO whose plots cannot be placed has to
+go on SHOWING — a card that vanishes off every board with nothing saying
+where it went is the fault this board exists to stop.
 
 ### Transplanting left the Maintenance module, and what that costs
 

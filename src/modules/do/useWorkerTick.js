@@ -95,6 +95,11 @@ export function useWorkerTick(workers) {
      the two lists are kept apart because only the first can be derived. */
   const [wtOwn, setWtOwn] = useState([]);
   const [wtExtra, setWtExtra] = useState([]);
+  /* Kept so the popup can SHOW what this DO is -- the customer, the plots
+     and the quantity -- and resolve a plot to its nursery where the DO
+     named one. The question "who loaded this" is unanswerable from a DO
+     number alone, and that number was all the popup carried. */
+  const [wtPlotMap, setWtPlotMap] = useState({});
   const [wtPicked, setWtPicked] = useState({});
   const [wtSaving, setWtSaving] = useState(false);
   const thenRef = useRef(null);
@@ -115,6 +120,7 @@ export function useWorkerTick(workers) {
     const seeded = {};
     own.concat(extra).forEach((k) => { seeded[k] = saved[k] || []; });
     setWtDO(doRecord);
+    setWtPlotMap(plotMap || {});
     setWtOwn(own);
     setWtExtra(extra);
     setWtPicked(seeded);
@@ -171,7 +177,7 @@ export function useWorkerTick(workers) {
   }
 
   return {
-    wtOpen, wtDO, wtNurseries, wtOwn, wtOtherNurseries, wtPicked, wtSaving, wtLocked, isAdmin, byNursery,
+    wtOpen, wtDO, wtPlotMap, wtNurseries, wtOwn, wtOtherNurseries, wtPicked, wtSaving, wtLocked, isAdmin, byNursery,
     openWorkerTick, closeWorkerTick, skipWorkerTick, toggleWorkerPick, saveWorkerTick,
     addNursery, removeNursery,
   };
