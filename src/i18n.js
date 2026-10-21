@@ -453,6 +453,7 @@ const en = {
   'board.footer': 'Collection Time Booking',
   'board.updated': 'Updated {time}',
   'board.offline': 'Offline · cached',
+  'board.unit': 'palms',
 
   // maintenance board (dashboard summary)
   'mtb.title': 'Maintenance Status',
@@ -1304,6 +1305,7 @@ const ms = {
   'board.footer': 'Tempahan Masa Kutipan',
   'board.updated': 'Dikemas kini {time}',
   'board.offline': 'Luar talian · cache',
+  'board.unit': 'bibit',
 
   // maintenance board (dashboard summary)
   'mtb.title': 'Status Penyelenggaraan',

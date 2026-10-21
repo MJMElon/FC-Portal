@@ -66,7 +66,7 @@ export default function CollectionBoard({ locationFilter = null }) {
           </span>
         </div>
         <span className="text-[10px] font-black text-emerald-700 shrink-0">
-          {list.length} · {totalQty.toLocaleString()} pcs
+          {totalQty.toLocaleString()} {t('board.unit')}
         </span>
       </div>
 
