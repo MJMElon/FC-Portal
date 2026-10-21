@@ -84,21 +84,61 @@ function SyncCard() {
   );
 }
 
+/* One row of module tiles. A component of its own, declared at module scope
+   rather than inside Dashboard — a component type recreated on every render
+   would remount its children on every Dashboard re-render, and SyncCard
+   (passed in as `children` below) holds state of its own that must survive
+   that. */
+function ModuleGrid({ items, children }) {
+  const { t } = useLang();
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {items.map((m) => (
+        <Link
+          key={m.to}
+          to={m.to}
+          className="bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:-translate-y-0.5 hover:border-emerald-500 transition-all p-4 flex items-center gap-3.5 no-underline"
+        >
+          <div className={`w-12 h-12 ${m.tint} rounded-xl flex items-center justify-center shrink-0 ${m.fg}`}>
+            <Icon name={m.icon} className="w-6 h-6" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-[15px] font-black text-slate-800 uppercase tracking-wide leading-tight">
+              {m.title}
+            </h3>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">{t('common.active')}</span>
+            </div>
+          </div>
+          <div className="text-slate-300 font-black text-lg shrink-0">›</div>
+        </Link>
+      ))}
+      {children}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { staffName, permissions } = useAuth();
   const { t } = useLang();
 
-  // Order: Scan Barcode Counter first, then Issue Collection DO, Maintenance,
-  // PALMS, Culling Calculator. Every one of them is hidden for anyone whose
-  // FC Portal User Access has that module switched off; someone who has never
-  // been through that screen still sees all of them.
-  const modules = [
+  // Two groups rather than one grid of four: each sits next to the board it
+  // answers to. Scan Barcode Counter and Issue Collection DO go straight
+  // under Today's Collection — both are collection-day tools. Maintenance
+  // and the Culling Calculator go under Maintenance Status, for the same
+  // reason. Every tile is still hidden for anyone whose FC Portal User
+  // Access has that module switched off; someone who has never been
+  // through that screen still sees all of them.
+  const collectionModules = [
     ...(canBarcode(permissions, 'view')
       ? [{ to: '/scan', icon: 'camera', fg: 'text-blue-600', tint: 'bg-blue-100', title: t('dash.scanTitle') }]
       : []),
     ...(canDo(permissions, 'view')
       ? [{ to: '/do', icon: 'clipboard', fg: 'text-emerald-600', tint: 'bg-emerald-100', title: t('dash.doTitle') }]
       : []),
+  ];
+  const maintModules = [
     ...(canMaintain(permissions, 'view')
       ? [{ to: '/maintenance', icon: 'tool', fg: 'text-teal-600', tint: 'bg-teal-100', title: t('dash.maintTitle') }]
       : []),
@@ -118,38 +158,27 @@ export default function Dashboard() {
         {/* "TV" board: who is coming today to collect seedlings */}
         <CollectionBoard />
 
+        {/* Scan Barcode Counter + Issue Collection DO — the two tools for a
+            collection day, so they sit right under the board that shows who
+            is coming to collect. */}
+        {collectionModules.length > 0 && (
+          <div className="mb-4">
+            <ModuleGrid items={collectionModules} />
+          </div>
+        )}
+
         {/* The month's four maintenance jobs, rolled up out of the module's
             week-by-week timeline. Only for someone who may open Maintenance —
             a summary is still the module's data. */}
         {canMaintain(permissions, 'view') && <MaintenanceBoard />}
 
-        {/* Modules */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {modules.map((m) => (
-            <Link
-              key={m.to}
-              to={m.to}
-              className="bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:-translate-y-0.5 hover:border-emerald-500 transition-all p-4 flex items-center gap-3.5 no-underline"
-            >
-              <div className={`w-12 h-12 ${m.tint} rounded-xl flex items-center justify-center shrink-0 ${m.fg}`}>
-                <Icon name={m.icon} className="w-6 h-6" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-[15px] font-black text-slate-800 uppercase tracking-wide leading-tight">
-                  {m.title}
-                </h3>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                  <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">{t('common.active')}</span>
-                </div>
-              </div>
-              <div className="text-slate-300 font-black text-lg shrink-0">›</div>
-            </Link>
-          ))}
-          {/* Under the Culling Calculator, for everyone — syncing a phone is
-              nobody's privilege to lack. */}
+        {/* Maintenance + Culling Calculator — both read off plot work, so
+            they sit under Maintenance Status. SyncCard rides along at the
+            end, for everyone — syncing a phone is nobody's privilege to
+            lack. */}
+        <ModuleGrid items={maintModules}>
           <SyncCard />
-        </div>
+        </ModuleGrid>
       </div>
     </div>
   );
