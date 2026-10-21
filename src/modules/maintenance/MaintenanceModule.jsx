@@ -54,6 +54,7 @@ import { batchesIn, plotKey } from './plotBatches.js';
 import { makeCapacity, makeCoverage, weekUsage } from './usage.js';
 import RecordCard from './RecordCard.jsx';
 import { tintOf } from './tints.js';
+import Icon from '../../components/Icon.jsx';
 import {
   WEEKS,
   isDone as isJobDone,
@@ -685,17 +686,17 @@ export default function MaintenanceModule({
           )}
           <button
             onClick={() => setHistory(true)}
-            className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-widest rounded-xl px-4 py-2.5"
+            className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-widest rounded-xl px-4 py-2.5 inline-flex items-center gap-1.5"
           >
-            🗂️ {t('mt.history')}
+            <Icon name="folder" className="w-3.5 h-3.5" /> {t('mt.history')}
           </button>
           <div className="flex-1" />
           {mayExport && !!visible.length && (
             <button
               onClick={handleExport}
-              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-widest rounded-xl px-4 py-2.5"
+              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-widest rounded-xl px-4 py-2.5 inline-flex items-center gap-1.5"
             >
-              {t('mt.exportCsv')}
+              <Icon name="download" className="w-3.5 h-3.5" /> {t('mt.exportCsv')}
             </button>
           )}
         </div>
@@ -843,7 +844,7 @@ export default function MaintenanceModule({
             disabled={setup || !visiblePlots.length}
             className="w-full bg-white hover:bg-slate-50 border-2 border-emerald-600 disabled:opacity-40 text-emerald-700 font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors"
           >
-            🌱 {t('tp.button')}
+            <Icon name="seedling" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('tp.button')}
           </button>
         )}
 
@@ -1042,10 +1043,10 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
       <div className="relative bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 pb-7 shadow-2xl max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-black text-slate-800 text-[15px] uppercase tracking-wide">
-            🛠️ {record ? t('mt.editTitle') : t('mt.newTitle')}
+            <Icon name="tool" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {record ? t('mt.editTitle') : t('mt.newTitle')}
           </h3>
-          <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 text-xl">
-            ×
+          <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 flex items-center justify-center">
+            <Icon name="close" className="w-4 h-4" />
           </button>
         </div>
 

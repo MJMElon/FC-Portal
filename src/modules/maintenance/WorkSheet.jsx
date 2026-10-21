@@ -6,6 +6,7 @@ import PhotoSlots from './PhotoSlots.jsx';
 import WhoDidIt from './WhoDidIt.jsx';
 import { batchesIn } from './plotBatches.js';
 import WorkIcon from './WorkIcons.jsx';
+import Icon from '../../components/Icon.jsx';
 
 /** Enough to show the work from more than one angle, few enough that a
     morning in the field does not turn into a bill for storage. */
@@ -127,12 +128,12 @@ export default function WorkSheet({
             </div>
           </div>
           <button onClick={onClose}
-            className="w-9 h-9 rounded-xl bg-slate-100 text-slate-500 font-black shrink-0">✕</button>
+            className="w-9 h-9 rounded-xl bg-slate-100 text-slate-500 font-black shrink-0 flex items-center justify-center"><Icon name="close" className="w-4 h-4" /></button>
         </div>
 
         {/* The plots the schedule asks for */}
         <div className="px-5 pt-4">
-          <div className={label}>{t('mt.plotsToDo', { n: tasks.length })}</div>
+          <div className={label}>{t('mt.plotsToDo', { n: tasks.length.toLocaleString() })}</div>
           {tasks.length === 0 ? (
             <div className="text-[13px] font-bold text-slate-400 py-2">{t('mt.nothingDue')}</div>
           ) : (
@@ -151,7 +152,7 @@ export default function WorkSheet({
                          : locked ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-default'
                          : done ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                 : 'bg-white text-slate-700 border-slate-200'}`}>
-                    {done ? '✓ ' : ''}{x.plot}
+                    {done ? <Icon name="check" className="w-3 h-3 inline-block mr-0.5" /> : ''}{x.plot}
                     {twiceOver.has(x.plot) && x.chemical && (
                       <span className={`block text-[9px] font-bold leading-tight ${
                         on ? 'text-emerald-100' : 'text-slate-400'}`}>

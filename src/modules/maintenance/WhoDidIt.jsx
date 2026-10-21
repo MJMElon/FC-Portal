@@ -15,6 +15,8 @@
  * under themselves are the same string.
  */
 
+import Icon from '../../components/Icon.jsx';
+
 export default function WhoDidIt({ workers, value, onChange, t }) {
   if (!workers || !workers.length) return null;
 
@@ -45,7 +47,7 @@ export default function WhoDidIt({ workers, value, onChange, t }) {
                   : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
               }`}
             >
-              {on && <span className="mr-1" aria-hidden="true">✓</span>}
+              {on && <Icon name="check" className="w-3 h-3 inline-block mr-1" />}
               {w.full_name}
             </button>
           );
