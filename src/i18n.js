@@ -438,6 +438,16 @@ const en = {
   'dock.left': '{n} of {total} plots still to key in today',
 
   // collection board ("TV")
+  'vrf.title': 'Pending Verification',
+  'vrf.count': 'Pending Verify : {n}',
+  'vrf.loading': 'Loading Seedlings',
+  'vrf.transplanting': 'Transplanting',
+  'vrf.pickWorkers': 'Pick workers',
+  'vrf.openSheet': 'Record jobs',
+  'vrf.allDone': 'Nothing to verify',
+  'vrf.prev': 'Previous',
+  'vrf.next': 'Next',
+  'vrf.footer': 'Work done, nobody named yet',
   'board.title': "Today's Collections",
   'board.empty': 'No collections booked today',
   'board.footer': 'Collection Time Booking',
@@ -1275,6 +1285,18 @@ const ms = {
   'dock.done': 'Status plot hari ini sudah lengkap',
   'dock.left': '{n} daripada {total} plot belum dikemas kini hari ini',
 
+  'vrf.title': 'Menunggu Pengesahan',
+  'vrf.count': 'Untuk Disemak : {n}',
+  /* The office's own words for the two jobs, not a translation of the
+     English headings. */
+  'vrf.loading': 'Pengambilan',
+  'vrf.transplanting': 'Pemindahan Bibit',
+  'vrf.pickWorkers': 'Pilih pekerja',
+  'vrf.openSheet': 'Rekod kerja',
+  'vrf.allDone': 'Tiada untuk disahkan',
+  'vrf.prev': 'Sebelum',
+  'vrf.next': 'Seterusnya',
+  'vrf.footer': 'Kerja siap, pekerja belum dinamakan',
   'board.title': 'Kutipan Hari Ini',
   'board.empty': 'Tiada kutipan ditempah hari ini',
   'board.footer': 'Tempahan Masa Kutipan',
