@@ -24,7 +24,9 @@ import { figuresBroken, hasFigures, rateFor } from './cullingSource.js';
  *      bring down, so a cell inviting a count there is a count nobody needed
  *      to walk. A batch brought under the line by a selection stays
  *      editable, or there would be no way to correct the figure that got it
- *      there.
+ *      there — AND SO DOES ONE CARRYING A FIGURE AT ALL, whatever its rate
+ *      now reads, because a selection nobody can reach is one nobody can
+ *      take off.
  *
  * @param batches  the blocks standing in the plot, with their figures
  * @param termsBy  { [batch]: number[] } — the counts already entered, in the
@@ -53,7 +55,14 @@ export function cullingLines(batches, termsBy, active, typing) {
       finalBalance: hasFigures(b) ? b.balance - inang : 0,
       known: hasFigures(b),
       broken: figuresBroken(b),
-      editable: Number.isFinite(rate) && rate > CULL_LIMIT,
+      /* 3. A FIGURE THAT EXISTS CAN ALWAYS BE TAKEN OFF. The two tests
+            above are about where a count is WORTH walking; neither is a
+            reason to strand one already keyed. A batch whose own rate has
+            since dropped under the line — the ledger moved, a sale, a
+            cull — would otherwise sit there with a selection against it
+            and no way to reach it, and the figure goes on coming off the
+            final balance. */
+      editable: (Number.isFinite(rate) && rate > CULL_LIMIT) || inang > 0,
     };
   });
 }
