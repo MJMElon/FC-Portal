@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
 import { allowedNurseries, canDo, canMaintain, nurseryKey } from '../lib/access.js';
@@ -12,13 +12,12 @@ import {
   loadTransplantRecords,
   loadTransplantingSince,
   TRANSPLANT_SETUP_NEEDED,
-  jobLabel,
 } from '../modules/maintenance/transplantData.js';
 import {
   clampIndex,
   doNeedsWorkers,
+  LOADING_WORKERS_FROM,
   plotsOwingJobs,
-  sinceISO,
 } from './verify/pending.js';
 
 /* The sheet is most of its own screen and nearly nobody opens it on a given
@@ -82,16 +81,16 @@ function Half({ icon, title, tone, n, i, setI, children, emptyText, prevLabel, n
   return (
     <div className={`rounded-xl border ${c.box} overflow-hidden flex flex-col`}>
       <div className={`flex items-center justify-between gap-1 px-2.5 py-1.5 border-b ${c.head}`}>
-        <span className={`font-black uppercase tracking-wider text-[9px] ${c.name} truncate min-w-0`}>
+        <span className={`font-black uppercase tracking-wider text-[11px] ${c.name} truncate min-w-0`}>
           {icon} {title}
         </span>
         {/* HOW MANY ARE LEFT, never how many there were. A conductor wants
             the size of what is in front of him. */}
-        <span className={`text-[9px] font-black ${c.n} shrink-0 tabular-nums`}>{n}</span>
+        <span className={`text-[11px] font-black ${c.n} shrink-0 tabular-nums`}>{n}</span>
       </div>
 
       {n === 0 ? (
-        <div className="px-2.5 py-4 text-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+        <div className="px-2.5 py-4 text-center text-[12px] font-bold text-slate-400 uppercase tracking-wider">
           {emptyText}
         </div>
       ) : (
@@ -104,7 +103,7 @@ function Half({ icon, title, tone, n, i, setI, children, emptyText, prevLabel, n
           <div className={`flex items-center justify-between gap-1 px-2.5 py-1.5 border-t ${c.foot}`}>
             <Arrow dir="prev" tone={tone} disabled={i <= 0}
               onClick={() => setI((x) => Math.max(0, x - 1))} label={prevLabel} />
-            <span className="text-[9px] font-black text-slate-400 tabular-nums">{i + 1} / {n}</span>
+            <span className="text-[11px] font-black text-slate-400 tabular-nums">{i + 1} / {n}</span>
             <Arrow dir="next" tone={tone} disabled={i >= n - 1}
               onClick={() => setI((x) => Math.min(n - 1, x + 1))} label={nextLabel} />
           </div>
@@ -134,7 +133,7 @@ function Half({ icon, title, tone, n, i, setI, children, emptyText, prevLabel, n
  */
 export default function VerificationBoard() {
   const { permissions, staffName } = useAuth();
-  const { t, lang } = useLang();
+  const { t } = useLang();
 
   const mayDo = canDo(permissions, 'view');
   const mayMaint = canMaintain(permissions, 'view');
@@ -146,12 +145,33 @@ export default function VerificationBoard() {
   const [di, setDi] = useState(0);
   const [ti, setTi] = useState(0);
   const [sheetFor, setSheetFor] = useState(null);   // { nursery, plotNames }
+  /* Bumped when the worker popup CLOSES, which re-reads the delivery
+     orders. See the effect below for why it is not a callback. */
+  const [doTick, setDoTick] = useState(0);
 
   const month = monthLabelOf(todayStr());
   const allowed = allowedNurseries(permissions, 'maintenance');
   const allowedSig = allowed === null ? '*' : [...allowed].sort().join('|');
 
   const wt = useWorkerTick(workers);
+
+  /* A DO ANSWERED HAS TO LEAVE THE LIST, and the only honest way to know
+     whether it was answered is to ask again.
+
+     openWorkerTick takes an `after` callback, but it is the wrong tool:
+     closeWorkerTick runs it on BOTH routes, so a DO somebody skipped a
+     second time would vanish exactly like one they filled in -- the card
+     would be gone and the work still owed, which is the fault this whole
+     board exists to stop.
+
+     So the popup closing simply re-reads. One query, only on close, and it
+     cannot be wrong in either direction: saved and it drops, skipped and it
+     stays. */
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !wt.wtOpen) setDoTick((n) => n + 1);
+    wasOpen.current = wt.wtOpen;
+  }, [wt.wtOpen]);
 
   /* ── The delivery orders ─────────────────────────────────────────── */
   useEffect(() => {
@@ -160,7 +180,7 @@ export default function VerificationBoard() {
     (async () => {
       try {
         const [rows, { plots }, ws] = await Promise.all([
-          loadDOsMissingWorkers(sinceISO()),
+          loadDOsMissingWorkers(LOADING_WORKERS_FROM),
           loadDropdownData().catch(() => ({ plots: [] })),
           loadDOWorkers().catch(() => []),
         ]);
@@ -178,7 +198,7 @@ export default function VerificationBoard() {
       }
     })();
     return () => { live = false; };
-  }, [mayDo]);
+  }, [mayDo, doTick]);
 
   /* ── The transplanted plots ──────────────────────────────────────── */
   useEffect(() => {
@@ -262,16 +282,16 @@ export default function VerificationBoard() {
               onClick={() => wt.openWorkerTick(doCard, plotMap)}
               className="w-full text-left"
             >
-              <div className="font-mono font-black text-[12px] text-sky-800 truncate">
+              <div className="font-mono font-black text-[16px] text-sky-800 truncate">
                 {doCard.do_number || '—'}
               </div>
-              <div className="text-[11px] font-bold text-slate-700 truncate">
+              <div className="text-[14px] font-bold text-slate-700 truncate">
                 {doCard.customer_name || doCard.al_number || '—'}
               </div>
-              <div className="text-[10px] text-slate-400 truncate">
+              <div className="text-[12px] text-slate-400 truncate">
                 {(doCard.delivery_date || '—')}{doCard.total_qty ? ' · ' + doCard.total_qty : ''}
               </div>
-              <div className="mt-1.5 text-[9px] font-black uppercase tracking-wider text-sky-700">
+              <div className="mt-2 text-[11px] font-black uppercase tracking-wider text-sky-700">
                 {t('vrf.pickWorkers')} ›
               </div>
             </button>
@@ -288,21 +308,23 @@ export default function VerificationBoard() {
               onClick={() => setSheetFor({ nursery: tpCard.nursery, plotNames: tpCard.plotNames })}
               className="w-full text-left"
             >
-              <div className="font-mono font-black text-[12px] text-emerald-800 truncate">
+              <div className="font-mono font-black text-[16px] text-emerald-800 truncate">
                 {tpCard.plot}
               </div>
-              <div className="text-[11px] font-bold text-slate-700 truncate">
+              <div className="text-[14px] font-bold text-slate-700 truncate">
                 {tpCard.nursery || '—'}
               </div>
-              <div className="text-[10px] text-slate-400 truncate">
+              <div className="text-[12px] text-slate-400 truncate">
                 {(tpCard.qty || 0)}{tpCard.batch ? ' · ' + tpCard.batch : ''}
               </div>
-              {/* WHICH jobs are missing, not merely how many: "2 left" sends
-                  somebody into the sheet to find out which two. */}
-              <div className="mt-1 text-[9px] font-bold text-amber-700 leading-tight line-clamp-2">
-                {tpCard.missing.map((j) => jobLabel(j, lang)).join(' · ')}
-              </div>
-              <div className="mt-1 text-[9px] font-black uppercase tracking-wider text-emerald-700">
+              {/* The job NAMES were here and the office asked for them out.
+                  Four of them spelt in full -- "Lining & Arranging Polybag
+                  15" x 18"" among them -- wrapped to three lines and made
+                  the card a paragraph: the plot, which is what somebody is
+                  looking for, had the least weight on it. Which jobs are
+                  missing is the first thing the sheet says anyway, one tap
+                  away. */}
+              <div className="mt-2 text-[11px] font-black uppercase tracking-wider text-emerald-700">
                 {t('vrf.openSheet')} ›
               </div>
             </button>
@@ -310,7 +332,7 @@ export default function VerificationBoard() {
         </Half>
       </div>
 
-      <div className="px-4 py-1.5 border-t border-slate-100 text-[9px] font-bold text-slate-400">
+      <div className="px-4 py-1.5 border-t border-slate-100 text-[10px] font-bold text-slate-400">
         {t('vrf.footer')}
       </div>
 

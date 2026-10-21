@@ -59,7 +59,7 @@ const jobs = (() => {
 const ctx = { console, Date, JSON, Math, Object, Set, Array, String, Number, Boolean };
 vm.createContext(ctx);
 vm.runInContext(cancelled + '\n' + jobs + '\n' + strip('src/components/verify/pending.js')
-  + '\n;globalThis.__p = { doNeedsWorkers, missingJobs, plotsOwingJobs, clampIndex, sinceISO, VERIFY_WINDOW_DAYS };',
+  + '\n;globalThis.__p = { doNeedsWorkers, missingJobs, plotsOwingJobs, clampIndex, LOADING_WORKERS_FROM };',
   ctx);
 const P = vm.runInContext('__p', ctx);
 
@@ -136,11 +136,16 @@ is(P.clampIndex(3, 0), 0, 'an emptied list leaves the index somewhere safe');
    under you, and the index must come back inside it. */
 is(P.clampIndex(2, 2), 1, 'a list that SHRANK under the open card does not point past the end');
 
-/* ── 4. The window ───────────────────────────────────────────────────── */
-is(P.VERIFY_WINDOW_DAYS, 92,
-   'the same 92 days History uses, so the portal has one answer to how far back it looks');
-is(P.sinceISO(92, new Date(2026, 9, 21)), '2026-07-21', '92 days back from 21 Oct 2026');
-is(P.sinceISO(92, new Date(2026, 0, 5)), '2025-10-05', 'and it crosses the year end');
+/* ── 4. Where the loading list starts ────────────────────────────────── */
+/* A rolling 92 days opened on 332 delivery orders, nearly all from before
+   anybody was ticking loaders at all -- 332 questions that were never going
+   to be answered, sitting on top of the handful that would. A wall gets
+   scrolled past; it is not a list anybody works down. The floor is the
+   month the step started being done. */
+is(P.LOADING_WORKERS_FROM, '2026-10-01',
+   'the loading list starts at October 2026, the month the step started being done');
+yes(!/VERIFY_WINDOW_DAYS|sinceISO/.test(R('src/components/VerificationBoard.jsx')),
+   'and the rolling window is gone, so there is only one rule for where it starts');
 
 /* ── 5. The wiring on the page ───────────────────────────────────────── */
 const board = R('src/components/VerificationBoard.jsx');
@@ -154,6 +159,19 @@ yes(dash.indexOf('<VerificationBoard />') > dash.indexOf('<CollectionBoard />')
 yes(/if \(!ready \|\| total === 0\) return null;/.test(board),
     'and it disappears when there is nothing to verify');
 yes(/grid grid-cols-2/.test(board), 'the two halves sit side by side at every width');
+yes(!/jobLabel/.test(board),
+    'the job names are off the transplanting card -- four spelt in full made it a paragraph');
+
+/* A DO ANSWERED HAS TO LEAVE THE LIST, and openWorkerTick's own `after`
+   callback is the wrong tool: closeWorkerTick runs it on BOTH routes, so a
+   DO skipped a second time would vanish exactly like one filled in -- card
+   gone, work still owed, which is the fault this board exists to stop. */
+yes(/if \(wasOpen\.current && !wt\.wtOpen\) setDoTick/.test(board),
+    'the popup closing re-reads the delivery orders');
+yes(/\}, \[mayDo, doTick\]\);/.test(board),
+    'and that re-read is what the list is built from, so saved drops and skipped stays');
+yes(!/openWorkerTick\([^)]*,\s*\(\)\s*=>/.test(board),
+    'never through the after-callback, which fires on skip as well as on save');
 
 /* TRANSPLANTING HAS LEFT MAINTENANCE -- button, sheet and the state behind
    them. A half-removal that leaves the import is the kind that comes back. */

@@ -31,19 +31,22 @@ export function doNeedsWorkers(d) {
   return !Object.keys(w).some((k) => Array.isArray(w[k]) && w[k].length > 0);
 }
 
-/* The window. A DO skipped in July still owes its loaders, but a list with
-   no end is a list that takes longer to read every month and eventually
-   stops loading at all. Ninety-two days is the same window History uses --
-   see "A row count is not a window" -- so the portal has ONE answer to
-   "how far back does this phone look", not two. */
-export const VERIFY_WINDOW_DAYS = 92;
+/* WHERE THE LIST STARTS, and it is a date rather than a rolling window.
+   A rolling 92 days opened on **332 delivery orders**, which is not a list
+   anybody works down -- it is a wall, and a wall gets scrolled past. Nearly
+   all of it was from before anybody was ticking loaders at all, so it was
+   332 questions that were never going to be answered sitting on top of the
+   handful that would.
 
-export function sinceISO(days = VERIFY_WINDOW_DAYS, today = new Date()) {
-  const d = new Date(today);
-  d.setDate(d.getDate() - days);
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
-       + '-' + String(d.getDate()).padStart(2, '0');
-}
+   The office asked for October 2026 on, which is the month the step
+   started being done. Before it there is nothing to recover.
+
+   A FIXED DATE, the same shape as TRANSPLANT_FLOW_FROM and
+   TRANSPLANT_DATE_FROM in transplantData.js and for the same reason given
+   there: records made before a rule existed and records made after it have
+   to meet somewhere, and the 1st of a month is that somewhere. Move this
+   date to move the floor; there is no second rule to keep in step. */
+export const LOADING_WORKERS_FROM = '2026-10-01';
 
 /* ── 2. A TRANSPLANTED PLOT WHOSE JOBS ARE NOT ALL RECORDED ───────────
    The ledger says seedlings went into the plot; the four jobs that go with

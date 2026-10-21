@@ -121,6 +121,31 @@ Three things in it:
   for and is right for a prompt: a card reading "nothing to do" every day is
   a card nobody reads on the day it says something else.
 
+**The loading list starts at a DATE, not a rolling window.** A rolling 92
+days opened on **332 delivery orders** — nearly all from before anybody was
+ticking loaders at all, so 332 questions that were never going to be
+answered sitting on top of the handful that would. A wall gets scrolled
+past; it is not a list anybody works down. `LOADING_WORKERS_FROM` is
+`2026-10-01`, the month the step started being done, and it is a fixed date
+for the same reason `TRANSPLANT_FLOW_FROM` is: records made before a rule
+existed and records made after it have to meet somewhere, and the 1st of a
+month is that somewhere.
+
+**A DO answered has to LEAVE the list, and the only honest way to know is to
+ask again.** `openWorkerTick` takes an `after` callback and it is the wrong
+tool here: `closeWorkerTick` runs it on BOTH routes, so a DO somebody
+skipped a second time would vanish exactly like one they filled in — card
+gone, work still owed, which is the fault this board exists to stop. So the
+popup CLOSING re-reads the delivery orders. One query, only on close, and it
+cannot be wrong in either direction.
+
+**The transplanting card does not name the missing jobs.** It did, and four
+of them spelt in full — *"Lining & Arranging Polybag 15" × 18""* among them
+— wrapped to three lines and turned the card into a paragraph, with the plot
+(which is what somebody is actually looking for) carrying the least weight
+on it. Which jobs are missing is the first thing the sheet says anyway, one
+tap away.
+
 **Colours are written out, never built from a variable.** Tailwind scans the
 source, so `` `border-${tone}-200` `` is a class that is never generated and
 a border that never appears. `TONE` is the explicit map; the test forbids

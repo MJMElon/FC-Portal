@@ -1287,8 +1287,10 @@ const ms = {
 
   'vrf.title': 'Menunggu Pengesahan',
   'vrf.count': '{n} perlu disahkan',
-  'vrf.loading': 'Memunggah Anak Benih',
-  'vrf.transplanting': 'Memindah',
+  /* The office's own words for the two jobs, not a translation of the
+     English headings. */
+  'vrf.loading': 'Pengambilan',
+  'vrf.transplanting': 'Pemindahan Bibit',
   'vrf.pickWorkers': 'Pilih pekerja',
   'vrf.openSheet': 'Rekod kerja',
   'vrf.allDone': 'Tiada untuk disahkan',
