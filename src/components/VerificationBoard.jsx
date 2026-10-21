@@ -121,9 +121,11 @@ function Half({ icon, title, tone, n, i, setI, children, emptyText, prevLabel, n
  * that was really done, by people who are really owed for it, and in both
  * cases the only trace of the gap is a column nothing was looking at.
  *
- * It sits between today's collections and the maintenance status because
- * that is the order of the morning: who is coming, what is owed, what is
- * planned.
+ * It sits LAST on the dashboard, after both boards and both rows of module
+ * tiles. It sat between the collections and the maintenance status at
+ * first, on the theory that this was the order of the morning; the office
+ * asked for it moved to the end instead, so a prompt does not sit ahead of
+ * the day's own tools.
  *
  * IT DISAPPEARS WHEN THERE IS NOTHING TO VERIFY, which the office asked for
  * and which is the right default for a prompt: a card reading "nothing to
