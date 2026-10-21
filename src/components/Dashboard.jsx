@@ -55,13 +55,13 @@ function SyncCard() {
     <button
       onClick={press}
       disabled={busy}
-      className="w-full bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:border-emerald-500 transition-all px-4 py-2.5 flex items-center gap-3 text-left cursor-pointer disabled:cursor-default"
+      className="w-full bg-white rounded-xl border border-slate-200 shadow-[0_2px_10px_rgba(0,0,0,.05)] hover:shadow-[0_6px_20px_rgba(0,0,0,.1)] hover:border-emerald-500 transition-all px-3 py-1.5 flex items-center gap-2.5 text-left cursor-pointer disabled:cursor-default"
     >
-      <div className="w-9 h-9 bg-sky-100 rounded-lg flex items-center justify-center shrink-0 text-sky-600">
-        <Icon name="refresh" className={`w-4.5 h-4.5 ${busy ? 'animate-spin' : ''}`} />
+      <div className="w-6 h-6 bg-sky-100 rounded-md flex items-center justify-center shrink-0 text-sky-600">
+        <Icon name="refresh" className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
       </div>
       <div className="flex-1 min-w-0 flex items-center gap-2.5">
-        <h3 className="text-[13px] font-black text-slate-800 uppercase tracking-wide leading-tight shrink-0">
+        <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide leading-tight shrink-0">
           {t('dash.syncTitle')}
         </h3>
         <div className="min-w-0 truncate">
@@ -84,7 +84,7 @@ function SyncCard() {
           )}
         </div>
       </div>
-      <div className="text-slate-300 font-black text-lg shrink-0">›</div>
+      <div className="text-slate-300 font-black text-base shrink-0">›</div>
     </button>
   );
 }
