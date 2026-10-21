@@ -173,10 +173,21 @@ up, every plot of that nursery-month is one tap away, recorded or not. The
 dead zone is only a nursery-month that is completely clear.
 
 **And the office cannot fix one either — check before relying on it.** The
-only writer of `nops_transplant_field_records` in either repository is this
-sheet. `npayroll_script.js` reads it for the claim and nothing else; the
-Work Maintenance screen edits `nops_maint_payroll`, which is a different
-table. `shared/RUN_ME_move_transplant_month.sql` is a paste-in repair, not a
+only writer of a CREW on `nops_transplant_field_records` in either
+repository is this sheet. The office reads those rows on Worker Record →
+Transplanting and writes **one column pair** on them, `checked_at` /
+`checked_by` — its agreement, which is what sends a row to the salary claim
+(`mjm-ai-system/CLAUDE.md` has the rule). It writes nothing else: not the
+crew, not the quantity, not the day. `npayroll_script.js` reads the rows and
+prices the agreed ones; the Work Maintenance screen edits
+`nops_maint_payroll`, which is a different table.
+
+**A correction made here CLEARS that agreement**, and a database trigger
+does it rather than either screen — three things write this table and a rule
+living in one of them is a rule the other two do not obey. So a crew put
+right after the office ticked the row comes off the claim until somebody
+ticks it again, which is the point: the figure moved. Nothing in this app has
+to know, and nothing in this app may be relied on to do it. `shared/RUN_ME_move_transplant_month.sql` is a paste-in repair, not a
 screen. The day somebody needs to correct a crew in a fully-recorded month,
 the answer is to put a door back — a module tile is the cheap one.
 
