@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { cacheGet, cacheSet } from '../lib/cache.js';
 import { useOnline, useAutoSync } from '../hooks/useOnline.js';
 import { useLang } from '../context/LanguageContext.jsx';
+import Icon from './Icon.jsx';
 
 const CACHE_KEY = 'collection_board_today';
 
@@ -60,12 +61,12 @@ export default function CollectionBoard({ locationFilter = null }) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-emerald-50">
         <div className="flex items-center gap-2 min-w-0">
           <span className={`w-2 h-2 rounded-full ${online ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'} shrink-0`} />
-          <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-emerald-800 truncate">
-            🌱 {t('board.title')}
+          <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-emerald-800 truncate flex items-center gap-1.5">
+            <Icon name="seedling" className="w-3.5 h-3.5 shrink-0" /> {t('board.title')}
           </span>
         </div>
         <span className="text-[10px] font-black text-emerald-700 shrink-0">
-          {list.length} · {totalQty} pcs
+          {list.length} · {totalQty.toLocaleString()} pcs
         </span>
       </div>
 
@@ -91,7 +92,7 @@ export default function CollectionBoard({ locationFilter = null }) {
                 </div>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-black text-sm text-slate-800">{b.collection_qty || 0}</div>
+                <div className="font-black text-sm text-slate-800">{Number(b.collection_qty || 0).toLocaleString()}</div>
                 <span className={`inline-block text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${statusStyle(b.status)}`}>
                   {b.status || 'booked'}
                 </span>
