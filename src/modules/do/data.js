@@ -411,6 +411,26 @@ export function nurseriesOfDO(d, plotMap) {
   return keys;
 }
 
+/* THE DELIVERY ORDERS STILL OWING THEIR LOADERS.
+   Narrowed by DATE in the query and by EMPTINESS in JS: the column is
+   jsonb, and "null or an object with nothing in it" is a test PostgREST
+   cannot be asked for cleanly, while `doNeedsWorkers` is the one rule the
+   card and its test already share. The window is the portal's single
+   answer to how far back a phone looks -- see VERIFY_WINDOW_DAYS.
+
+   `select('*')` because the card hands the whole row to openWorkerTick,
+   which reads plot_1..plot_5, worked_by_by_nursery and the lock. */
+export async function loadDOsMissingWorkers(sinceDate) {
+  let q = supabase
+    .from('shared_do_records')
+    .select('*')
+    .order('delivery_date', { ascending: false });
+  if (sinceDate) q = q.gte('delivery_date', sinceDate);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
 // Active workers for the "Who Loaded This DO" tick list. Same table, same
 // columns, same active-only filter as the maintenance module's own
 // loadWorkers() (mjmnpayroll_workers — the roster the 555 Worker Portal

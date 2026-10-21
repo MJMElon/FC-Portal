@@ -6,6 +6,7 @@ import { useLang } from '../context/LanguageContext.jsx';
 import TopNav from './TopNav.jsx';
 import CollectionBoard from './CollectionBoard.jsx';
 import MaintenanceBoard from './MaintenanceBoard.jsx';
+import VerificationBoard from './VerificationBoard.jsx';
 import { lastSync, syncAll } from '../lib/syncAll.js';
 
 /* "31 Aug, 11:42" — enough to trust the stamp, short enough for one line. */
@@ -116,6 +117,14 @@ export default function Dashboard() {
       <div className="max-w-[900px] mx-auto px-3 sm:px-6 py-4 sm:py-6">
         {/* "TV" board: who is coming today to collect seedlings */}
         <CollectionBoard />
+
+        {/* What was done and never signed for: a delivery order whose loading
+            gang was never ticked, and a transplanted plot whose jobs were
+            never recorded. Between the collections and the plan because that
+            is the order of the morning — who is coming, what is owed, what is
+            planned. It hides itself when there is nothing outstanding, so its
+            own gate is inside it rather than here. */}
+        <VerificationBoard />
 
         {/* The month's four maintenance jobs, rolled up out of the module's
             week-by-week timeline. Only for someone who may open Maintenance —

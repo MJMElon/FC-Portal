@@ -84,3 +84,77 @@ anywhere in the app.
 `tests/a_seal_that_will_not_read_is_keyed.cjs` lifts the real `recordScan`
 out of the shipped file and drives it beside the real `store.js` and
 `sealRanges.js`.
+
+## Work that was done and nobody signed for it
+
+Two gaps, one shape, and both were invisible BY CONSTRUCTION — which is why
+neither was ever noticed on the day it happened:
+
+- **A delivery order whose loading gang was never ticked.** Skipping "Who
+  Loaded This DO" writes *nothing*: `saveDOWorkers` is never called, and
+  `do/data.js` says in as many words that such a DO "reads identically to
+  one nobody has looked at yet". The only difference between a DO somebody
+  answered and one somebody walked past is an empty column nothing was
+  looking at.
+- **A transplanted plot whose four jobs were never recorded.** You found
+  one by opening the sheet and looking.
+
+Both are somebody's pay. `VerificationBoard` raises them on the dashboard,
+between the collections and the maintenance status — the order of the
+morning: who is coming, what is owed, what is planned.
+
+Three things in it:
+
+- **`src/components/verify/pending.js` holds both rules and nothing else.**
+  Pure and outside the card so the test drives the REAL ones. `doNeedsWorkers`
+  treats `null`, `{}` and `{UNN1: []}` alike — all three name nobody, and
+  `cleanPicks` can leave the second — and asks the shared `isCancelledDO`
+  rather than a copy of it. That rule is EXACT: `'Cancelled'` with the
+  capital, or `[CANCELLED]` in the remark. The first draft of the test used
+  a lowercase status and was right to fail.
+- **One card at a time, and the stepper CLAMPS.** Same choice the
+  maintenance week stepper made: the last card rolling round to the first
+  reads as a list that has started again, and somebody working down a deck
+  of nine loses their place. It is also clamped against a list that SHRANK —
+  answering the DO you are looking at takes it off the list underneath you.
+- **It hides when there is nothing outstanding**, which the office asked
+  for and is right for a prompt: a card reading "nothing to do" every day is
+  a card nobody reads on the day it says something else.
+
+**Colours are written out, never built from a variable.** Tailwind scans the
+source, so `` `border-${tone}-200` `` is a class that is never generated and
+a border that never appears. `TONE` is the explicit map; the test forbids
+the interpolated form.
+
+### Transplanting left the Maintenance module, and what that costs
+
+The four transplanting jobs were never planned by the month's schedule —
+the operation report decides which plots they apply to, by having
+transplanted into them — so they sat in Maintenance as a button beside four
+jobs they had nothing to do with. The office asked for them out, and the
+board's right-hand half is now the only door: it raises a plot while any of
+its four jobs is unrecorded and opens **the same `TransplantSheet`**, not a
+rebuild of it.
+
+**The cost was weighed and accepted.** The section hides itself when nothing
+is outstanding, so a nursery-month with every job recorded has NO door until
+the next plot is transplanted. That matters because a transplanting record
+is a crew, and `TransplantSheet.jsx` spells out why: *"the plot's quantity is
+divided among the people ticked here and that is what each of them is
+paid."* Correcting a name is correcting somebody's month.
+
+It is softened by the sheet being the whole sheet: whenever the section is
+up, every plot of that nursery-month is one tap away, recorded or not. The
+dead zone is only a nursery-month that is completely clear.
+
+**And the office cannot fix one either — check before relying on it.** The
+only writer of `nops_transplant_field_records` in either repository is this
+sheet. `npayroll_script.js` reads it for the claim and nothing else; the
+Work Maintenance screen edits `nops_maint_payroll`, which is a different
+table. `shared/RUN_ME_move_transplant_month.sql` is a paste-in repair, not a
+screen. The day somebody needs to correct a crew in a fully-recorded month,
+the answer is to put a door back — a module tile is the cheap one.
+
+`tests/nobody_signed_for_this_work.cjs` holds all of it, and checks the
+button, the sheet and the state behind them are all gone from Maintenance —
+a half-removal that leaves the import is the kind that comes back.
