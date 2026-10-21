@@ -1,5 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, forwardRef, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
+import Icon from '../../components/Icon.jsx';
 
 // Touch/mouse signature pad. Exposes { hasSig(), clear(), toDataURL() } via ref.
 const SignaturePad = forwardRef(function SignaturePad({ height = 160 }, ref) {
@@ -99,7 +100,7 @@ const SignaturePad = forwardRef(function SignaturePad({ height = 160 }, ref) {
           onClick={() => ref.current?.clear()}
           className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest bg-slate-50 px-4 py-2 rounded-full border border-slate-200 cursor-pointer transition-colors"
         >
-          {t('do.clearSig')}
+          <Icon name="close" className="w-3 h-3 inline-block align-[-2px]" /> {t('do.clearSig')}
         </button>
         <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">{time}</span>
       </div>

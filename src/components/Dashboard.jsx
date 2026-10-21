@@ -7,6 +7,7 @@ import TopNav from './TopNav.jsx';
 import CollectionBoard from './CollectionBoard.jsx';
 import MaintenanceBoard from './MaintenanceBoard.jsx';
 import { lastSync, syncAll } from '../lib/syncAll.js';
+import Icon from './Icon.jsx';
 
 /* "31 Aug, 11:42" — enough to trust the stamp, short enough for one line. */
 function fmtWhen(at) {
@@ -51,8 +52,8 @@ function SyncCard() {
       disabled={busy}
       className="bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:-translate-y-0.5 hover:border-emerald-500 transition-all p-4 flex items-center gap-3.5 text-left cursor-pointer disabled:cursor-default"
     >
-      <div className={`w-12 h-12 bg-sky-100 rounded-xl flex items-center justify-center text-2xl shrink-0 ${busy ? 'animate-spin' : ''}`}>
-        🔄
+      <div className="w-12 h-12 bg-sky-100 rounded-xl flex items-center justify-center shrink-0 text-sky-600">
+        <Icon name="refresh" className={`w-6 h-6 ${busy ? 'animate-spin' : ''}`} />
       </div>
       <div className="flex-1 min-w-0">
         <h3 className="text-[15px] font-black text-slate-800 uppercase tracking-wide leading-tight">
@@ -68,8 +69,8 @@ function SyncCard() {
               {t('dash.syncing')}
             </span>
           ) : stamp ? (
-            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
-              ✓ {t('dash.syncLast', { when: fmtWhen(stamp.at) })}
+            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest inline-flex items-center gap-1">
+              <Icon name="check" className="w-3 h-3" /> {t('dash.syncLast', { when: fmtWhen(stamp.at) })}
             </span>
           ) : (
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
@@ -93,20 +94,20 @@ export default function Dashboard() {
   // been through that screen still sees all of them.
   const modules = [
     ...(canBarcode(permissions, 'view')
-      ? [{ to: '/scan', icon: '📷', tint: 'bg-blue-100', title: t('dash.scanTitle') }]
+      ? [{ to: '/scan', icon: 'camera', fg: 'text-blue-600', tint: 'bg-blue-100', title: t('dash.scanTitle') }]
       : []),
     ...(canDo(permissions, 'view')
-      ? [{ to: '/do', icon: '📋', tint: 'bg-emerald-100', title: t('dash.doTitle') }]
+      ? [{ to: '/do', icon: 'clipboard', fg: 'text-emerald-600', tint: 'bg-emerald-100', title: t('dash.doTitle') }]
       : []),
     ...(canMaintain(permissions, 'view')
-      ? [{ to: '/maintenance', icon: '🛠️', tint: 'bg-teal-100', title: t('dash.maintTitle') }]
+      ? [{ to: '/maintenance', icon: 'tool', fg: 'text-teal-600', tint: 'bg-teal-100', title: t('dash.maintTitle') }]
       : []),
     // The Culling Calculator is a tab inside PALMS, but it is a job of its
     // own — a Field Conductor going out to count pokok inang should not have
     // to know it is filed under PALMS to find it. Its own tick and its own
     // nursery list too, for the same reason.
     ...(canCulling(permissions, 'view')
-      ? [{ to: '/culling', icon: '🧮', tint: 'bg-rose-100', title: t('cull.title') }]
+      ? [{ to: '/culling', icon: 'calculator', fg: 'text-rose-600', tint: 'bg-rose-100', title: t('cull.title') }]
       : []),
   ];
 
@@ -130,8 +131,8 @@ export default function Dashboard() {
               to={m.to}
               className="bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:-translate-y-0.5 hover:border-emerald-500 transition-all p-4 flex items-center gap-3.5 no-underline"
             >
-              <div className={`w-12 h-12 ${m.tint} rounded-xl flex items-center justify-center text-2xl shrink-0`}>
-                {m.icon}
+              <div className={`w-12 h-12 ${m.tint} rounded-xl flex items-center justify-center shrink-0 ${m.fg}`}>
+                <Icon name={m.icon} className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-[15px] font-black text-slate-800 uppercase tracking-wide leading-tight">
