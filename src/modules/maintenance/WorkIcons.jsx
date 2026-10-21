@@ -1,16 +1,18 @@
 /**
  * The four maintenance jobs, drawn.
  *
- * These are words, not pictures. Drawings of the work kept coming out as
- * near-identical smudges once shrunk to icon size — two of the jobs are the
- * same man with the same tank pointed somewhere else, and two happen over the
- * same grass — whereas the words are what the office writes on the schedule
- * and what the Field Conductor says out loud:
+ * Plain drawings of the work kept coming out as near-identical smudges once
+ * shrunk to icon size — two of the jobs are the same man with the same tank
+ * pointed somewhere else, and two happen over the same grass — so each
+ * picture here is built from a small, deliberately different object (a
+ * handheld sprayer, a hand with a sprout, a hook, a ringed spray head)
+ * rather than a figure, and every job still carries the word the office
+ * writes on the schedule and says out loud underneath it:
  *
- *   pd        P&D
- *   manuring  BAJA
- *   weeding   CABUT, with the knife over it
- *   interrow  RACUN, ringed like a hazard label over the spray head
+ *   pd        the hand sprayer, spraying      · P&D
+ *   manuring  a sprout in a cupped hand       · BAJA
+ *   weeding   the hook that cuts it           · CABUT
+ *   interrow  the spray head, ringed          · RACUN
  *
  * The two grass jobs used to share one word (RUMPUT) because both are done
  * to the grass — the office asked for the two to read apart instead: CABUT
@@ -50,20 +52,41 @@ function Word({ text, y, size, w = 21 }) {
   );
 }
 
-/* P & D — on its own, centred. */
+/* P & D — the hand sprayer, trigger up and three drops leaving the nozzle.
+   The same drops-off-a-nozzle motif interrow uses, because both are
+   something being sprayed — what tells the two apart is the canister
+   itself: a handheld bottle here, the overhead head on a pipe there. */
 export function PdIcon({ className = 'w-7 h-7' }) {
   return (
     <svg {...svg} className={className}>
-      <Word text="P&D" y={12.5} size={11} w={18} />
+      {/* the bottle */}
+      <rect x="9.3" y="8.3" width="4.4" height="6.6" rx="1.2" />
+      {/* the trigger/nozzle, angled up */}
+      <rect x="10.1" y="6.1" width="1.7" height="2.6" rx=".5" transform="rotate(18 10.1 6.1)" />
+      {/* the spray leaving it */}
+      <path {...line} strokeWidth="1.1" d="M14.2 6.0 16.0 4.8" />
+      <path {...line} strokeWidth="1.1" d="M14.7 7.5 16.7 7.1" />
+      <path {...line} strokeWidth="1.1" d="M14.5 9.0 16.3 9.5" />
+      <Word text="P&D" y={18.5} size={8.5} w={13} />
     </svg>
   );
 }
 
-/* Manuring — BAJA. */
+/* Manuring — BAJA, a sprout rising out of a cupped hand. The office's own
+   picture for this job: fertiliser is something put IN a plant's hand, not
+   sprayed over it, so this is the one job here that is not a nozzle and
+   drops. */
 export function ManuringIcon({ className = 'w-7 h-7' }) {
   return (
     <svg {...svg} className={className}>
-      <Word text="BAJA" y={12.5} size={10} w={20} />
+      {/* the cupped palm */}
+      <path {...line} strokeWidth="1.3" d="M7.2 12c0 2.7 2.1 4.1 4.8 4.1s4.8-1.4 4.8-4.1" />
+      {/* the stem */}
+      <path {...line} strokeWidth="1.3" d="M12 12.3V6.8" />
+      {/* the two leaves */}
+      <path d="M12 6.8c-2.6 0-4-1.8-4-4 2.6 0 4 1.3 4 4z" />
+      <path d="M12 6.8c2.6 0 4-1.8 4-4-2.6 0-4 1.3-4 4z" />
+      <Word text="BAJA" y={19.4} size={7.8} w={17} />
     </svg>
   );
 }
