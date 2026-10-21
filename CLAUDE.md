@@ -34,3 +34,53 @@ What is specific to this repository:
   the app fails to mount, so a misbehaving worker cleans itself up.
 - Rules shared with the office repository carry a comment saying so in both
   copies. Change one, change the other.
+
+## A seal that will not read is keyed by hand, through the SAME door
+
+A sticker gets wet, creased or printed short, and the conductor is standing
+at the lorry with it in his hand. There were two ways on: wave it until the
+battery goes, or leave the order short — and a count that is short for a
+reason nobody wrote down is the one the office cannot settle later. So the
+scan log carries an **Add** button.
+
+**The whole risk in adding a keyboard is that it becomes a SECOND WRITER.**
+A path of its own would skip the guards the camera goes through, and the one
+it would skip is exactly the one that catches a typed mistake: `sealVerdict`,
+which refuses a number that is not on this consent. `600` fat-fingered out of
+`0035190` is caught there. So the dialog hands its seal to `recordScan` — the
+same function the camera and the Bluetooth gun hand theirs to — and opens no
+insert of its own.
+
+Two things differ for a typed seal, and only two:
+
+- **The debounce is skipped** (`opts.typed`). It exists because a camera
+  reads one barcode ten times a second; a person pressing Add has done one
+  deliberate thing, and swallowing it would be silence where the answer
+  matters most — including the "duplicate" a second press should hear.
+- **`recordScan` RETURNS its verdict** (`{ ok, key, vars }`), so the dialog
+  prints the very sentence the toast prints. The toast is behind the dialog
+  at that moment, and two wordings for one outcome is how they drift apart.
+  The camera and the wedge ignore the return, as they always have.
+
+Three smaller things, each a way this goes wrong:
+
+- **It is a dialog, never `prompt()`.** A prompt is dismissed out of habit,
+  and a cancel that looks like a save is the one shape of wrong this screen
+  must not have. The test forbids `prompt(` in the file — after stripping
+  comments, because this file explains in prose why it is not one.
+- **It stays OPEN after each seal.** The reason a sticker is unreadable — a
+  wet roll, a bad print run — is usually true of the next one too, and
+  reopening per seal is the work done twice. The box clears on a seal that
+  went in and KEEPS a refused one, because a refusal is usually a typo and
+  retyping seven digits to fix one of them is how the second typo happens.
+- **The wedge listener already lets a real `<input>` keep its keystrokes**,
+  so typing is never swallowed and Enter reaches the form. A gun fired while
+  the dialog is open simply fills the box.
+
+The scan log itself is unchanged and still **read-only** — nothing added can
+be edited or removed, by design, and `fcportal_scan_records` has no delete
+anywhere in the app.
+
+`tests/a_seal_that_will_not_read_is_keyed.cjs` lifts the real `recordScan`
+out of the shipped file and drives it beside the real `store.js` and
+`sealRanges.js`.

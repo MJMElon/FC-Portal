@@ -315,14 +315,37 @@ export default function ScanModule() {
     });
   }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ONE DOOR, and a seal keyed by hand comes through it too.
+     `opts.typed` is the Add button on the scan log -- the seal whose
+     sticker will not read. It is the SAME seal and the same record, so it
+     takes the same path: the duplicate guard, the spoken-for guard, the
+     consent's own seal ranges, the server write, the over-quota count.
+     A second writer would be a second set of rules to keep in step, and
+     the one it would skip is the one that catches a typo.
+
+     Two things differ, and only two:
+
+     - The DEBOUNCE is skipped. It exists because a camera reads the same
+       barcode ten times a second; a person pressing Add has done one
+       deliberate thing, and swallowing it would be silence where the
+       answer matters most.
+     - It RETURNS its verdict, so the dialog can print the very sentence
+       the toast prints. The toast is behind the dialog at that moment,
+       and two wordings for one outcome is how they drift apart.
+
+     The camera and the hardware wedge ignore the return, as they always
+     have. */
   const recordScan = useCallback(
-    (rawCode) => {
+    (rawCode, opts) => {
+      const typed = !!(opts && opts.typed);
       const a = activeRef.current;
-      if (!a) return;
+      if (!a) return { ok: false };
       const code = String(rawCode).trim();
-      if (!code) return;
+      if (!code) return { ok: false, key: 'scan.manualEmpty' };
       const now = Date.now();
-      if (code === lastCodeRef.current && now - lastTimeRef.current < DEDUPE_DEBOUNCE_MS) return;
+      if (!typed && code === lastCodeRef.current && now - lastTimeRef.current < DEDUPE_DEBOUNCE_MS) {
+        return { ok: false };
+      }
       lastCodeRef.current = code;
       lastTimeRef.current = now;
 
@@ -330,7 +353,7 @@ export default function ScanModule() {
         beepDuplicate();
         vibrate([20, 40, 20]);
         flash(t('scan.duplicate', { code }), 'warn');
-        return;
+        return { ok: false, key: 'scan.duplicate', vars: { code } };
       }
 
       /* A seal counted onto an earlier customer's lorry is spoken for, so
@@ -360,7 +383,7 @@ export default function ScanModule() {
         vibrate([120, 60, 120, 60, 200]);
         setLastInfo({ key: 'scan.notCountedElsewhere', vars: { code, who } });
         flash(t('scan.notCountedElsewhere', { code, who }), 'danger');
-        return;
+        return { ok: false, key: 'scan.notCountedElsewhere', vars: { code, who } };
       }
 
       /* IS THIS SEAL THIS CUSTOMER'S? Only asked of an order whose consent
@@ -396,7 +419,7 @@ export default function ScanModule() {
         vibrate([120, 60, 120, 60, 200]);
         setLastInfo({ key, vars });
         flash(t(key, vars), 'danger');
-        return;
+        return { ok: false, key, vars };
       }
 
       seenRef.current.add(code);
@@ -465,6 +488,9 @@ export default function ScanModule() {
         saveProgress(map);
         return map;
       });
+      return willBeOver
+        ? { ok: true, key: 'scan.overItem', vars: { code } }
+        : { ok: true, key: 'scan.manualAdded', vars: { code } };
     },
     [flash, t]
   );
@@ -906,6 +932,23 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
   });
   const hwModeRef = useRef(hwMode);
   hwModeRef.current = hwMode;
+  /* THE SEAL THAT WILL NOT READ. A sticker gets wet, creased or printed
+     short, and the conductor is standing at the lorry with it in his hand.
+     Without this the only ways on are to wave it until the battery goes or
+     to leave the order short, and a count that is short for a reason
+     nobody wrote down is the one the office cannot settle later.
+
+     It is a DIALOG rather than a prompt(): a prompt is dismissed out of
+     habit, and a cancel that looks like a save is the one shape of wrong
+     this screen must not have. It stays OPEN after each seal, because the
+     reason a sticker is unreadable -- a wet roll, a bad print run -- is
+     usually true of the next one too, and reopening it per seal is the
+     work done twice. */
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const [manualSaid, setManualSaid] = useState(null);   // { ok, key, vars }
+  const [manualCount, setManualCount] = useState(0);
+  const manualInputRef = useRef(null);
   const wedgeRef = useRef({ chars: '', last: 0, timer: null });
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
@@ -1192,6 +1235,31 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* Hands the typed seal to the ONE writer and prints back whatever it
+     says. `sealDigits` only normalises what was typed -- a gun sends a
+     stray space or newline and a thumb adds one too -- it does not judge
+     it: whether the seal is this customer's, already counted, or spoken
+     for by another lorry is recordScan's to answer, and it answers it the
+     same way for a wave of the camera.
+
+     The box is cleared only on a seal that went IN. A refused one stays in
+     it, because a refusal is usually a typo and retyping seven digits to
+     fix one of them is how the second typo happens. */
+  function submitManual() {
+    const code = sealDigits(manualCode);
+    if (!code) {
+      setManualSaid({ ok: false, key: 'scan.manualEmpty' });
+      return;
+    }
+    const said = onScanRef.current(code, { typed: true }) || { ok: false };
+    setManualSaid(said);
+    if (said.ok) {
+      setManualCount((n) => n + 1);
+      setManualCode('');
+    }
+    try { manualInputRef.current && manualInputRef.current.focus(); } catch (e) { /* ignore */ }
+  }
+
   async function handleBack() {
     await stopCamera();
     onBack();
@@ -1323,7 +1391,24 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       <div className="bg-[#0f1620] border border-[#1f2a38] rounded-2xl p-5 mb-3">
         <div className="flex justify-between items-center mb-3">
           <div className="font-mono text-[11px] tracking-[0.3em] text-slate-400 uppercase">{t('scan.scanLog')}</div>
-          <div className="font-mono text-[11px] text-emerald-400">{t('scan.entries', { n: consent.scans.length })}</div>
+          <div className="flex items-center gap-3">
+            <div className="font-mono text-[11px] text-emerald-400">{t('scan.entries', { n: consent.scans.length })}</div>
+            {/* Off on a card with nothing left to collect, the same as the
+                camera -- there is no seal to key against a finished order. */}
+            <button
+              type="button"
+              disabled={fullyCollected}
+              onClick={() => {
+                setManualCode('');
+                setManualSaid(null);
+                setManualCount(0);
+                setManualOpen(true);
+              }}
+              className="font-mono text-[11px] uppercase tracking-wider text-emerald-400 border border-emerald-700/60 disabled:opacity-40 rounded-lg px-3 py-1 hover:bg-emerald-600 hover:text-white transition-colors"
+            >
+              + {t('scan.manualAdd')}
+            </button>
+          </div>
         </div>
         <div className="max-h-[240px] overflow-y-auto font-mono text-xs">
           {consent.scans.length === 0 ? (
@@ -1355,6 +1440,69 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
           )}
         </div>
       </div>
+
+      {manualOpen && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center p-4"
+          onClick={() => setManualOpen(false)}
+        >
+          <div
+            className="bg-[#0f1620] border border-[#1f2a38] rounded-3xl w-full max-w-sm p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="font-mono text-[11px] tracking-[0.3em] text-slate-400 uppercase mb-1">
+              {t('scan.manualTitle')}
+            </div>
+            <div className="text-xs text-slate-500 mb-4">{t('scan.manualHint')}</div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitManual();
+              }}
+            >
+              {/* The wedge listener lets a real INPUT keep its own
+                  keystrokes (see its onKey), so typing here is never
+                  swallowed and Enter reaches this form. A Bluetooth gun
+                  fired while this is open simply fills the box, which is
+                  the sensible thing for it to do. */}
+              <input
+                ref={manualInputRef}
+                value={manualCode}
+                onChange={(e) => setManualCode(e.target.value)}
+                inputMode="numeric"
+                autoComplete="off"
+                autoFocus
+                placeholder={t('scan.manualPlaceholder')}
+                className="w-full bg-[#0b1118] border border-[#243244] rounded-xl px-4 py-3 font-mono text-lg tracking-widest text-slate-100 placeholder:text-slate-600 focus:border-emerald-600 focus:outline-none"
+              />
+
+              {manualSaid && (
+                <div className={`mt-3 font-mono text-xs break-all ${manualSaid.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {t(manualSaid.key, manualSaid.vars)}
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setManualOpen(false)}
+                  className="flex-1 border border-[#243244] text-slate-300 font-mono text-xs uppercase tracking-wider rounded-xl py-3"
+                >
+                  {manualCount > 0 ? t('scan.manualDone', { n: manualCount }) : t('common.cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!manualCode.trim()}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-mono text-xs font-bold uppercase tracking-wider rounded-xl py-3"
+                >
+                  {t('scan.manualAdd')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <button
         disabled={issuing || fullyCollected}
