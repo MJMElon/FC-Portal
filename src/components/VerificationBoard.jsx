@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
 import Icon from './Icon.jsx';
 import { allowedNurseries, canDo, canMaintain, nurseryKey } from '../lib/access.js';
-import { loadDOsMissingWorkers, loadDOWorkers, loadDropdownData } from '../modules/do/data.js';
+import { customerOfDO, loadDOsMissingWorkers, loadDOWorkers, loadDropdownData, plotsOfDO } from '../modules/do/data.js';
 import { useWorkerTick } from '../modules/do/useWorkerTick.js';
 import WorkerTickModal from '../modules/do/WorkerTickModal.jsx';
 import { canMaintCorrect } from '../modules/maintenance/functions.js';
@@ -285,8 +285,19 @@ export default function VerificationBoard() {
               <div className="font-mono font-black text-[16px] text-sky-800 truncate">
                 {doCard.do_number || '—'}
               </div>
+              {/* The CUSTOMER, which is not simply `customer_name`: this
+                  portal writes it into the remark and leaves that column
+                  empty, so the card used to read out the AL number. See
+                  customerOfDO. */}
               <div className="text-[14px] font-bold text-slate-700 truncate">
-                {doCard.customer_name || doCard.al_number || '—'}
+                {customerOfDO(doCard) || '—'}
+              </div>
+              {/* And WHICH PLOT, which is what the gang was standing in.
+                  Kept to one truncated line: the transplanting card beside
+                  this one already taught us that a card which wraps to a
+                  paragraph buries the thing somebody is looking for. */}
+              <div className="text-[12px] font-bold text-slate-500 truncate">
+                {plotsOfDO(doCard).join(' · ') || '—'}
               </div>
               <div className="text-[12px] text-slate-400 truncate">
                 {(doCard.delivery_date || '—')}{doCard.total_qty ? ' · ' + doCard.total_qty : ''}
