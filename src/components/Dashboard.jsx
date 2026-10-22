@@ -93,30 +93,35 @@ function SyncCard() {
    rather than inside Dashboard — a component type recreated on every render
    would remount its children on every Dashboard re-render, which would cost
    SyncCard its state back when it lived in here. It has its own ribbon now,
-   so this grid is only ever the module tiles. */
+   so this grid is only ever the module tiles.
+
+   Always two columns, even on a phone — the row stays the same total width
+   it always had, split in half rather than widened, so each tile is shorter
+   and smaller to fit it: a shrunk icon, a shrunk badge, and a title that
+   wraps to two lines instead of forcing the tile wide. A single tile (the
+   Culling Calculator on its own) simply sits in the first slot. */
 function ModuleGrid({ items }) {
   const { t } = useLang();
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 gap-2.5">
       {items.map((m) => (
         <Link
           key={m.to}
           to={m.to}
-          className="bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:-translate-y-0.5 hover:border-emerald-500 transition-all p-4 flex items-center gap-3.5 no-underline"
+          className="bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)] hover:shadow-[0_8px_32px_rgba(0,0,0,.12)] hover:-translate-y-0.5 hover:border-emerald-500 transition-all p-2.5 flex items-center gap-2 no-underline min-w-0"
         >
-          <div className={`w-12 h-12 ${m.tint} rounded-xl flex items-center justify-center shrink-0 ${m.fg}`}>
-            <Icon name={m.icon} className="w-6 h-6" />
+          <div className={`w-9 h-9 ${m.tint} rounded-lg flex items-center justify-center shrink-0 ${m.fg}`}>
+            <Icon name={m.icon} className="w-[18px] h-[18px]" />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-[15px] font-black text-slate-800 uppercase tracking-wide leading-tight">
+            <h3 className="text-[11.5px] font-black text-slate-800 uppercase tracking-wide leading-[1.15] line-clamp-2">
               {m.title}
             </h3>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">{t('common.active')}</span>
+            <div className="flex items-center gap-1 mt-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span className="text-[8.5px] font-black text-emerald-600 uppercase tracking-widest">{t('common.active')}</span>
             </div>
           </div>
-          <div className="text-slate-300 font-black text-lg shrink-0">›</div>
         </Link>
       ))}
     </div>
@@ -129,11 +134,10 @@ export default function Dashboard() {
 
   // Two groups rather than one grid of four: each sits next to the board it
   // answers to. Scan Barcode Counter and Issue Collection DO go straight
-  // under Today's Collection — both are collection-day tools. Maintenance
-  // and the Culling Calculator go under Maintenance Status, for the same
-  // reason. Every tile is still hidden for anyone whose FC Portal User
-  // Access has that module switched off; someone who has never been
-  // through that screen still sees all of them.
+  // under Today's Collection — both are collection-day tools. Every tile is
+  // still hidden for anyone whose FC Portal User Access has that module
+  // switched off; someone who has never been through that screen still
+  // sees all of them.
   const collectionModules = [
     ...(canBarcode(permissions, 'view')
       ? [{ to: '/scan', icon: 'camera', fg: 'text-blue-600', tint: 'bg-blue-100', title: t('dash.scanTitle') }]
@@ -142,10 +146,11 @@ export default function Dashboard() {
       ? [{ to: '/do', icon: 'clipboard', fg: 'text-emerald-600', tint: 'bg-emerald-100', title: t('dash.doTitle') }]
       : []),
   ];
+  // Maintenance no longer has a tile of its own here — Maintenance Status
+  // already answers "how much is done" and opening the module from a
+  // second button beside it was two tiles for one question. MaintenanceBoard
+  // carries its own "See All" link through to /maintenance now.
   const maintModules = [
-    ...(canMaintain(permissions, 'view')
-      ? [{ to: '/maintenance', icon: 'tool', fg: 'text-teal-600', tint: 'bg-teal-100', title: t('dash.maintTitle') }]
-      : []),
     // The Culling Calculator is a tab inside PALMS, but it is a job of its
     // own — a Field Conductor going out to count pokok inang should not have
     // to know it is filed under PALMS to find it. Its own tick and its own
@@ -177,15 +182,18 @@ export default function Dashboard() {
         )}
 
         {/* The month's four maintenance jobs, rolled up out of the module's
-            week-by-week timeline. Only for someone who may open Maintenance —
-            a summary is still the module's data. */}
+            week-by-week timeline, with its own "See All" through to the
+            module. Only for someone who may open Maintenance — a summary
+            is still the module's data. */}
         {canMaintain(permissions, 'view') && <MaintenanceBoard />}
 
-        {/* Maintenance + Culling Calculator — both read off plot work, so
-            they sit under Maintenance Status. */}
-        <div className="mb-4">
-          <ModuleGrid items={maintModules} />
-        </div>
+        {/* The Culling Calculator — reads off plot work like Maintenance
+            Status above it, but is its own job and keeps its own tile. */}
+        {maintModules.length > 0 && (
+          <div className="mb-4">
+            <ModuleGrid items={maintModules} />
+          </div>
+        )}
 
         {/* What was done and never signed for: a delivery order whose loading
             gang was never ticked, and a transplanted plot whose jobs were

@@ -42,15 +42,14 @@ const en = {
 
   // dashboard
   'dash.welcome': 'Welcome, {name}',
-  'dash.doTitle': 'Issue Collection DO',
-  'dash.scanTitle': 'Scan Barcode Counter',
+  'dash.doTitle': 'Issue DO',
+  'dash.scanTitle': 'Scan Barcode',
   'dash.syncTitle': 'Sync',
   'dash.syncing': 'Syncing…',
   'dash.syncLast': 'Last sync: {when}',
   'dash.syncNever': 'Not synced yet',
   'dash.syncOffline': 'No line — sync needs signal. Work saved on this phone sends itself when the line returns.',
   'dash.syncFailed': 'Some data could not sync — try again where the line is better.',
-  'dash.maintTitle': 'Maintenance',
   'dash.palmsTitle': 'PALMS',
 
   // culling calculator (PALMS tab)
@@ -471,7 +470,7 @@ const en = {
   'mtb.noFigures': 'Work is due, but plot capacity could not be read — no figures to show.',
   'mtb.plotsN': '{n} plots',
   'mtb.noCap': 'Not counted: {plots} — no capacity keyed in for these plots.',
-  'mtb.footer': 'Open the weekly plan',
+  'mtb.footer': 'See All',
   'mtb.cached': 'Offline · cached',
   'mtb.unavailable': 'Schedule unavailable',
 
@@ -935,15 +934,14 @@ const ms = {
 
   // dashboard
   'dash.welcome': 'Selamat datang, {name}',
-  'dash.doTitle': 'Isu Kutipan DO',
-  'dash.scanTitle': 'Pengira Imbas Barkod',
+  'dash.doTitle': 'Isu DO',
+  'dash.scanTitle': 'Imbas Barkod',
   'dash.syncTitle': 'Segerak',
   'dash.syncing': 'Menyegerak…',
   'dash.syncLast': 'Segerak terakhir: {when}',
   'dash.syncNever': 'Belum pernah segerak',
   'dash.syncOffline': 'Tiada talian — segerak perlukan talian. Kerja yang disimpan pada telefon ini akan dihantar sendiri bila talian kembali.',
   'dash.syncFailed': 'Sebahagian data tidak dapat disegerak — cuba lagi di tempat talian lebih baik.',
-  'dash.maintTitle': 'Penyelenggaraan',
   'dash.palmsTitle': 'PALMS',
 
   // culling calculator (PALMS tab)
@@ -1319,7 +1317,7 @@ const ms = {
   'mtb.noFigures': 'Ada kerja, tetapi kapasiti plot tidak dapat dibaca — tiada angka.',
   'mtb.plotsN': '{n} plot',
   'mtb.noCap': 'Tidak dikira: {plots} — kapasiti plot belum dimasukkan.',
-  'mtb.footer': 'Buka jadual mingguan',
+  'mtb.footer': 'Lihat Semua',
   'mtb.cached': 'Luar talian · cache',
   'mtb.unavailable': 'Jadual tiada',
 

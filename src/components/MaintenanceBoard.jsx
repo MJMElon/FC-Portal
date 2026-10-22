@@ -184,9 +184,12 @@ export default function MaintenanceBoard() {
     return () => { live = false; };
   }, [allowedSig, month]);
 
-  // A month the office has not planned yet, or one with nothing due, has
-  // nothing to report — and an empty widget is worse than no widget. Keep it
-  // out of the way until there is a number to show.
+  // A month the office has not planned yet, or one with nothing due, has no
+  // dials to draw. The card itself stays up regardless — it carries the one
+  // "See All" door through to the module now that the module has no tile of
+  // its own on the dashboard, and a card that vanished with nothing due
+  // would take that door away exactly when there is nothing on screen to
+  // explain where it went.
   const anyWork = useMemo(
     () =>
       !!sum &&
@@ -195,7 +198,6 @@ export default function MaintenanceBoard() {
       ),
     [sum]
   );
-  if (sum && !anyWork) return null;
 
   const thisWeek = weekOfDate(todayStr());
   const wk = (sum && sum.byWeek && sum.byWeek[week]) || { totals: {}, done: {} };
@@ -252,68 +254,79 @@ export default function MaintenanceBoard() {
         <div className="px-4 py-5 text-center text-[11px] font-bold text-slate-400 uppercase tracking-widest">
           {failed ? t('mtb.unavailable') : t('common.loading')}
         </div>
+      ) : !anyWork ? (
+        <div className="px-4 py-5 text-center text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+          {t('mtb.noProgram')}
+        </div>
       ) : (
-        <>
-          {/* All four jobs on one row. Four dials fit a 360px phone at ~78px
-              a column, which keeps the ring readable and the whole board
-              shorter than the stack of bars it replaced. */}
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-3 p-3">
-            {WORK_TYPES.map((wt) => {
-              const total = wk.totals[wt.key] || 0;
-              const doneN = wk.done[wt.key] || 0;
-              const pct = total ? Math.round((doneN / total) * 100) : 0;
-              const clear = total > 0 && doneN >= total;
-              const tint = tintOf(wt.key);
-              return (
-                <div key={wt.key} className={`flex flex-col items-center ${total ? '' : 'opacity-50'}`}>
-                  <ProgressDial
-                    pct={pct}
-                    ringCls={clear ? 'text-emerald-500' : total ? tint.ring : 'text-slate-200'}
-                  >
-                    <WorkIcon
-                      workKey={wt.key}
-                      className={`w-[26px] h-[26px] sm:w-8 sm:h-8 ${total ? tint.fg : 'text-slate-300'}`}
-                    />
-                  </ProgressDial>
+        /* All four jobs on one row. Four dials fit a 360px phone at ~78px a
+           column, which keeps the ring readable and the whole board shorter
+           than the stack of bars it replaced. */
+        <div className="grid grid-cols-4 gap-1.5 sm:gap-3 p-3">
+          {WORK_TYPES.map((wt) => {
+            const total = wk.totals[wt.key] || 0;
+            const doneN = wk.done[wt.key] || 0;
+            const pct = total ? Math.round((doneN / total) * 100) : 0;
+            const clear = total > 0 && doneN >= total;
+            const tint = tintOf(wt.key);
+            return (
+              <div key={wt.key} className={`flex flex-col items-center ${total ? '' : 'opacity-50'}`}>
+                <ProgressDial
+                  pct={pct}
+                  ringCls={clear ? 'text-emerald-500' : total ? tint.ring : 'text-slate-200'}
+                >
+                  <WorkIcon
+                    workKey={wt.key}
+                    className={`w-[26px] h-[26px] sm:w-8 sm:h-8 ${total ? tint.fg : 'text-slate-300'}`}
+                  />
+                </ProgressDial>
 
-                  {/* Two lines reserved for the name so all four columns line
-                      their numbers up, and clamped there so the Malay names —
-                      "Penyemburan Racun Kulat & Serangga" — cannot push one
-                      column taller than the rest. */}
-                  <span className="mt-1.5 text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-slate-500 leading-[1.2] text-center line-clamp-2 min-h-[22px]">
-                    {workTypeLabel(wt, lang)}
-                  </span>
+                {/* Two lines reserved for the name so all four columns line
+                    their numbers up, and clamped there so the Malay names —
+                    "Penyemburan Racun Kulat & Serangga" — cannot push one
+                    column taller than the rest. */}
+                <span className="mt-1.5 text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-slate-500 leading-[1.2] text-center line-clamp-2 min-h-[22px]">
+                  {workTypeLabel(wt, lang)}
+                </span>
 
-                  <span className="text-[10px] sm:text-[11px] font-black tabular-nums leading-none text-slate-400">
-                    {total ? (
-                      <>
-                        <span className={clear ? 'text-emerald-600' : 'text-slate-700'}>
-                          {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : doneN.toLocaleString()}
-                        </span>
-                        {!clear && `/${total.toLocaleString()}`}
-                      </>
-                    ) : (
-                      t('mtb.none')
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          <Link to="/maintenance"
-            className="px-4 py-1.5 border-t border-slate-100 text-[9px] font-bold text-slate-400 flex justify-between gap-3 no-underline hover:text-teal-700">
-            <span className="truncate">{t('mtb.footer')}</span>
-            <span className="shrink-0">
-              {failed
-                ? t('mtb.cached')
-                : updatedAt
-                ? t('board.updated', { time: new Date(updatedAt).toLocaleTimeString() })
-                : ''}
-            </span>
-          </Link>
-        </>
+                <span className="text-[10px] sm:text-[11px] font-black tabular-nums leading-none text-slate-400">
+                  {total ? (
+                    <>
+                      <span className={clear ? 'text-emerald-600' : 'text-slate-700'}>
+                        {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : doneN.toLocaleString()}
+                      </span>
+                      {!clear && `/${total.toLocaleString()}`}
+                    </>
+                  ) : (
+                    t('mtb.none')
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
+
+      {/* The Maintenance tile used to sit on its own below this board; it is
+          this link now, so reading the status and opening the module are one
+          tap instead of two tiles answering the same question. Outside the
+          branches above and always rendered — loading, unavailable, nothing
+          due this month — this is the one door into the module and it must
+          not disappear with any of them. */}
+      <Link to="/maintenance"
+        className="px-4 py-2 border-t border-slate-100 text-[9px] font-bold text-slate-400 flex items-center justify-between gap-3 no-underline hover:text-teal-700">
+        <span className="truncate inline-flex items-center gap-1">
+          {t('mtb.footer')}
+          <span className="text-slate-300" aria-hidden="true">›</span>
+        </span>
+        <span className="shrink-0">
+          {failed
+            ? t('mtb.cached')
+            : updatedAt
+            ? t('board.updated', { time: new Date(updatedAt).toLocaleTimeString() })
+            : ''}
+        </span>
+      </Link>
 
       {showInfo && (
         <SchedulePopover
