@@ -50,6 +50,7 @@ const en = {
   'dash.syncNever': 'Not synced yet',
   'dash.syncOffline': 'No line — sync needs signal. Work saved on this phone sends itself when the line returns.',
   'dash.syncFailed': 'Some data could not sync — try again where the line is better.',
+  'dash.syncFailedStep': 'Could not sync {step} — try again where the line is better.',
   'dash.palmsTitle': 'PALMS',
 
   // culling calculator (PALMS tab)
@@ -942,6 +943,7 @@ const ms = {
   'dash.syncNever': 'Belum pernah segerak',
   'dash.syncOffline': 'Tiada talian — segerak perlukan talian. Kerja yang disimpan pada telefon ini akan dihantar sendiri bila talian kembali.',
   'dash.syncFailed': 'Sebahagian data tidak dapat disegerak — cuba lagi di tempat talian lebih baik.',
+  'dash.syncFailedStep': 'Tidak dapat segerak {step} — cuba lagi di tempat talian lebih baik.',
   'dash.palmsTitle': 'PALMS',
 
   // culling calculator (PALMS tab)
