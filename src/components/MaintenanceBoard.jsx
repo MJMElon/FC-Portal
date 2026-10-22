@@ -35,7 +35,9 @@ import Icon from './Icon.jsx';
 const CACHE_KEY = 'maintenance_board_month_v3';
 
 /** One week-stepper arrow. Greys out at the ends of the month instead of
-    disappearing, so the control does not change shape as you move. */
+    disappearing, so the control does not change shape as you move. Plain
+    triple-chevron text, no circle and no border — the office asked for the
+    round button gone and the arrow itself smaller. */
 function NavArrow({ dir, disabled, onClick, label }) {
   return (
     <button
@@ -43,16 +45,13 @@ function NavArrow({ dir, disabled, onClick, label }) {
       disabled={disabled}
       title={label}
       aria-label={label}
-      className={`grid place-items-center w-7 h-7 rounded-full border shrink-0 transition-colors ${
+      className={`shrink-0 px-1 py-0.5 text-[11px] font-black tracking-tighter leading-none transition-colors ${
         disabled
-          ? 'border-teal-100 text-teal-200 cursor-default'
-          : 'border-teal-300 text-teal-700 hover:bg-teal-100 cursor-pointer'
+          ? 'text-teal-200 cursor-default'
+          : 'text-teal-600 hover:text-teal-800 cursor-pointer'
       }`}
     >
-      <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="3"
-        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        {dir === 'prev' ? <path d="m15 5-7 7 7 7" /> : <path d="m9 5 7 7-7 7" />}
-      </svg>
+      {dir === 'prev' ? '<<<' : '>>>'}
     </button>
   );
 }
@@ -202,7 +201,7 @@ export default function MaintenanceBoard() {
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4 shadow-[0_4px_16px_rgba(0,0,0,.06)]">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-teal-50">
+      <div className="px-4 py-2.5 border-b border-slate-200">
         <div className="flex items-center justify-between gap-2">
           <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate flex items-center gap-1.5">
             <Icon name="tool" className="w-3.5 h-3.5 shrink-0" /> {t('mtb.title')}
