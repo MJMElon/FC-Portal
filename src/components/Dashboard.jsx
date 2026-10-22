@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
-import { canBarcode, canCulling, canDo, canMaintain } from '../lib/access.js';
+import { canBarcode, canDo, canMaintain } from '../lib/access.js';
 import { useLang } from '../context/LanguageContext.jsx';
 import TopNav from './TopNav.jsx';
 import CollectionBoard from './CollectionBoard.jsx';
@@ -67,16 +67,9 @@ export default function Dashboard() {
   // Maintenance no longer has a tile of its own here — Maintenance Status
   // already answers "how much is done" and opening the module from a
   // second button beside it was two tiles for one question. MaintenanceBoard
-  // carries its own "See All" link through to /maintenance now.
-  const maintModules = [
-    // The Culling Calculator is a tab inside PALMS, but it is a job of its
-    // own — a Field Conductor going out to count pokok inang should not have
-    // to know it is filed under PALMS to find it. Its own tick and its own
-    // nursery list too, for the same reason.
-    ...(canCulling(permissions, 'view')
-      ? [{ to: '/culling', icon: 'calculator', fg: 'text-rose-600', tint: 'bg-rose-100', title: t('cull.title') }]
-      : []),
-  ];
+  // carries its own "See All" link through to /maintenance now. The Culling
+  // Calculator's tile went the same way, into the floating dock's own fan —
+  // see FloatingDock.jsx — so there is no second grid of tiles left here.
 
   return (
     <div className="min-h-screen bg-slate-100 fade-enter">
@@ -99,15 +92,6 @@ export default function Dashboard() {
             module. Only for someone who may open Maintenance — a summary
             is still the module's data. */}
         {canMaintain(permissions, 'view') && <MaintenanceBoard />}
-
-        {/* The Culling Calculator — reads off plot work like Maintenance
-            Status above it, but is its own job and keeps its own tile. */}
-        {maintModules.length > 0 && (
-          <div className="mb-4">
-            <ModuleGrid items={maintModules} />
-          </div>
-        )}
-
       </div>
     </div>
   );

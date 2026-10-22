@@ -1,21 +1,26 @@
 /* ══════════════════════════════════════════════════════════════════════
-   ONE FLOATING BUTTON, TWO THINGS BEHIND IT
+   ONE FLOATING BUTTON, UP TO FOUR THINGS BEHIND IT
 
-   PALMS and Nelos both want to follow the Field Conductor around the
-   portal: the plot round is the first job of the morning, and a case can
-   land while somebody is halfway through a scan. Two floating buttons is
-   one too many — on a 360px screen the second one always ends up sitting
-   on the thing that needs tapping, and both of them want the bottom-right
+   PALMS, Nelos, Pending Verification and the Culling Calculator all want
+   to follow the Field Conductor around the portal: the plot round is the
+   first job of the morning, a case can land while somebody is halfway
+   through a scan, a DO or a transplanted plot can go unanswered, and the
+   calculator is reached for mid-walk. Four floating buttons is three too
+   many — on a 360px screen the second one already started sitting on the
+   thing that needed tapping, and every one of them wants the bottom-right
    corner a thumb reaches.
 
-   So there is one. Tap it and it fans open into the two; tap one of those
-   and its window opens over whatever screen you were on. Tap the trigger
-   again, tap away, or press Escape and it folds back.
+   So there is one. Tap it and it fans open into whichever of the four this
+   login may open; tap one of those and its window opens over whatever
+   screen you were on. Tap the trigger again, tap away, or press Escape and
+   it folds back.
 
-   The trigger carries the WORSE of the two states, because the point of a
-   button that follows you is to be answerable at a glance: a red count
-   when either PALMS has plots left or Nelos has cases pending, and quiet
-   only when both are clear. Opening it shows which is which.
+   The trigger carries the WORST of the states that carry a count — PALMS
+   plots left, Nelos cases pending, work still to verify — because the
+   point of a button that follows you is to be answerable at a glance: a
+   red count when anything is waiting, quiet only when all three are clear.
+   The Culling Calculator carries no count; it is a tool, not a worklist.
+   Opening the dock shows which is which.
 
    Drag and position are here, once, rather than in each of them — see
    PalmsDock, which is where this drag maths came from and which still
@@ -25,7 +30,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
-import { allowedNurseries, canDo, canMaintain, canPalms } from '../lib/access.js';
+import { allowedNurseries, canCulling, canDo, canMaintain, canPalms } from '../lib/access.js';
 import { NURSERIES } from '../modules/palms/data.js';
 import { applyCachedOfficeConfig, refreshOfficeConfig } from '../modules/palms/officeConfig.js';
 import { visibleNurseries } from '../lib/access.js';
@@ -36,6 +41,7 @@ import Icon from './Icon.jsx';
 import PalmsWindow from './PalmsWindow.jsx';
 import NelosWindow from './NelosWindow.jsx';
 import VerifyWindow from './VerifyWindow.jsx';
+import CullingWindow from './CullingWindow.jsx';
 import { Train, todayProgress } from './PalmsDock.jsx';
 
 const POS_KEY = 'mjm_dock_pos_v1';
@@ -85,6 +91,14 @@ function NelosMark() {
    window opens with, amber like the card it replaced. */
 function VerifyMark() {
   return <Icon name="hourglass" className="w-[22px] h-[22px] text-amber-800" />;
+}
+
+/* The Culling Calculator's own mark — the same calculator its dashboard
+   tile used to wear, rose like that tile's icon box. It carries no badge:
+   counting pokok inang is a tool somebody reaches for, not a worklist with
+   something pending. */
+function CullingMark() {
+  return <Icon name="calculator" className="w-[22px] h-[22px] text-rose-700" />;
 }
 
 /* The trigger's own face — neither module's. It used to wear the train,
@@ -252,10 +266,12 @@ export default function FloatingDock() {
      sent a case, so anybody signed in can read their own list — what they
      may see inside it is nelos_my_scope()'s answer, not this button's. */
   const mayVerify = canDo(permissions, 'view') || canMaintain(permissions, 'view');
+  const mayCulling = canCulling(permissions, 'view') && !location.pathname.startsWith('/culling');
   const actions = [];
   if (mayPalms) actions.push('palms');
   actions.push('nelos');
   if (mayVerify) actions.push('verify');
+  if (mayCulling) actions.push('culling');
   // One thing behind it is not a fan. Tapping opens that one thing.
   soloRef.current = actions.length === 1 ? actions[0] : null;
 
@@ -311,6 +327,7 @@ export default function FloatingDock() {
               n: plotsLeft },
     nelos:  { label: 'Nelos', cls: 'bg-[#efc7e2] border-[#cf6eaf]', icon: <NelosMark />, n: casesLeft },
     verify: { label: t('vrf.title'), cls: 'bg-amber-100 border-amber-400', icon: <VerifyMark />, n: verifyLeft },
+    culling: { label: t('cull.title'), cls: 'bg-rose-100 border-rose-400', icon: <CullingMark />, n: 0 },
   };
 
   return (
@@ -400,6 +417,9 @@ export default function FloatingDock() {
       )}
       {open === 'verify' && (
         <VerifyWindow onClose={() => { setOpen(null); refreshVerify(); }} onCount={setVerifyCount} />
+      )}
+      {open === 'culling' && (
+        <CullingWindow onClose={() => setOpen(null)} />
       )}
     </>
   );
