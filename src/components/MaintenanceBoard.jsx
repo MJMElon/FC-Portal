@@ -88,7 +88,6 @@ export default function MaintenanceBoard() {
   const fresh = cached && cached.value && cached.value.month === month ? cached : null;
   // { totals: {key:n}, done: {key:n}, month, scheduled }
   const [sum, setSum] = useState(fresh?.value || null);
-  const [updatedAt, setUpdatedAt] = useState(fresh?.at || null);
   const [failed, setFailed] = useState(false);
   // A restricted user must be summed over their own nurseries only, exactly
   // as the module scopes them — otherwise the front page quotes a total for
@@ -171,7 +170,6 @@ export default function MaintenanceBoard() {
         const next = { byWeek, month, scheduled: schedule.length > 0 };
         if (!live) return;
         setSum(next);
-        setUpdatedAt(Date.now());
         setFailed(false);
         cacheSet(CACHE_KEY, next);
       } catch (e) {
@@ -209,20 +207,15 @@ export default function MaintenanceBoard() {
           <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate flex items-center gap-1.5">
             <Icon name="tool" className="w-3.5 h-3.5 shrink-0" /> {t('mtb.title')}
           </span>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[10px] font-black text-teal-700">{month}</span>
-            {/* What the week takes out of the store. It used to open a box
-                that said "no programme listed yet" whatever the month held —
-                a button with one answer. */}
-            <button
-              onClick={() => setShowInfo(true)}
-              title={t('mtb.maxUse')}
-              aria-label={t('mtb.maxUse')}
-              className="grid place-items-center w-6 h-6 rounded-full border border-teal-300 text-teal-700 text-[11px] font-black italic hover:bg-teal-100 transition-colors cursor-pointer shrink-0"
-            >
-              i
-            </button>
-          </div>
+          {/* The month badge used to sit here on its own, just a label. The
+              card's one door into the module belongs on its own header —
+              the ordinary place a "See All" sits on a summary card — so it
+              takes the month's place instead. The ⓘ that stood beside it
+              moves down to the foot of the card; see there for why. */}
+          <Link to="/maintenance"
+            className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-black text-teal-700 uppercase tracking-widest hover:text-teal-900 no-underline">
+            {t('mtb.footer')} <span aria-hidden="true">›</span>
+          </Link>
         </div>
 
         {/* Which week. The arrows stop at the ends rather than wrapping —
@@ -307,26 +300,22 @@ export default function MaintenanceBoard() {
         </div>
       )}
 
-      {/* The Maintenance tile used to sit on its own below this board; it is
-          this link now, so reading the status and opening the module are one
-          tap instead of two tiles answering the same question. Outside the
-          branches above and always rendered — loading, unavailable, nothing
-          due this month — this is the one door into the module and it must
-          not disappear with any of them. */}
-      <Link to="/maintenance"
-        className="px-4 py-2 border-t border-slate-100 text-[9px] font-bold text-slate-400 flex items-center justify-between gap-3 no-underline hover:text-teal-700">
-        <span className="truncate inline-flex items-center gap-1">
-          {t('mtb.footer')}
-          <span className="text-slate-300" aria-hidden="true">›</span>
-        </span>
-        <span className="shrink-0">
-          {failed
-            ? t('mtb.cached')
-            : updatedAt
-            ? t('board.updated', { time: new Date(updatedAt).toLocaleTimeString() })
-            : ''}
-        </span>
-      </Link>
+      {/* The "Updated HH:MM" stamp used to read here. The ⓘ that opens what
+          the week takes out of the store moves down to take its place —
+          the header's top-right is the one door into the module now (the
+          See All link above), so the card's other button, the one that
+          opens something ON this card rather than leaving it, belongs at
+          the card's own foot instead. */}
+      <div className="px-4 py-2 border-t border-slate-100 flex items-center justify-end">
+        <button
+          onClick={() => setShowInfo(true)}
+          title={t('mtb.maxUse')}
+          aria-label={t('mtb.maxUse')}
+          className="grid place-items-center w-6 h-6 rounded-full border border-teal-200 text-teal-600 text-[11px] font-black italic hover:bg-teal-50 transition-colors cursor-pointer shrink-0"
+        >
+          i
+        </button>
+      </div>
 
       {showInfo && (
         <SchedulePopover
