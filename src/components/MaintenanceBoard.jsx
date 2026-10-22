@@ -201,45 +201,48 @@ export default function MaintenanceBoard() {
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4 shadow-[0_4px_16px_rgba(0,0,0,.06)]">
-      <div className="px-4 py-2.5 border-b border-slate-200">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate flex items-center gap-1.5">
-            <Icon name="tool" className="w-3.5 h-3.5 shrink-0" /> {t('mtb.title')}
-          </span>
-          {/* The month badge used to sit here on its own, just a label. The
-              card's one door into the module belongs on its own header —
-              the ordinary place a "See All" sits on a summary card — so it
-              takes the month's place instead. The ⓘ that stood beside it
-              moves down to the foot of the card; see there for why. */}
-          <Link to="/maintenance"
-            className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-black text-teal-700 uppercase tracking-widest hover:text-teal-900 no-underline">
-            {t('mtb.footer')} <span aria-hidden="true">›</span>
-          </Link>
-        </div>
+      {/* Same strip as Today's Collection — bg-emerald-50, the same
+          px-4 py-2.5 border-b — so the two cards read as one family rather
+          than one tinted and one plain. Its own border-b is the line
+          between the title and the week stepper below; the stepper gets a
+          second one of its own, separating it from the dials in turn. */}
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-200 bg-emerald-50">
+        <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate flex items-center gap-1.5">
+          <Icon name="tool" className="w-3.5 h-3.5 shrink-0" /> {t('mtb.title')}
+        </span>
+        {/* The month badge used to sit here on its own, just a label. The
+            card's one door into the module belongs on its own header —
+            the ordinary place a "See All" sits on a summary card — so it
+            takes the month's place instead. The ⓘ that stood beside it
+            moves down to the foot of the card; see there for why. */}
+        <Link to="/maintenance"
+          className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-black text-teal-700 uppercase tracking-widest hover:text-teal-900 no-underline">
+          {t('mtb.footer')} <span aria-hidden="true">›</span>
+        </Link>
+      </div>
 
-        {/* Which week. The arrows stop at the ends rather than wrapping —
-            week 4 rolling round to week 1 reads as the month having changed. */}
-        <div className="flex items-center justify-between gap-2 mt-2">
-          <NavArrow
-            dir="prev"
-            disabled={week <= WEEKS[0]}
-            onClick={() => setWeek((w) => Math.max(WEEKS[0], w - 1))}
-            label={t('mtb.prevWeek')}
-          />
-          <div className="text-center leading-tight min-w-0">
-            <div className="text-[12px] font-black text-teal-800 uppercase tracking-wide">
-              {t('mt.weekN', { n: week })}
-              {week === thisWeek && <span className="text-teal-600"> · {t('mt.thisWeek')}</span>}
-            </div>
-            <div className="text-[10px] font-bold text-teal-600">{weekDates(week, month)}</div>
+      {/* Which week. The arrows stop at the ends rather than wrapping —
+          week 4 rolling round to week 1 reads as the month having changed. */}
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-200">
+        <NavArrow
+          dir="prev"
+          disabled={week <= WEEKS[0]}
+          onClick={() => setWeek((w) => Math.max(WEEKS[0], w - 1))}
+          label={t('mtb.prevWeek')}
+        />
+        <div className="text-center leading-tight min-w-0">
+          <div className="text-[12px] font-black text-teal-800 uppercase tracking-wide">
+            {t('mt.weekN', { n: week })}
+            {week === thisWeek && <span className="text-teal-600"> · {t('mt.thisWeek')}</span>}
           </div>
-          <NavArrow
-            dir="next"
-            disabled={week >= WEEKS[WEEKS.length - 1]}
-            onClick={() => setWeek((w) => Math.min(WEEKS[WEEKS.length - 1], w + 1))}
-            label={t('mtb.nextWeek')}
-          />
+          <div className="text-[10px] font-bold text-teal-600">{weekDates(week, month)}</div>
         </div>
+        <NavArrow
+          dir="next"
+          disabled={week >= WEEKS[WEEKS.length - 1]}
+          onClick={() => setWeek((w) => Math.min(WEEKS[WEEKS.length - 1], w + 1))}
+          label={t('mtb.nextWeek')}
+        />
       </div>
 
       {!sum ? (
