@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { canBarcode, canCulling, canDo, canMaintain } from '../lib/access.js';
@@ -6,93 +5,13 @@ import { useLang } from '../context/LanguageContext.jsx';
 import TopNav from './TopNav.jsx';
 import CollectionBoard from './CollectionBoard.jsx';
 import MaintenanceBoard from './MaintenanceBoard.jsx';
-import { lastSync, syncAll } from '../lib/syncAll.js';
+import SyncButton from './SyncButton.jsx';
 import Icon from './Icon.jsx';
-
-/* "31 Aug, 11:42" — enough to trust the stamp, short enough for one line. */
-function fmtWhen(at) {
-  try {
-    return new Date(at).toLocaleString(undefined, {
-      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-    });
-  } catch (e) {
-    return new Date(at).toISOString().slice(0, 16).replace('T', ' ');
-  }
-}
-
-/* The Sync bar, first thing on the page, above even Today's Collection —
-   this is the one press a Field Conductor wants before walking into
-   the field with no signal, so it comes before anything else asks to
-   be read. A thin full-width ribbon rather than a square tile: it is
-   one action, not a module, and does not need a tile's worth of room
-   to say so. The stamp only moves when EVERY step succeeded — see
-   syncAll.js. */
-let syncNoteTimer = null;
-
-function SyncCard() {
-  const { t } = useLang();
-  const [busy, setBusy] = useState(false);
-  const [stamp, setStamp] = useState(lastSync);
-  const [note, setNote] = useState(null); // transient error / offline line
-
-  async function press() {
-    if (busy) return;
-    setBusy(true);
-    setNote(null);
-    const r = await syncAll();
-    setBusy(false);
-    if (r.ok) {
-      setStamp({ at: r.at, ok: true });
-      return;
-    }
-    setNote(r.offline ? t('dash.syncOffline') : t('dash.syncFailed'));
-    clearTimeout(syncNoteTimer);
-    syncNoteTimer = setTimeout(() => setNote(null), 6000);
-  }
-
-  return (
-    <button
-      onClick={press}
-      disabled={busy}
-      className="w-full bg-white rounded-xl border border-slate-200 shadow-[0_2px_10px_rgba(0,0,0,.05)] hover:shadow-[0_6px_20px_rgba(0,0,0,.1)] hover:border-emerald-500 transition-all px-3 py-1.5 flex items-center gap-2.5 text-left cursor-pointer disabled:cursor-default"
-    >
-      <div className="w-6 h-6 bg-sky-100 rounded-md flex items-center justify-center shrink-0 text-sky-600">
-        <Icon name="refresh" className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
-      </div>
-      <div className="flex-1 min-w-0 flex items-center gap-2.5">
-        <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-wide leading-tight shrink-0">
-          {t('dash.syncTitle')}
-        </h3>
-        <div className="min-w-0 truncate">
-          {note ? (
-            <span className="text-[10px] font-black text-amber-600 uppercase tracking-wider">
-              {note}
-            </span>
-          ) : busy ? (
-            <span className="text-[10px] font-black text-sky-600 uppercase tracking-widest">
-              {t('dash.syncing')}
-            </span>
-          ) : stamp ? (
-            <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest inline-flex items-center gap-1">
-              <Icon name="check" className="w-3 h-3 shrink-0" /> {t('dash.syncLast', { when: fmtWhen(stamp.at) })}
-            </span>
-          ) : (
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              {t('dash.syncNever')}
-            </span>
-          )}
-        </div>
-      </div>
-      <div className="text-slate-300 font-black text-base shrink-0">›</div>
-    </button>
-  );
-}
 
 /* One row of module tiles. A component of its own, declared at module scope
    rather than inside Dashboard — a component type recreated on every render
-   would remount its children on every Dashboard re-render, which would cost
-   SyncCard its state back when it lived in here. It has its own ribbon now,
-   so this grid is only ever the module tiles.
+   would remount its children on every Dashboard re-render, which matters
+   for components carrying their own state even though this one does not.
 
    Always two columns, even on a phone — the row stays the same total width
    it always had, split in half rather than widened, so each tile is shorter
@@ -161,13 +80,8 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-100 fade-enter">
-      <TopNav title="MJM Nursery" subtitle="FC Portal" user={staffName} book />
+      <TopNav title="MJM Nursery" subtitle="FC Portal" user={staffName} book left={<SyncButton />} />
       <div className="max-w-[900px] mx-auto px-3 sm:px-6 py-4 sm:py-6">
-        {/* Sync, first thing on the page — see SyncCard's own comment for why. */}
-        <div className="mb-4">
-          <SyncCard />
-        </div>
-
         {/* "TV" board: who is coming today to collect seedlings */}
         <CollectionBoard />
 

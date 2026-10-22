@@ -38,6 +38,8 @@ function CogIcon() {
 // - `theme`: 'light' (default) or 'dark' to match a dark page background
 // - `book`: stack the title the way the 555 book cover on the login screen
 //   reads — house name, 555, then the portal. Dashboard only
+// - `left`: extra content before the Back arrow (or in its place, when there
+//   is none) — the Dashboard's Sync button, so far the only user of it
 export default function TopNav({
   title,
   subtitle,
@@ -47,6 +49,7 @@ export default function TopNav({
   settingsOn,
   theme = 'light',
   book,
+  left,
 }) {
   const { signOut } = useAuth();
   const { t } = useLang();
@@ -95,6 +98,7 @@ export default function TopNav({
 
   const leftControls = (
     <>
+      {left}
       {back && (
         <Link
           to={back}
