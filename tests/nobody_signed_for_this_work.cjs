@@ -147,22 +147,31 @@ is(P.LOADING_WORKERS_FROM, '2026-10-01',
 yes(!/VERIFY_WINDOW_DAYS|sinceISO/.test(R('src/components/VerificationBoard.jsx')),
    'and the rolling window is gone, so there is only one rule for where it starts');
 
-/* ── 5. The wiring on the page ───────────────────────────────────────── */
+/* ── 5. The wiring: a floating icon, not a card pushed onto the dashboard ──
+   It used to sit last on the dashboard and disappear when there was
+   nothing to verify -- the right default for something nobody asked to
+   see. It is the floating dock's own window now, opened on purpose the
+   same way PALMS and Nelos already are, so it no longer hides itself when
+   it is opened and finds nothing: see VerificationBoard.jsx and
+   VerifyWindow.jsx for why. */
 const board = R('src/components/VerificationBoard.jsx');
 const dash  = R('src/components/Dashboard.jsx');
+const dock  = R('src/components/FloatingDock.jsx');
+const win   = R('src/components/VerifyWindow.jsx');
 const maint = R('src/modules/maintenance/MaintenanceModule.jsx');
 
-yes(/<VerificationBoard \/>/.test(dash), 'the board is on the dashboard');
-/* Moved LAST on the page -- the office asked for it after the module tiles
-   rather than between the collections and the maintenance status, so it is
-   the last thing a Field Conductor scrolls to rather than a prompt sitting
-   ahead of the day's own tools. */
-yes(dash.indexOf('<VerificationBoard />') > dash.indexOf('<CollectionBoard />')
- && dash.indexOf('<VerificationBoard />') > dash.indexOf('<MaintenanceBoard />')
- && dash.indexOf('<VerificationBoard />') > dash.lastIndexOf('<ModuleGrid'),
-    'last on the page, after both boards and both module-tile rows');
-yes(/if \(!ready \|\| total === 0\) return null;/.test(board),
-    'and it disappears when there is nothing to verify');
+yes(!/<VerificationBoard\b/.test(dash) && !/VerificationBoard\.jsx/.test(dash),
+    'the board is OFF the dashboard -- no import, no element');
+yes(/actions\.push\('verify'\)/.test(dock) && /VerifyWindow/.test(dock),
+    'the dock offers it as a third fan action, opening VerifyWindow');
+yes(/pendingVerifyCount/.test(dock),
+    "and the dock's own badge reads the shared count, not a copy of the board's query");
+yes(/<VerificationBoard onCount=\{onCount\} \/>/.test(win),
+    'the window renders the real board as its body, lazily, and hands its count back up');
+yes(!/if \(!ready \|\| total === 0\) return null;/.test(board),
+    'it no longer disappears when there is nothing to verify');
+yes(/total === 0/.test(board) && /vrf\.allDone/.test(board),
+    "-- it says so instead, now that opening it was somebody's choice");
 yes(/grid grid-cols-2/.test(board), 'the two halves sit side by side at every width');
 yes(!/jobLabel/.test(board),
     'the job names are off the transplanting card -- four spelt in full made it a paragraph');

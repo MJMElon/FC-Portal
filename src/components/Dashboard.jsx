@@ -6,7 +6,6 @@ import { useLang } from '../context/LanguageContext.jsx';
 import TopNav from './TopNav.jsx';
 import CollectionBoard from './CollectionBoard.jsx';
 import MaintenanceBoard from './MaintenanceBoard.jsx';
-import VerificationBoard from './VerificationBoard.jsx';
 import { lastSync, syncAll } from '../lib/syncAll.js';
 import Icon from './Icon.jsx';
 
@@ -195,13 +194,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* What was done and never signed for: a delivery order whose loading
-            gang was never ticked, and a transplanted plot whose jobs were
-            never recorded. Last on the page now rather than between the
-            collections and the plan — the office asked for it moved; see
-            CLAUDE.md. It hides itself when there is nothing outstanding, so
-            its own gate is inside it rather than here. */}
-        <VerificationBoard />
       </div>
     </div>
   );
