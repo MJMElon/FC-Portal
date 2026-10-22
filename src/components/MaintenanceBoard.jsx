@@ -15,6 +15,8 @@ import {
   withQueued,
   workTypeLabel,
 } from '../modules/maintenance/data.js';
+import { canMaintFn } from '../modules/maintenance/functions.js';
+import MaintenanceQuickEntry from './MaintenanceQuickEntry.jsx';
 import {
   WEEKS,
   isDone as isJobDone,
@@ -94,91 +96,111 @@ export default function MaintenanceBoard() {
   // Opens on the week you are actually in; stepping is per-visit, not saved.
   const [week, setWeek] = useState(() => weekOfDate(todayStr()) || 1);
   const [showInfo, setShowInfo] = useState(false);
+  /* { workTypeKey } — which dial popped the record form open, if any. The
+     week it opens on is this card's own `week` above: whichever one is on
+     screen when the dial is tapped. */
+  const [quickEntry, setQuickEntry] = useState(null);
 
   const allowed = allowedNurseries(permissions, 'maintenance');
   const allowedSig = allowed === null ? '*' : [...allowed].sort().join('|');
+  /* Same switch the module's own "+ New Record" button is gated on — a
+     dial that cannot be tapped through to anything is worse than one that
+     is plainly not a button, so the dials only become clickable here. */
+  const mayRecord = canMaintFn(permissions, 'record');
+
+  /* Pulled out into its own function so closing the quick-entry popup (see
+     quickEntry/MaintenanceQuickEntry further down) can ask for the same
+     read again — a record just saved there should not leave this card's
+     own dials reading what they did before it was recorded.
+
+     `live` is the effect's own mount-guard object, `{ current: true }`
+     until cleanup flips it — shared this way rather than a plain closed-
+     over boolean so a manual call (no cleanup to guard with) can simply
+     leave it out and default to "always live". */
+  const loadBoard = async (live = { current: true }) => {
+    try {
+      const [{ plots, records }, queued] = await Promise.all([
+        loadMaintenanceData(),
+        pendingRecords().catch(() => []),
+      ]);
+      const nurseries = [
+        ...new Set(
+          plots
+            /* Through nurseryKey, like every other nursery comparison in
+               this repository: the tick list on the User Access screen is
+               typed by hand and says "UNN1" where shared_plots says
+               "UNN 1". Compared as spelt, a person ticked for a nursery
+               is shown none of it. It cannot widen access — two names with
+               different letters or digits give different keys. */
+            .filter((p) => allowed === null
+              || allowed.some((a) => nurseryKey(a) === nurseryKey(p.nursery_name)))
+            .map((p) => p.nursery_name)
+            .filter(Boolean)
+        ),
+      ];
+      if (!nurseries.length) {
+        if (live.current) setSum({ totals: {}, done: {}, month, scheduled: false });
+        return;
+      }
+      // The office files under BNN / UNN1; shared_plots says "UNN 1". Ask
+      // for both spellings and keep whichever comes back.
+      const keys = [...new Set(nurseries.flatMap((n) => [n, nurseryKey(n)]))];
+      /* The plan, and what the week's work takes out of the store. The
+         capacity read is allowed to fail on its own: a card that shows the
+         counts is worth having even where the figures cannot be worked
+         out, and they are the optional half of it. */
+      const [schedule, cap] = await Promise.all([
+        loadSchedules(keys, month),
+        loadCapacity().catch(() => null),
+      ]);
+      const all = withQueued(records, queued);
+      const capacityOf = cap ? makeCapacity(cap) : null;
+      const coverageOf = cap ? makeCoverage(cap.chemicals, cap.preset) : null;
+
+      // Kept week by week rather than summed. The board shows one week at
+      // a time and you step between them, so a month-wide total would have
+      // to be un-summed again to answer "what is due now".
+      const byWeek = {};
+      WEEKS.forEach((w) => {
+        const tasks = mergeWeekTasks(schedule, w);
+        const totals = {};
+        const done = {};
+        WORK_TYPES.forEach((wt) => {
+          const list = tasks[wt.key] || [];
+          totals[wt.key] = list.length;
+          done[wt.key] = list.filter((x) =>
+            isJobDone(all, {
+              workTypeKey: wt.key, plot: x.plot, chemical: x.chemical, week: w, month,
+            })
+          ).length;
+        });
+        byWeek[w] = { totals, done };
+        /* How much chemical, fertiliser and sticker this week comes to —
+           the same arithmetic the office prints under each work and the
+           module's own board shows under each job. See usage.js. */
+        if (capacityOf) {
+          byWeek[w].usage = weekUsage(schedule, w, { capacityOf, coverageOf });
+        }
+      });
+
+      const next = { byWeek, month, scheduled: schedule.length > 0 };
+      if (!live.current) return;
+      setSum(next);
+      setFailed(false);
+      cacheSet(CACHE_KEY, next);
+    } catch (e) {
+      // Offline, or the tables are not set up on this project yet. Whatever
+      // was cached stays on screen; a portal that cannot reach the office
+      // must still show the modules below.
+      if (live.current) setFailed(true);
+    }
+  };
 
   useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const [{ plots, records }, queued] = await Promise.all([
-          loadMaintenanceData(),
-          pendingRecords().catch(() => []),
-        ]);
-        const nurseries = [
-          ...new Set(
-            plots
-              /* Through nurseryKey, like every other nursery comparison in
-                 this repository: the tick list on the User Access screen is
-                 typed by hand and says "UNN1" where shared_plots says
-                 "UNN 1". Compared as spelt, a person ticked for a nursery
-                 is shown none of it. It cannot widen access — two names with
-                 different letters or digits give different keys. */
-              .filter((p) => allowed === null
-                || allowed.some((a) => nurseryKey(a) === nurseryKey(p.nursery_name)))
-              .map((p) => p.nursery_name)
-              .filter(Boolean)
-          ),
-        ];
-        if (!nurseries.length) {
-          if (live) setSum({ totals: {}, done: {}, month, scheduled: false });
-          return;
-        }
-        // The office files under BNN / UNN1; shared_plots says "UNN 1". Ask
-        // for both spellings and keep whichever comes back.
-        const keys = [...new Set(nurseries.flatMap((n) => [n, nurseryKey(n)]))];
-        /* The plan, and what the week's work takes out of the store. The
-           capacity read is allowed to fail on its own: a card that shows the
-           counts is worth having even where the figures cannot be worked
-           out, and they are the optional half of it. */
-        const [schedule, cap] = await Promise.all([
-          loadSchedules(keys, month),
-          loadCapacity().catch(() => null),
-        ]);
-        const all = withQueued(records, queued);
-        const capacityOf = cap ? makeCapacity(cap) : null;
-        const coverageOf = cap ? makeCoverage(cap.chemicals, cap.preset) : null;
-
-        // Kept week by week rather than summed. The board shows one week at
-        // a time and you step between them, so a month-wide total would have
-        // to be un-summed again to answer "what is due now".
-        const byWeek = {};
-        WEEKS.forEach((w) => {
-          const tasks = mergeWeekTasks(schedule, w);
-          const totals = {};
-          const done = {};
-          WORK_TYPES.forEach((wt) => {
-            const list = tasks[wt.key] || [];
-            totals[wt.key] = list.length;
-            done[wt.key] = list.filter((x) =>
-              isJobDone(all, {
-                workTypeKey: wt.key, plot: x.plot, chemical: x.chemical, week: w, month,
-              })
-            ).length;
-          });
-          byWeek[w] = { totals, done };
-          /* How much chemical, fertiliser and sticker this week comes to —
-             the same arithmetic the office prints under each work and the
-             module's own board shows under each job. See usage.js. */
-          if (capacityOf) {
-            byWeek[w].usage = weekUsage(schedule, w, { capacityOf, coverageOf });
-          }
-        });
-
-        const next = { byWeek, month, scheduled: schedule.length > 0 };
-        if (!live) return;
-        setSum(next);
-        setFailed(false);
-        cacheSet(CACHE_KEY, next);
-      } catch (e) {
-        // Offline, or the tables are not set up on this project yet. Whatever
-        // was cached stays on screen; a portal that cannot reach the office
-        // must still show the modules below.
-        if (live) setFailed(true);
-      }
-    })();
-    return () => { live = false; };
+    const live = { current: true };
+    loadBoard(live);
+    return () => { live.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowedSig, month]);
 
   // A month the office has not planned yet, or one with nothing due, has no
@@ -264,8 +286,21 @@ export default function MaintenanceBoard() {
             const pct = total ? Math.round((doneN / total) * 100) : 0;
             const clear = total > 0 && doneN >= total;
             const tint = tintOf(wt.key);
+            /* Tapping a dial pops the record form straight open, for this
+               job and whichever week is on screen — the same thing tapping
+               it does from inside the module itself (WeekBoard's own
+               onOpen), just reached one tap sooner. A login without record
+               permission gets the plain, unclickable dial it always had. */
+            const Dial = mayRecord ? 'button' : 'div';
             return (
-              <div key={wt.key} className={`flex flex-col items-center ${total ? '' : 'opacity-50'}`}>
+              <Dial
+                key={wt.key}
+                type={mayRecord ? 'button' : undefined}
+                onClick={mayRecord ? () => setQuickEntry({ workTypeKey: wt.key }) : undefined}
+                className={`flex flex-col items-center ${total ? '' : 'opacity-50'} ${
+                  mayRecord ? 'cursor-pointer' : ''
+                }`}
+              >
                 <ProgressDial
                   pct={pct}
                   ringCls={clear ? 'text-emerald-500' : total ? tint.ring : 'text-slate-200'}
@@ -296,7 +331,7 @@ export default function MaintenanceBoard() {
                     t('mtb.none')
                   )}
                 </span>
-              </div>
+              </Dial>
             );
           })}
         </div>
@@ -324,6 +359,14 @@ export default function MaintenanceBoard() {
           t={t} lang={lang} month={month} week={week}
           usage={wk.usage} totals={wk.totals}
           onClose={() => setShowInfo(false)}
+        />
+      )}
+
+      {quickEntry && (
+        <MaintenanceQuickEntry
+          week={week}
+          workTypeKey={quickEntry.workTypeKey}
+          onClose={() => { setQuickEntry(null); loadBoard(); }}
         />
       )}
     </div>

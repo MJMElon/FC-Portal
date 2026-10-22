@@ -119,6 +119,18 @@ export default function MaintenanceModule({
   plotFilter = null,
   subtitle = 'FC Portal',
   back = '/dashboard',
+  /* { week, workTypeKey } — opens straight to that job's record form,
+     skipping the week board. The dashboard's own maintenance dials use
+     this: tapping one pops the form directly rather than landing on the
+     whole module first. The task list it needs (tasksByWeek) is still
+     built the ordinary way below and fills in once the schedule has
+     loaded, same as it would after a tap from WeekBoard itself. */
+  initialSheet = null,
+  /* Closes the WHOLE thing when the sheet initialSheet opened is
+     dismissed, instead of revealing the module page behind it — a
+     dashboard dial only ever asked for the one form, not a landing on
+     this page. Ignored without initialSheet. */
+  onQuickClose = null,
 }) {
   const auth = useAuth();
   const staffName   = identity ? identity.name        : auth.staffName;
@@ -143,7 +155,9 @@ export default function MaintenanceModule({
      worked out from. Null until read, and null forever on a source that
      cannot read it, which the board takes as "say nothing". */
   const [cap, setCap] = useState(null);
-  const [sheet, setSheet] = useState(null);         // { week, workType }
+  const [sheet, setSheet] = useState(() => (initialSheet
+    ? { week: initialSheet.week, workType: workTypeByKey(initialSheet.workTypeKey) }
+    : null));                                       // { week, workType }
   const [history, setHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [workers, setWorkers] = useState([]);   // the roster a conductor may credit work to
@@ -868,7 +882,7 @@ export default function MaintenanceModule({
               workTypeKey: sheet.workType.key, plot: task.plot,
               chemical: task.chemical, week: sheet.week, month })}
             onSave={handleSheetSave}
-            onClose={() => setSheet(null)}
+            onClose={() => { setSheet(null); if (onQuickClose) onQuickClose(); }}
           />
         )}
 
