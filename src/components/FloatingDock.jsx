@@ -408,18 +408,23 @@ export default function FloatingDock() {
         )}
       </button>
 
+      {/* All four present the same way now — the Nelos pop-out, anchored
+          to wherever the button sits, each at its own size. */}
       {open === 'palms' && (
-        <PalmsWindow onClose={() => { setOpen(null); refreshPalms(); }} onDayChange={refreshPalms} />
+        <PalmsWindow onClose={() => { setOpen(null); refreshPalms(); }} onDayChange={refreshPalms}
+          anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
       )}
       {open === 'nelos' && (
         <NelosWindow onClose={() => { setOpen(null); refreshCases(); }} onCount={setCases}
           anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
       )}
       {open === 'verify' && (
-        <VerifyWindow onClose={() => { setOpen(null); refreshVerify(); }} onCount={setVerifyCount} />
+        <VerifyWindow onClose={() => { setOpen(null); refreshVerify(); }} onCount={setVerifyCount}
+          anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
       )}
       {open === 'culling' && (
-        <CullingWindow onClose={() => setOpen(null)} />
+        <CullingWindow onClose={() => setOpen(null)}
+          anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
       )}
     </>
   );

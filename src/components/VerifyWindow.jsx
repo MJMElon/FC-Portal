@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import anchoredFrame from './anchoredFrame.js';
 import { useLang } from '../context/LanguageContext.jsx';
 import Icon from './Icon.jsx';
 
@@ -52,7 +53,7 @@ function Spinner({ label }) {
   );
 }
 
-export default function VerifyWindow({ onClose, onCount }) {
+export default function VerifyWindow({ onClose, onCount, anchor }) {
   const { t } = useLang();
   const [wide, setWide] = useState(isWide);
   const [pos, setPos] = useState(() => (isWide() ? readPos() || defaultPos() : null));
@@ -109,19 +110,32 @@ export default function VerifyWindow({ onClose, onCount }) {
         width: Math.min(W, window.innerWidth - EDGE * 2),
         maxHeight: '84vh',
       }
-    : { position: 'fixed', left: 0, right: 0, bottom: 0, maxHeight: '92vh' };
+    /* A phone gets the Nelos pop-out shape — a floating card beside the
+       dock icon, not a sheet glued to the bottom edge — at THIS window's
+       own width (the office asked for the presentation to match and the
+       size to stay). anchoredFrame clamps the width to the screen less
+       its margins and sizes the height to the room on the icon's side;
+       the 92vh cap the sheet had stays as the ceiling. */
+    : (() => {
+        const f = anchoredFrame(anchor, { w: window.innerWidth, minH: 260 });
+        f.maxHeight = Math.min(f.maxHeight, window.innerHeight * 0.92);
+        return f;
+      })();
 
   return (
     <>
       <div
         onClick={onClose}
-        className={wide ? 'fixed inset-0 z-[55] bg-slate-900/20' : 'fixed inset-0 z-[55] bg-slate-900/55 backdrop-blur-[2px]'}
+        /* No dark or blurred backdrop — same rule as NelosWindow: a pop-out
+            beside the icon reads as attached to it, not as a dialog that has
+            taken over the screen. This catcher only closes on a tap away. */
+        className="fixed inset-0 z-[55]"
       />
 
       <div
         style={{ ...frame, zIndex: 56, transition: dragging ? 'none' : 'box-shadow .15s' }}
         className={`bg-white shadow-[0_24px_70px_rgba(0,0,0,.35)] flex flex-col overflow-hidden ${
-          wide ? 'rounded-2xl border border-slate-300' : 'rounded-t-3xl'
+          'rounded-2xl border border-slate-300'
         }`}
         role="dialog"
         aria-modal="true"
@@ -135,9 +149,6 @@ export default function VerifyWindow({ onClose, onCount }) {
           style={{ touchAction: 'none', cursor: wide ? (dragging ? 'grabbing' : 'grab') : 'default' }}
           className="relative shrink-0 bg-amber-50 border-b border-slate-200 px-3 sm:px-4 py-2.5 flex items-center gap-1.5 select-none"
         >
-          {!wide && (
-            <span className="absolute left-1/2 -translate-x-1/2 top-1.5 w-10 h-1 rounded-full bg-slate-300" aria-hidden="true" />
-          )}
           <Icon name="hourglass" className="w-3.5 h-3.5 shrink-0 text-amber-700" />
           <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-amber-800 truncate">
             {t('vrf.title')}
