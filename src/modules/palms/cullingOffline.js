@@ -1,5 +1,6 @@
 import { PERMANENT, flushOutbox, isOnline, looksOffline, queueJob } from '../../lib/outbox.js';
 import { raiseCase } from '../../lib/nelos.js';
+import { saveInangSelection } from './cullingInang.js';
 
 /**
  * The Culling Calculator without a signal.
@@ -21,7 +22,13 @@ import { raiseCase } from '../../lib/nelos.js';
 
 /* Bumped when the shape of a block changes, so an old device serving an old
    cache to new code cannot show figures the new code would read differently.
-   A missed cache costs one read; a misread one costs a wrong decision. */
+   A missed cache costs one read; a misread one costs a wrong decision.
+
+   NOT bumped for the selection count added to each block: a cache written
+   before it carries no `attempts`, which the rule reads as "could not tell"
+   and answers with the two buttons this screen has always had. Bumping it
+   would take the blocks off every phone that is out of signal right now,
+   which is the one place they are needed, in exchange for nothing. */
 const CACHE_KEY = 'mjm_culling_blocks_v1';
 
 /** Keep what was just read, for the next time there is nothing to read. */
@@ -52,9 +59,10 @@ export function cachedBlocks() {
   }
 }
 
-/* One kind of queued job, named so an older build that does not know it
-   leaves it alone rather than dropping it. */
+/* Two kinds of queued job, each named so an older build that does not know
+   it leaves it alone rather than dropping it. */
 const CULL_JOB = 'culling_case';
+const INANG_JOB = 'culling_inang';
 
 /* ══════════════════════════════════════════════════════════════════════
    THE CASES THE SERVER WOULD NOT TAKE
@@ -167,6 +175,41 @@ export async function submitCase(args) {
 }
 
 /**
+ * Write down the selection, signal or no signal.
+ *
+ * The same shape as the case above, and it goes up beside it: a round nobody
+ * recorded is a round that never happened so far as the next Field Conductor
+ * is concerned, and the whole purpose of the row is to be there when
+ * somebody else counts the same block next month.
+ *
+ * It is a row, not an increment, so sending it late is safe: whatever round
+ * the phone worked out is the round it writes, and a block whose rows crossed
+ * keeps the higher one — see loadInangSelections.
+ */
+export async function submitSelection(sel) {
+  if (!isOnline()) {
+    await queueJob(INANG_JOB, sel);
+    return { queued: true, error: null };
+  }
+  try {
+    await saveInangSelection(sel);
+    return { queued: false, error: null };
+  } catch (e) {
+    if (looksOffline(e)) {
+      await queueJob(INANG_JOB, sel);
+      return { queued: true, error: null };
+    }
+    /* Refused. NOT kept in the refusals strip and NOT shown: the case is
+       what the Field Conductor asked for and it has gone, and a red line
+       about a bookkeeping row he never asked for would read as the request
+       having failed. The cost of losing it is one round uncounted, which
+       shows up as the auditor being asked again rather than HQ. */
+    console.warn('[culling] could not record the selection:', (e && e.message) || e);
+    return { queued: false, error: e };
+  }
+}
+
+/**
  * Send whatever the queue is holding.
  *
  * Dedupe is left on for a queued case: the flush may be the second attempt at
@@ -175,6 +218,17 @@ export async function submitCase(args) {
  */
 export function flushCulling() {
   return flushOutbox({
+    [INANG_JOB]: async (payload) => {
+      try {
+        await saveInangSelection(payload);
+      } catch (e) {
+        if (looksOffline(e)) throw e;
+        // Refused for a reason a retry cannot fix. Dropped rather than left
+        // blocking the cases behind it, which are what somebody is waiting on.
+        console.warn('[culling] selection refused:', (e && e.message) || e);
+        throw new Error(PERMANENT);
+      }
+    },
     [CULL_JOB]: async (payload) => {
       const res = await raiseCase({ ...payload, dedupe: true });
       if (res && res.error) {
