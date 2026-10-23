@@ -15,6 +15,8 @@ import {
   withQueued,
   workTypeLabel,
 } from '../modules/maintenance/data.js';
+import { canMaintFn } from '../modules/maintenance/functions.js';
+import MaintenanceQuickEntry from './MaintenanceQuickEntry.jsx';
 import {
   WEEKS,
   isDone as isJobDone,
@@ -27,6 +29,7 @@ import { tintOf } from '../modules/maintenance/tints.js';
 import { makeCapacity, makeCoverage, weekUsage } from '../modules/maintenance/usage.js';
 import ProgressDial from '../modules/maintenance/ProgressDial.jsx';
 import WorkIcon from '../modules/maintenance/WorkIcons.jsx';
+import Icon from './Icon.jsx';
 
 /* v3: the cached shape gained usageByWeek. An older cache would simply have
    no figures, which is survivable — but a new key means the first load after
@@ -34,7 +37,9 @@ import WorkIcon from '../modules/maintenance/WorkIcons.jsx';
 const CACHE_KEY = 'maintenance_board_month_v3';
 
 /** One week-stepper arrow. Greys out at the ends of the month instead of
-    disappearing, so the control does not change shape as you move. */
+    disappearing, so the control does not change shape as you move. Plain
+    triple-chevron text, no circle and no border — the office asked for the
+    round button gone and the arrow itself smaller. */
 function NavArrow({ dir, disabled, onClick, label }) {
   return (
     <button
@@ -42,16 +47,13 @@ function NavArrow({ dir, disabled, onClick, label }) {
       disabled={disabled}
       title={label}
       aria-label={label}
-      className={`grid place-items-center w-7 h-7 rounded-full border shrink-0 transition-colors ${
+      className={`shrink-0 px-1 py-0.5 text-[11px] font-black tracking-tighter leading-none transition-colors ${
         disabled
-          ? 'border-teal-100 text-teal-200 cursor-default'
-          : 'border-teal-300 text-teal-700 hover:bg-teal-100 cursor-pointer'
+          ? 'text-teal-200 cursor-default'
+          : 'text-teal-600 hover:text-teal-800 cursor-pointer'
       }`}
     >
-      <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="3"
-        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        {dir === 'prev' ? <path d="m15 5-7 7 7 7" /> : <path d="m9 5 7 7-7 7" />}
-      </svg>
+      {dir === 'prev' ? '<<<' : '>>>'}
     </button>
   );
 }
@@ -87,7 +89,6 @@ export default function MaintenanceBoard() {
   const fresh = cached && cached.value && cached.value.month === month ? cached : null;
   // { totals: {key:n}, done: {key:n}, month, scheduled }
   const [sum, setSum] = useState(fresh?.value || null);
-  const [updatedAt, setUpdatedAt] = useState(fresh?.at || null);
   const [failed, setFailed] = useState(false);
   // A restricted user must be summed over their own nurseries only, exactly
   // as the module scopes them — otherwise the front page quotes a total for
@@ -95,97 +96,119 @@ export default function MaintenanceBoard() {
   // Opens on the week you are actually in; stepping is per-visit, not saved.
   const [week, setWeek] = useState(() => weekOfDate(todayStr()) || 1);
   const [showInfo, setShowInfo] = useState(false);
+  /* { workTypeKey } — which dial popped the record form open, if any. The
+     week it opens on is this card's own `week` above: whichever one is on
+     screen when the dial is tapped. */
+  const [quickEntry, setQuickEntry] = useState(null);
 
   const allowed = allowedNurseries(permissions, 'maintenance');
   const allowedSig = allowed === null ? '*' : [...allowed].sort().join('|');
+  /* Same switch the module's own "+ New Record" button is gated on — a
+     dial that cannot be tapped through to anything is worse than one that
+     is plainly not a button, so the dials only become clickable here. */
+  const mayRecord = canMaintFn(permissions, 'record');
+
+  /* Pulled out into its own function so closing the quick-entry popup (see
+     quickEntry/MaintenanceQuickEntry further down) can ask for the same
+     read again — a record just saved there should not leave this card's
+     own dials reading what they did before it was recorded.
+
+     `live` is the effect's own mount-guard object, `{ current: true }`
+     until cleanup flips it — shared this way rather than a plain closed-
+     over boolean so a manual call (no cleanup to guard with) can simply
+     leave it out and default to "always live". */
+  const loadBoard = async (live = { current: true }) => {
+    try {
+      const [{ plots, records }, queued] = await Promise.all([
+        loadMaintenanceData(),
+        pendingRecords().catch(() => []),
+      ]);
+      const nurseries = [
+        ...new Set(
+          plots
+            /* Through nurseryKey, like every other nursery comparison in
+               this repository: the tick list on the User Access screen is
+               typed by hand and says "UNN1" where shared_plots says
+               "UNN 1". Compared as spelt, a person ticked for a nursery
+               is shown none of it. It cannot widen access — two names with
+               different letters or digits give different keys. */
+            .filter((p) => allowed === null
+              || allowed.some((a) => nurseryKey(a) === nurseryKey(p.nursery_name)))
+            .map((p) => p.nursery_name)
+            .filter(Boolean)
+        ),
+      ];
+      if (!nurseries.length) {
+        if (live.current) setSum({ totals: {}, done: {}, month, scheduled: false });
+        return;
+      }
+      // The office files under BNN / UNN1; shared_plots says "UNN 1". Ask
+      // for both spellings and keep whichever comes back.
+      const keys = [...new Set(nurseries.flatMap((n) => [n, nurseryKey(n)]))];
+      /* The plan, and what the week's work takes out of the store. The
+         capacity read is allowed to fail on its own: a card that shows the
+         counts is worth having even where the figures cannot be worked
+         out, and they are the optional half of it. */
+      const [schedule, cap] = await Promise.all([
+        loadSchedules(keys, month),
+        loadCapacity().catch(() => null),
+      ]);
+      const all = withQueued(records, queued);
+      const capacityOf = cap ? makeCapacity(cap) : null;
+      const coverageOf = cap ? makeCoverage(cap.chemicals, cap.preset) : null;
+
+      // Kept week by week rather than summed. The board shows one week at
+      // a time and you step between them, so a month-wide total would have
+      // to be un-summed again to answer "what is due now".
+      const byWeek = {};
+      WEEKS.forEach((w) => {
+        const tasks = mergeWeekTasks(schedule, w);
+        const totals = {};
+        const done = {};
+        WORK_TYPES.forEach((wt) => {
+          const list = tasks[wt.key] || [];
+          totals[wt.key] = list.length;
+          done[wt.key] = list.filter((x) =>
+            isJobDone(all, {
+              workTypeKey: wt.key, plot: x.plot, chemical: x.chemical, week: w, month,
+            })
+          ).length;
+        });
+        byWeek[w] = { totals, done };
+        /* How much chemical, fertiliser and sticker this week comes to —
+           the same arithmetic the office prints under each work and the
+           module's own board shows under each job. See usage.js. */
+        if (capacityOf) {
+          byWeek[w].usage = weekUsage(schedule, w, { capacityOf, coverageOf });
+        }
+      });
+
+      const next = { byWeek, month, scheduled: schedule.length > 0 };
+      if (!live.current) return;
+      setSum(next);
+      setFailed(false);
+      cacheSet(CACHE_KEY, next);
+    } catch (e) {
+      // Offline, or the tables are not set up on this project yet. Whatever
+      // was cached stays on screen; a portal that cannot reach the office
+      // must still show the modules below.
+      if (live.current) setFailed(true);
+    }
+  };
 
   useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const [{ plots, records }, queued] = await Promise.all([
-          loadMaintenanceData(),
-          pendingRecords().catch(() => []),
-        ]);
-        const nurseries = [
-          ...new Set(
-            plots
-              /* Through nurseryKey, like every other nursery comparison in
-                 this repository: the tick list on the User Access screen is
-                 typed by hand and says "UNN1" where shared_plots says
-                 "UNN 1". Compared as spelt, a person ticked for a nursery
-                 is shown none of it. It cannot widen access — two names with
-                 different letters or digits give different keys. */
-              .filter((p) => allowed === null
-                || allowed.some((a) => nurseryKey(a) === nurseryKey(p.nursery_name)))
-              .map((p) => p.nursery_name)
-              .filter(Boolean)
-          ),
-        ];
-        if (!nurseries.length) {
-          if (live) setSum({ totals: {}, done: {}, month, scheduled: false });
-          return;
-        }
-        // The office files under BNN / UNN1; shared_plots says "UNN 1". Ask
-        // for both spellings and keep whichever comes back.
-        const keys = [...new Set(nurseries.flatMap((n) => [n, nurseryKey(n)]))];
-        /* The plan, and what the week's work takes out of the store. The
-           capacity read is allowed to fail on its own: a card that shows the
-           counts is worth having even where the figures cannot be worked
-           out, and they are the optional half of it. */
-        const [schedule, cap] = await Promise.all([
-          loadSchedules(keys, month),
-          loadCapacity().catch(() => null),
-        ]);
-        const all = withQueued(records, queued);
-        const capacityOf = cap ? makeCapacity(cap) : null;
-        const coverageOf = cap ? makeCoverage(cap.chemicals, cap.preset) : null;
-
-        // Kept week by week rather than summed. The board shows one week at
-        // a time and you step between them, so a month-wide total would have
-        // to be un-summed again to answer "what is due now".
-        const byWeek = {};
-        WEEKS.forEach((w) => {
-          const tasks = mergeWeekTasks(schedule, w);
-          const totals = {};
-          const done = {};
-          WORK_TYPES.forEach((wt) => {
-            const list = tasks[wt.key] || [];
-            totals[wt.key] = list.length;
-            done[wt.key] = list.filter((x) =>
-              isJobDone(all, {
-                workTypeKey: wt.key, plot: x.plot, chemical: x.chemical, week: w, month,
-              })
-            ).length;
-          });
-          byWeek[w] = { totals, done };
-          /* How much chemical, fertiliser and sticker this week comes to —
-             the same arithmetic the office prints under each work and the
-             module's own board shows under each job. See usage.js. */
-          if (capacityOf) {
-            byWeek[w].usage = weekUsage(schedule, w, { capacityOf, coverageOf });
-          }
-        });
-
-        const next = { byWeek, month, scheduled: schedule.length > 0 };
-        if (!live) return;
-        setSum(next);
-        setUpdatedAt(Date.now());
-        setFailed(false);
-        cacheSet(CACHE_KEY, next);
-      } catch (e) {
-        // Offline, or the tables are not set up on this project yet. Whatever
-        // was cached stays on screen; a portal that cannot reach the office
-        // must still show the modules below.
-        if (live) setFailed(true);
-      }
-    })();
-    return () => { live = false; };
+    const live = { current: true };
+    loadBoard(live);
+    return () => { live.current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowedSig, month]);
 
-  // A month the office has not planned yet, or one with nothing due, has
-  // nothing to report — and an empty widget is worse than no widget. Keep it
-  // out of the way until there is a number to show.
+  // A month the office has not planned yet, or one with nothing due, has no
+  // dials to draw. The card itself stays up regardless — it carries the one
+  // "See All" door through to the module now that the module has no tile of
+  // its own on the dashboard, and a card that vanished with nothing due
+  // would take that door away exactly when there is nothing on screen to
+  // explain where it went.
   const anyWork = useMemo(
     () =>
       !!sum &&
@@ -194,131 +217,156 @@ export default function MaintenanceBoard() {
       ),
     [sum]
   );
-  if (sum && !anyWork) return null;
 
   const thisWeek = weekOfDate(todayStr());
   const wk = (sum && sum.byWeek && sum.byWeek[week]) || { totals: {}, done: {} };
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4 shadow-[0_4px_16px_rgba(0,0,0,.06)]">
-      <div className="px-4 py-2.5 border-b border-slate-200 bg-teal-50">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate">
-            🛠️ {t('mtb.title')}
-          </span>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[10px] font-black text-teal-700">{month}</span>
-            {/* What the week takes out of the store. It used to open a box
-                that said "no programme listed yet" whatever the month held —
-                a button with one answer. */}
-            <button
-              onClick={() => setShowInfo(true)}
-              title={t('mtb.maxUse')}
-              aria-label={t('mtb.maxUse')}
-              className="grid place-items-center w-6 h-6 rounded-full border border-teal-300 text-teal-700 text-[11px] font-black italic hover:bg-teal-100 transition-colors cursor-pointer shrink-0"
-            >
-              i
-            </button>
-          </div>
-        </div>
+      {/* Same strip as Today's Collection — bg-emerald-50, the same
+          px-4 py-2.5 border-b — so the two cards read as one family rather
+          than one tinted and one plain. Its own border-b is the line
+          between the title and the week stepper below; the stepper gets a
+          second one of its own, separating it from the dials in turn. */}
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-200 bg-emerald-50">
+        <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate flex items-center gap-1.5">
+          <Icon name="tool" className="w-3.5 h-3.5 shrink-0" /> {t('mtb.title')}
+        </span>
+        {/* The month badge used to sit here on its own, just a label. The
+            card's one door into the module belongs on its own header —
+            the ordinary place a "See All" sits on a summary card — so it
+            takes the month's place instead. The ⓘ that stood beside it
+            moves down to the foot of the card; see there for why. */}
+        <Link to="/maintenance"
+          className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-black text-teal-700 uppercase tracking-widest hover:text-teal-900 no-underline">
+          {t('mtb.footer')} <span aria-hidden="true">›</span>
+        </Link>
+      </div>
 
-        {/* Which week. The arrows stop at the ends rather than wrapping —
-            week 4 rolling round to week 1 reads as the month having changed. */}
-        <div className="flex items-center justify-between gap-2 mt-2">
-          <NavArrow
-            dir="prev"
-            disabled={week <= WEEKS[0]}
-            onClick={() => setWeek((w) => Math.max(WEEKS[0], w - 1))}
-            label={t('mtb.prevWeek')}
-          />
-          <div className="text-center leading-tight min-w-0">
-            <div className="text-[12px] font-black text-teal-800 uppercase tracking-wide">
-              {t('mt.weekN', { n: week })}
-              {week === thisWeek && <span className="text-teal-600"> · {t('mt.thisWeek')}</span>}
-            </div>
-            <div className="text-[10px] font-bold text-teal-600">{weekDates(week, month)}</div>
+      {/* Which week. The arrows stop at the ends rather than wrapping —
+          week 4 rolling round to week 1 reads as the month having changed. */}
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-200">
+        <NavArrow
+          dir="prev"
+          disabled={week <= WEEKS[0]}
+          onClick={() => setWeek((w) => Math.max(WEEKS[0], w - 1))}
+          label={t('mtb.prevWeek')}
+        />
+        <div className="text-center leading-tight min-w-0">
+          <div className="text-[12px] font-black text-teal-800 uppercase tracking-wide">
+            {t('mt.weekN', { n: week })}
+            {week === thisWeek && <span className="text-teal-600"> · {t('mt.thisWeek')}</span>}
           </div>
-          <NavArrow
-            dir="next"
-            disabled={week >= WEEKS[WEEKS.length - 1]}
-            onClick={() => setWeek((w) => Math.min(WEEKS[WEEKS.length - 1], w + 1))}
-            label={t('mtb.nextWeek')}
-          />
+          <div className="text-[10px] font-bold text-teal-600">{weekDates(week, month)}</div>
         </div>
+        <NavArrow
+          dir="next"
+          disabled={week >= WEEKS[WEEKS.length - 1]}
+          onClick={() => setWeek((w) => Math.min(WEEKS[WEEKS.length - 1], w + 1))}
+          label={t('mtb.nextWeek')}
+        />
       </div>
 
       {!sum ? (
         <div className="px-4 py-5 text-center text-[11px] font-bold text-slate-400 uppercase tracking-widest">
           {failed ? t('mtb.unavailable') : t('common.loading')}
         </div>
+      ) : !anyWork ? (
+        <div className="px-4 py-5 text-center text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+          {t('mtb.noProgram')}
+        </div>
       ) : (
-        <>
-          {/* All four jobs on one row. Four dials fit a 360px phone at ~78px
-              a column, which keeps the ring readable and the whole board
-              shorter than the stack of bars it replaced. */}
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-3 p-3">
-            {WORK_TYPES.map((wt) => {
-              const total = wk.totals[wt.key] || 0;
-              const doneN = wk.done[wt.key] || 0;
-              const pct = total ? Math.round((doneN / total) * 100) : 0;
-              const clear = total > 0 && doneN >= total;
-              const tint = tintOf(wt.key);
-              return (
-                <div key={wt.key} className={`flex flex-col items-center ${total ? '' : 'opacity-50'}`}>
-                  <ProgressDial
-                    pct={pct}
-                    ringCls={clear ? 'text-emerald-500' : total ? tint.ring : 'text-slate-200'}
-                  >
-                    <WorkIcon
-                      workKey={wt.key}
-                      className={`w-[26px] h-[26px] sm:w-8 sm:h-8 ${total ? tint.fg : 'text-slate-300'}`}
-                    />
-                  </ProgressDial>
+        /* All four jobs on one row. Four dials fit a 360px phone at ~78px a
+           column, which keeps the ring readable and the whole board shorter
+           than the stack of bars it replaced. */
+        <div className="grid grid-cols-4 gap-1.5 sm:gap-3 p-3">
+          {WORK_TYPES.map((wt) => {
+            const total = wk.totals[wt.key] || 0;
+            const doneN = wk.done[wt.key] || 0;
+            const pct = total ? Math.round((doneN / total) * 100) : 0;
+            const clear = total > 0 && doneN >= total;
+            const tint = tintOf(wt.key);
+            /* Tapping a dial pops the record form straight open, for this
+               job and whichever week is on screen — the same thing tapping
+               it does from inside the module itself (WeekBoard's own
+               onOpen), just reached one tap sooner. A login without record
+               permission gets the plain, unclickable dial it always had. */
+            const Dial = mayRecord ? 'button' : 'div';
+            return (
+              <Dial
+                key={wt.key}
+                type={mayRecord ? 'button' : undefined}
+                onClick={mayRecord ? () => setQuickEntry({ workTypeKey: wt.key }) : undefined}
+                className={`flex flex-col items-center ${total ? '' : 'opacity-50'} ${
+                  mayRecord ? 'cursor-pointer' : ''
+                }`}
+              >
+                <ProgressDial
+                  pct={pct}
+                  ringCls={clear ? 'text-emerald-500' : total ? tint.ring : 'text-slate-200'}
+                >
+                  <WorkIcon
+                    workKey={wt.key}
+                    className={`w-[26px] h-[26px] sm:w-8 sm:h-8 ${total ? tint.fg : 'text-slate-300'}`}
+                  />
+                </ProgressDial>
 
-                  {/* Two lines reserved for the name so all four columns line
-                      their numbers up, and clamped there so the Malay names —
-                      "Penyemburan Racun Kulat & Serangga" — cannot push one
-                      column taller than the rest. */}
-                  <span className="mt-1.5 text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-slate-500 leading-[1.2] text-center line-clamp-2 min-h-[22px]">
-                    {workTypeLabel(wt, lang)}
-                  </span>
+                {/* Two lines reserved for the name so all four columns line
+                    their numbers up, and clamped there so the Malay names —
+                    "Penyemburan Racun Kulat & Serangga" — cannot push one
+                    column taller than the rest. */}
+                <span className="mt-1.5 text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-slate-500 leading-[1.2] text-center line-clamp-2 min-h-[22px]">
+                  {workTypeLabel(wt, lang)}
+                </span>
 
-                  <span className="text-[10px] sm:text-[11px] font-black tabular-nums leading-none text-slate-400">
-                    {total ? (
-                      <>
-                        <span className={clear ? 'text-emerald-600' : 'text-slate-700'}>
-                          {clear ? '✓' : doneN}
-                        </span>
-                        {!clear && `/${total}`}
-                      </>
-                    ) : (
-                      t('mtb.none')
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          <Link to="/maintenance"
-            className="px-4 py-1.5 border-t border-slate-100 text-[9px] font-bold text-slate-400 flex justify-between gap-3 no-underline hover:text-teal-700">
-            <span className="truncate">{t('mtb.footer')}</span>
-            <span className="shrink-0">
-              {failed
-                ? t('mtb.cached')
-                : updatedAt
-                ? t('board.updated', { time: new Date(updatedAt).toLocaleTimeString() })
-                : ''}
-            </span>
-          </Link>
-        </>
+                <span className="text-[10px] sm:text-[11px] font-black tabular-nums leading-none text-slate-400">
+                  {total ? (
+                    <>
+                      <span className={clear ? 'text-emerald-600' : 'text-slate-700'}>
+                        {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : doneN.toLocaleString()}
+                      </span>
+                      {!clear && `/${total.toLocaleString()}`}
+                    </>
+                  ) : (
+                    t('mtb.none')
+                  )}
+                </span>
+              </Dial>
+            );
+          })}
+        </div>
       )}
+
+      {/* The "Updated HH:MM" stamp used to read here. The ⓘ that opens what
+          the week takes out of the store moves down to take its place —
+          the header's top-right is the one door into the module now (the
+          See All link above), so the card's other button, the one that
+          opens something ON this card rather than leaving it, belongs at
+          the card's own foot instead. */}
+      <div className="px-4 py-2 border-t border-slate-100 flex items-center justify-end">
+        <button
+          onClick={() => setShowInfo(true)}
+          title={t('mtb.maxUse')}
+          aria-label={t('mtb.maxUse')}
+          className="grid place-items-center w-6 h-6 rounded-full border border-teal-200 text-teal-600 text-[11px] font-black italic hover:bg-teal-50 transition-colors cursor-pointer shrink-0"
+        >
+          i
+        </button>
+      </div>
 
       {showInfo && (
         <SchedulePopover
           t={t} lang={lang} month={month} week={week}
           usage={wk.usage} totals={wk.totals}
           onClose={() => setShowInfo(false)}
+        />
+      )}
+
+      {quickEntry && (
+        <MaintenanceQuickEntry
+          week={week}
+          workTypeKey={quickEntry.workTypeKey}
+          onClose={() => { setQuickEntry(null); loadBoard(); }}
         />
       )}
     </div>
@@ -360,9 +408,9 @@ function SchedulePopover({ t, lang, month, week, usage, totals, onClose }) {
           <button
             onClick={onClose}
             aria-label={t('common.cancel')}
-            className="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-500 text-xl leading-none cursor-pointer shrink-0"
+            className="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer shrink-0"
           >
-            ×
+            <Icon name="close" className="w-4 h-4" />
           </button>
         </div>
         <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3">
@@ -385,7 +433,7 @@ function SchedulePopover({ t, lang, month, week, usage, totals, onClose }) {
                       {workTypeLabel(wt, lang)}
                     </span>
                     <span className="ml-auto text-[10px] font-black tabular-nums text-slate-400 shrink-0">
-                      {t('mtb.plotsN', { n: due })}
+                      {t('mtb.plotsN', { n: due.toLocaleString() })}
                     </span>
                   </div>
                   <div className="divide-y divide-slate-100">

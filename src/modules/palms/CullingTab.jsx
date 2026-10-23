@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import CfSelect from '../../components/CfSelect.jsx';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtNum, fmtPct } from './cullingData.js';
-import { CULL_LIMIT, actionFor, caseBody } from './cullingActions.js';
+import { CULL_LIMIT, HQ_ACTION, actionForPlot, caseBody } from './cullingActions.js';
 // Every figure on this screen comes from here.
 import {
   blocksCachedAt, diagnose, figuresBroken, figuresFor, hasFigures, lastLoadWasCached,
@@ -12,6 +11,8 @@ import { agoText } from '../../lib/ago.js';
 import { listJobs } from '../../lib/outbox.js';
 import { openCasePlots } from '../../lib/nelos.js';
 import { clearRefused, refusedCases, retryRefused, submitCase } from './cullingOffline.js';
+import { clearInang, draftInang, loadInang, pruneInang, saveInang } from './cullingInang.js';
+import { cullingLines } from './cullingLines.js';
 
 /**
  * The Culling Calculator.
@@ -67,7 +68,6 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      ground, collected on their own timetables. */
   const [plotId, setPlotId] = useState(null);
   const [picking, setPicking] = useState(false);
-  const [terms, setTerms] = useState([]);      // the counts already entered
   const [typing, setTyping] = useState('');    // the one being keyed now
   const [busy, setBusy] = useState(false);
   /* { at } when the blocks on screen came off the device rather than the
@@ -119,6 +119,9 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
     try {
       const n = await closeCollectingStatus(plot);
       if (n > 0) {
+        /* Off the list by hand is still off the list, so its selection goes
+           with it — the same rule the load-time prune follows. */
+        clearInang(plot);
         setRows((prev) => prev.filter((r) => r.plot !== plot));
         if (plotId === plot) setPlotId(null);   // key IS the plot name
         flash(t('cull.removed', { plot }));
@@ -143,8 +146,20 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
       /* Where these figures came from, so the screen can say so. An empty
          list means one of two very different things and only the source
          knows which. */
-      setStale(lastLoadWasCached() ? { at: blocksCachedAt() } : null);
+      const cached = lastLoadWasCached();
+      setStale(cached ? { at: blocksCachedAt() } : null);
       refresh();
+      /* A PLOT THAT HAS LEFT THE LIST TAKES ITS SELECTION WITH IT. The plot
+         is here because a PALMS collecting status is open on it; once that
+         closes the plot has been collected, and last month's selection is a
+         figure waiting to be mistaken for a current one.
+
+         Never off a CACHED list. What a phone serves with no signal is
+         whatever it last saw, and deleting against it would wipe the
+         selections of every plot that has opened since. The list is the one
+         just read from the server, before this person's nursery filter —
+         the filter decides what they may SEE, not what exists. */
+      if (!cached) pruneInang((p || []).map((r) => r.plot));
     }, () => {});
     openCasePlots({ source: 'scan' }).then((s) => { if (live) setRaised(s); }, () => {});
     /* A plot that ought to be on this list and is not has been stopped by one
@@ -295,73 +310,233 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
   const plotRow = plotList.find((p) => p.key === plotId) || plotList[0] || null;
   useEffect(() => { if (!plotId && plotRow) setPlotId(plotRow.key); }, [plotRow, plotId]);
 
-  /* WHICH batch — always exactly one, never all of them together.
+  /* EVERY BATCH AT ONCE, which is the whole shape of this screen now.
 
-     The plot's batches were summed into one "All batches" figure, and that
-     figure could not be acted on: a plot is culled batch by batch, the ten
-     percent line is drawn per batch, and two batches averaged together hide
-     the one that is in trouble behind the one that is fine. So the choice is
-     always a single block, and the first is chosen for you.
+     It used to be one batch at a time, chosen beside the plot. That was
+     right about the arithmetic — the ten percent line is drawn per batch and
+     two batches averaged together hide the one in trouble behind the one
+     that is fine — and wrong about the job: a Field Conductor is sent to a
+     PLOT, and the decision taken there is about the plot. Asking him to step
+     through its batches one at a time to find out whether any of them is
+     over is asking him to hold the answer in his head.
 
-     Reset whenever the plot changes — a batch number means nothing on a
-     different plot. */
+     So the plot's batches are a table, each with its balance, its rate, what
+     has been selected off it and what that leaves — and the buttons act on
+     all of them together. The worst batch decides; see actionForPlot. */
   const batches = plotRow ? plotRow.blocks : [];
-  const [batchId, setBatchId] = useState(null);
-  const picked = batches.find((b) => b.batch === batchId) || batches[0] || null;
-  useEffect(() => { setBatchId(null); }, [plotId]);
+
+  /* Which batch the keypad is typing into, and what has been keyed against
+     each. Kept per BATCH, because a count belongs to the block it was walked
+     in: there is no single running total on this screen any more.
+
+     `termsBy` is the counts already entered, in the several goes they were
+     walked in; `typing` is the one being keyed now, and it belongs to the
+     active batch alone. */
+  const [active, setActive] = useState(null);
+  const [termsBy, setTermsBy] = useState(() => ({}));
+  /* WHAT IS ALREADY SAVED against this plot, and how many rounds it has been
+     through. Read from the database rather than from this phone, because the
+     second round is usually keyed by somebody else and often on a different
+     phone — see cullingInang.js. `rounds` is what the HQ button is decided
+     from; `savedBy` is what the table starts filled with, so a selection
+     made this morning is still on screen this afternoon. */
+  const [saved, setSaved] = useState({ byBatch: {}, rounds: 0 });
+  /* Which plot the rows above actually belong to. The draft save waits for
+     it: writing before the read has landed would put an empty selection
+     over one somebody made this morning. */
+  const [loadedPlot, setLoadedPlot] = useState(null);
+  /* A selection belongs to the plot it was made on, so changing plot drops
+     what is on screen and loads that plot's own. */
   useEffect(() => {
-    if (!batchId && picked) setBatchId(picked.batch);
-  }, [batchId, picked]);
-  /* A count belongs to the block it was walked in, so moving to another one
-     clears it rather than quietly re-attributing it. */
-  useEffect(() => { setTerms([]); setTyping(''); }, [plotId, batchId]);
+    setTyping(''); setActive(null);
+    setSaved({ byBatch: {}, rounds: 0 });
+    setTermsBy({});
+    setLoadedPlot(null);
+    setDraftFailed(false);
+    wrote.current = new Set();
+    if (!plotId) return;
+    let live = true;
+    loadInang(plotId).then((got) => {
+      if (!live) return;
+      setSaved(got);
+      /* The saved figure IS the starting selection. Anything else would
+         show a plot as untouched when a round has already been keyed
+         against it. */
+      const start = {};
+      Object.keys(got.byBatch).forEach((b) => {
+        const r = got.byBatch[b];
+        start[b] = r.terms && r.terms.length ? r.terms : (r.qty ? [r.qty] : []);
+      });
+      setTermsBy(start);
+      setLoadedPlot(plotId);
+    });
+    return () => { live = false; };
+  }, [plotId]);
 
-  /* The row the whole screen works from — one object, so the rate, the action
-     and the case cannot read different figures. It is one plot and one batch:
-     the block of ground somebody is standing in. */
-  const row = picked;
+  /* One line per batch, which is what the table draws, what the buttons are
+     decided from and what the case records — one list, so the three cannot
+     read different figures.
 
-  const known = hasFigures(row);
-  const broken = figuresBroken(row);
-  const inang = terms.reduce((a, b) => a + b, 0) + (typing === '' ? 0 : Number(typing));
-  /* Whether a count has been MADE, which is not the same as whether it came
-     to anything. A Field Conductor who walks the plot and finds no pokok
-     inang at all has done the work and has an answer — nought — and that
-     answer has to be enterable, show a rate, and be sendable. Judging by the
-     total instead treated "I looked and there are none" as "I have not
-     looked yet", and left him with a dead button on a plot he had just
-     walked. */
-  const counted = terms.length > 0 || typing !== '';
-  const rateNow = rateFor({ balance: row?.balance, transplant: row?.transplant, inang: 0 });
-  const rateAfter = rateFor({ balance: row?.balance, transplant: row?.transplant, inang });
-  const left = known ? row.balance - inang : 0;
-  /* When to offer the button.
-     Counting pokok inang is what brings a block DOWN to ten percent, so the
-     button waited for a count. But a block already at or under ten percent
-     before anybody counts has nothing to bring down — it is ready, and the
-     drone flight is what records it having got there. Making the Field
-     Conductor key a number he does not have, into a plot that already passes,
-     to reach a button that was always going to say the same thing, is asking
-     him to do the arithmetic the calculator just did.
+     EDITABLE is decided on the batch's OWN rate, before anything is selected
+     off it: a batch already under ten percent has nothing to bring down, and
+     a cell that invites a count there is a count nobody needed to walk. A
+     batch brought under the line by a selection stays editable, or there
+     would be no way to correct the figure that got it there. */
+  const lines = useMemo(() => cullingLines(batches, termsBy, active, typing),
+    [batches, termsBy, typing, active]);
 
-     So: already passing, offer it straight away. Over the line, it still
-     takes a count, because that is the only thing that can change the answer.
-     rateAfter equals rateNow while nothing has been counted, so one call
-     covers both. */
-  const action = known && (counted || rateNow <= CULL_LIMIT) ? actionFor(rateAfter) : null;
+  /* ── SAVED AS IT IS KEYED ──────────────────────────────────────────
+     A count walked in a plot and typed on a phone is work that has been
+     done, and it used to live nowhere until a button was pressed: a phone
+     that died, a screen closed, a plot changed, and the walk had to be
+     walked again.
 
+     Within the second of the last keystroke, not on it — a write per digit
+     is three writes to key 250, on the signal a nursery has. The timer is
+     cleared and restarted by each change, so a run of keys is one save.
+
+     It writes only the FIGURE. The round and the figure that round was sent
+     with belong to the buttons; a draft is not a round, and counting it as
+     one would light the HQ button over a number nobody has sent anywhere.
+
+     Nothing is written until the plot's own rows have been READ, or the
+     first save would race the load and write an empty selection over one
+     somebody made this morning. */
+  const [draftFailed, setDraftFailed] = useState(false);
+  /* WHICH BLOCKS THIS SESSION HAS ALREADY WRITTEN A ROW FOR.
+
+     The filter below exists so a block nobody has touched gets no row made
+     for it. A block CLEARED back to nought is the opposite of that and must
+     still be written, or the deletion never leaves the phone — and a block
+     keyed and then cleared again in one sitting has a row on the server
+     from its own draft, written eight hundred milliseconds after the first
+     digit, which `saved` was read before and knows nothing about. Without
+     this it drops out of the list the moment it reads nought and the figure
+     stands in the database for ever.
+
+     A ref and not state: it must not itself cause the draft to re-run. */
+  const wrote = useRef(new Set());
+  /* Every block worth a row: one with a figure, one the last round left a
+     row for, and one this session has written. */
+  const draftRows = () => lines.filter((l) => l.inang > 0 || saved.byBatch[l.batch]
+    || wrote.current.has(l.batch));
+  useEffect(() => {
+    if (!plotRow || !loadedPlot || loadedPlot !== plotRow.plot) return;
+    const rows = draftRows();
+    if (!rows.length) return;
+    const id = setTimeout(() => {
+      rows.forEach((r) => wrote.current.add(r.batch));
+      draftInang({ plot: plotRow.plot, nursery: plotRow.nursery, rows })
+        .then((okNow) => setDraftFailed(!okNow));
+    }, 800);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, plotRow && plotRow.plot, loadedPlot]);
+
+  /* SAVE, PRESSED ON PURPOSE.
+     The draft goes up by itself a second after the last keystroke, so this
+     changes nothing about what is recorded. What it changes is knowing: a
+     save that happens silently is one nobody can be sure of, and a Field
+     Conductor about to walk away from a plot wants to be told, not to
+     assume. So it writes the same draft, at once, and SAYS SO — which is
+     the whole of its job.
+
+     It is also the one way to make the save happen on a phone that has just
+     found a bar of signal, without keying another digit to trigger it. */
+  const [savingDraft, setSavingDraft] = useState(false);
+  async function saveDraftNow() {
+    if (!plotRow || savingDraft || busy) return;
+    commit();
+    const rows = draftRows();
+    if (!rows.length) { flash(t('cull.nothingToSave')); return; }
+    setSavingDraft(true);
+    rows.forEach((r) => wrote.current.add(r.batch));
+    const landed = await draftInang({ plot: plotRow.plot, nursery: plotRow.nursery, rows });
+    setSavingDraft(false);
+    setDraftFailed(!landed);
+    flash(landed ? t('cull.saved') : t('cull.draftFailed'));
+  }
+
+  /* What the plot adds up to, for the line at the top. The worst batch is
+     what the buttons answer to, so it is what the header shows. */
+  const worstNow   = lines.length ? Math.max(...lines.map((l) => (Number.isFinite(l.rate) ? l.rate : Infinity))) : NaN;
+  const anyBroken  = lines.some((l) => l.broken || !l.known);
+
+  /* THE TWO BUTTONS, and they are the same two rules as before.
+
+     Every final rate clear → the drone flight, which is what records the
+     plot having got there. Any one of them still over → the final pokok
+     inang selection, which sends somebody to the plot. A batch whose ledger
+     does not add up answers neither: actionForPlot returns null and both
+     buttons stay off, because "cannot say" must never read as "yes". */
+  const action = actionForPlot(lines.map((l) => l.finalRate));
+  const allClear  = !!action && action.key === 'drone';
+  const anyOver   = !!action && action.key !== 'drone';
+
+  /* HAS THIS ROUND BEEN KEYED? Not "is there a figure" — a figure loaded off
+     the last round is somebody else's answer, and the HQ button must not
+     light on the strength of it. It lights when a NEW selection has been
+     made and the plot is still over, which is the office's own sentence:
+     the second time someone keys the amount again and it is still over ten
+     percent. */
+  const keyedThisRound = useMemo(() => lines.some((l) => {
+    const was = saved.byBatch[l.batch];
+    /* Against what the figure was WHEN THE LAST ROUND WENT, never against
+       what is saved now — the draft is saved as it is keyed, so comparing
+       with that would answer no every time and the HQ button would never
+       light. */
+    const sent = was && was.sentQty != null ? was.sentQty : 0;
+    return l.inang !== sent;
+  }), [lines, saved]);
+
+  /* The three buttons, and each is a different question:
+       drone  — every block clear, whatever round it took to get there;
+       final  — still over, and nobody has been sent yet;
+       HQ     — still over after a round has already been sent and a second
+                selection keyed. A loop that has been round twice is not a
+                figure to re-count. */
+  const canDrone = allClear;
+  const canFinal = anyOver && saved.rounds < 1;
+  const canHq    = anyOver && saved.rounds >= 1 && keyedThisRound;
+
+  /* The keypad types into ONE batch — the one whose cell was pressed. With
+     none chosen it does nothing at all rather than guessing, because a count
+     landing on the wrong block of ground is worse than a key that did not
+     answer. */
+  const commit = () => {
+    if (typing === '' || !active) return;
+    const n = Number(typing);
+    setTermsBy((m) => ({ ...m, [active]: [...(m[active] || []), n] }));
+    setTyping('');
+  };
   const press = (k) => {
-    if (k === 'AC') { setTerms([]); setTyping(''); return; }
-    if (k === 'DEL') { setTyping((s) => s.slice(0, -1)); return; }
-    if (k === '+') {
-      if (typing !== '') { setTerms((ts) => [...ts, Number(typing)]); setTyping(''); }
+    if (!active) return;
+    if (k === 'AC') { setTermsBy((m) => ({ ...m, [active]: [] })); setTyping(''); return; }
+    /* A DIGIT WHILE ONE IS BEING KEYED, OTHERWISE THE LAST GO.
+       The delete key used to reach `typing` and nothing else, so the moment
+       a count settled — on =, on + , on the tap to another batch, or on
+       being loaded back off a save — it went dead. A figure already written
+       down could not be taken off at all: the one way back was to hold the
+       key, which clears the whole batch and which nothing on screen says.
+       So a saved 122 was a saved 122 for ever.
+
+       The GO is the unit, not the digit. "98 + 24" is a block walked in two
+       goes, so one press takes back one go and the cell drops to 98 — the
+       same thing the + key did, undone. Holding still clears the lot. */
+    if (k === 'DEL') {
+      if (typing !== '') { setTyping((s) => s.slice(0, -1)); return; }
+      setTermsBy((m) => {
+        const was = m[active] || [];
+        return was.length ? { ...m, [active]: was.slice(0, -1) } : m;
+      });
       return;
     }
+    if (k === '+') { commit(); return; }
     if (k === '=') {
       // Fold what is being typed into the list. The total is the same either
       // way — this just makes "10 + 15 + 16 =" settle into one figure the
       // way a calculator does.
-      if (typing !== '') { setTerms((ts) => [...ts, Number(typing)]); setTyping(''); }
+      commit();
       return;
     }
     /* Nought is a count, so it can be keyed and it stands on its own. It is
@@ -416,27 +591,57 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  async function raise() {
-    if (!action || !row || busy) return;
+  /* Raise one of the three. `act` is the rule — the two bands out of
+     cullingActions.js, or the HQ one beside them — so the button only has to
+     say which, and the category, the title and the routing travel with it.
+
+     THE SELECTION IS WRITTEN FIRST, and a refusal stops the case. The case
+     and the table are one record of one decision: a case raised over figures
+     the office cannot see is a case nobody can check, and a selection saved
+     under a case that never went is a round counted for nothing. */
+  async function raise(act) {
+    if (!act || !plotRow || busy) return;
+    /* Fold what is on the keypad into the batch it belongs to BEFORE
+       anything else. `lines` already counts it, so the figures saved and
+       the case raised are right either way — but the screen clears the
+       keypad at the end, and without this the figure on screen would drop
+       by whatever was being typed the moment the case went. */
+    commit();
     setBusy(true);
+    const attempt = (saved.rounds || 0) + 1;
+    try {
+      await saveInang({
+        plot: plotRow.plot, nursery: plotRow.nursery, rows: lines,
+        attempt, by: staffName, byId: userId,
+      });
+    } catch (e) {
+      setBusy(false);
+      flash(t('cull.saveFailed'));
+      return;
+    }
+    setSaved((prev) => ({
+      rounds: attempt,
+      byBatch: Object.fromEntries(lines.map((l) =>
+        [l.batch, { qty: l.inang, terms: l.terms, attempt, sentQty: l.inang }])),
+    }));
+    const action = act;
     // The case's own sentence, not the button's label: see caseTitle in
     // cullingActions.js for why it does not follow the language picker.
-    const title = action.caseTitle(row.plot);
+    const title = action.caseTitle(plotRow.plot);
     const { data: c, error, deduped, queued } = await submitCase({
       title,
+      /* EVERY batch of the plot, because the decision was taken over all of
+         them. A case naming one would be a record of a different decision,
+         and it would send the auditor to part of a plot. */
       description: caseBody({
-        t, plot: row.plot, nursery: row.nursery, balance: row.balance,
-        inang, rate: rateAfter, terms, by: staffName, date: todayStr(),
-        /* Which block of the plot was walked. Without it the auditor is sent
-           to a plot and left to work out which part of it was counted. It is
-           always one batch now, so there is one name to give. */
-        batch: row.batch,
+        t, plot: plotRow.plot, nursery: plotRow.nursery,
+        rows: lines, by: staffName, date: todayStr(),
       }),
       category: action.category,
       priority: action.priority,
       source: 'scan',            // the FC Portal's key in nelos_modules
-      nursery: row.nursery,
-      plot: row.plot,
+      nursery: plotRow.nursery,
+      plot: plotRow.plot,
       by: staffName,
       byId: userId,
       // Pressed twice, or the same plot revisited while the first case is
@@ -455,14 +660,15 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
     /* No signal: it is in the outbox and will go up on its own. The count is
        cleared either way, because it HAS been recorded — leaving it on screen
        would invite it being sent a second time when the signal returns. */
-    if (queued) {
-      flash(t('cull.queued'));
-      setTerms([]); setTyping('');
-      return;
-    }
+    /* THE SELECTION STAYS ON SCREEN. It used to be cleared, because it had
+       nowhere to live and leaving it invited the same count being sent
+       twice. It is in the table now, and clearing it would show the plot as
+       untouched the moment after somebody recorded a round against it —
+       which is exactly what the next person must not see. */
+    setTyping('');
+    if (queued) { flash(t('cull.queued')); return; }
     reloadRaised();
     flash(deduped ? t('cull.alreadyOpen', { n: c.case_no || '' }) : t('cull.raised', { n: c.case_no || '' }));
-    setTerms([]); setTyping('');
   }
 
   if (!plots.length) {
@@ -515,45 +721,27 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
           </div>
         )}
 
-        {/* Which plot, and where its rate stands before any of today's
-            counting. Apple puts the clock here; the plot is what this
-            calculator is always about, so it takes that place. */}
+        {/* Which plot. The batch picker beside it has gone: every batch of
+            the plot is on screen now, so choosing one was choosing which
+            part of the answer to look at. */}
         <div className="flex items-center justify-between px-2 pt-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              onClick={() => setPicking(true)}
-              className="flex items-center gap-1.5 text-white font-black text-[15px] cursor-pointer"
-            >
-              {plotRow ? plotRow.plot : '—'}
-              <span className="text-[10px] text-slate-500">▼</span>
-            </button>
-            {/* Which batch, beside the plot rather than folded into choosing
-                it. Only when there is more than one: a dropdown offering one
-                answer is furniture, so a single-batch plot just prints its
-                number. */}
-            {batches.length > 1 && (
-              <CfSelect
-                dark
-                value={batchId || ''}
-                onChange={(e) => setBatchId(e.target.value)}
-                ariaLabel={t('cull.batch')}
-              >
-                {batches.map((b) => (
-                  <option key={b.batch} value={b.batch}>{b.batch}</option>
-                ))}
-              </CfSelect>
-            )}
-            {batches.length === 1 && batches[0].batch && (
-              <span className="font-bold text-slate-400 text-[11px] tabular-nums">{batches[0].batch}</span>
-            )}
-          </div>
+          <button
+            onClick={() => setPicking(true)}
+            className="flex items-center gap-1.5 text-white font-black text-[15px] cursor-pointer"
+          >
+            {plotRow ? plotRow.plot : '—'}
+            <span className="text-[10px] text-slate-500">▼</span>
+          </button>
+          {/* WHERE THE PLOT STANDS, which is where its WORST batch stands.
+              An average would read as a healthy plot with one block in
+              trouble inside it. */}
           <div className="text-[13px] font-black tabular-nums">
             <span className="text-slate-500 mr-1">{t('cull.cullShort')} :</span>
             <span className={
-              broken ? 'text-amber-400'
-                : known && rateNow > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
+              anyBroken ? 'text-amber-400'
+                : worstNow > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
             }>
-              {known ? fmtPct(rateNow) : t('cull.checkStock')}
+              {anyBroken ? t('cull.checkStock') : fmtPct(worstNow)}
             </span>
           </div>
         </div>
@@ -562,10 +750,7 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
             Only ever drawn when there is one, so it costs nothing on the
             screen it is normally absent from — and when it is there it is the
             most important line on the calculator, because everything below it
-            is about a case somebody believes has been raised and has not.
-            Pressing it tries again: the usual cause is the database not yet
-            knowing about culling cases, which somebody in the office fixes,
-            and then the request is still wanted. */}
+            is about a case somebody believes has been raised and has not. */}
         {notSent.length > 0 && (
           <button
             data-notsent
@@ -586,104 +771,201 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
           </button>
         )}
 
-        {/* Two blocks, because there are two numbers and they are not the
-            same kind of thing: what the plot is holding, and what has been
-            counted off it. Told apart by a panel each rather than a rule
-            between them — a hard border here made the screen busier without
-            making it clearer. */}
-        <div className="bg-[#101013] rounded-2xl px-4 py-2 text-right">
-          <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-            {t('cull.balance')}
-          </div>
-          <div className={`text-[clamp(19px,3.4dvh,28px)] font-light tabular-nums leading-tight ${
-            broken ? 'text-amber-400' : 'text-slate-300'
-          }`}>
-            {fmtNum(row.balance)}
-          </div>
-          {/* Below zero means the stock ledger for this plot does not add up:
-              more has been culled and sold off it than was ever transplanted
-              in. It is a real figure and the office movement report shows it
-              too, so it is named rather than hidden — but no rate is offered
-              on top of it, because a rate worked out from it would be
-              negative, and a negative rate reads as a healthy plot. */}
-          {broken && (
-            <div className="text-[10px] font-bold text-amber-500/80 leading-snug pt-0.5">
+        {/* THE PLOT, ONE LINE PER BATCH.
+
+            Four columns and they read left to right as the decision does:
+            what is standing and what that rate is, what has been selected
+            off it, and what that leaves. Green is clear, red is over the
+            line — the one thing a Field Conductor has to be able to see
+            from arm's length in the sun.
+
+            The Select cell is a BUTTON on a batch that is over the line and
+            plain type on one that is not: a batch already under ten percent
+            has nothing to bring down, so a cell inviting a count there is a
+            count nobody needed to walk. */}
+        <div data-batches className="bg-[#101013] rounded-2xl px-2 py-2 overflow-y-auto">
+          {/* THE FIGURES ARE READ AT ARM'S LENGTH, IN THE SUN, so they are
+              set at a size that can be. What that costs is width, and the
+              answer is to WRAP rather than to shrink: a heading that reads
+              over two lines is a heading; one squeezed to fit a column is
+              a thing somebody has to lean in to. The rate goes UNDER its
+              figure for the same reason — the two together will not sit on
+              one line at this size on a phone, and the number is what the
+              eye lands on. */}
+          {/* CENTRED ACROSS AND DOWN, which is the office own layout and is
+              also what a wrapped column wants: a heading over two lines and
+              a figure with its rate under it are both blocks, and a block
+              ragged to one edge reads as a column that has slipped. */}
+          <table className="w-full tabular-nums table-fixed text-center">
+            <thead>
+              <tr className="text-[11px] font-black uppercase tracking-wide text-slate-400 align-middle">
+                <th className="text-center font-black pb-1.5 px-1 w-[18%] whitespace-normal break-words leading-tight">{t('cull.batch')}</th>
+                <th className="text-center font-black pb-1.5 px-1 w-[27%] whitespace-normal break-words leading-tight">{t('cull.balance')}</th>
+                <th className="text-center font-black pb-1.5 px-1 w-[27%] whitespace-normal break-words leading-tight">{t('cull.selected')}</th>
+                <th className="text-center font-black pb-1.5 px-1 w-[28%] whitespace-normal break-words leading-tight">{t('cull.finalBalance')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l) => (
+                <tr key={l.batch} data-batch={l.batch} className="border-t border-[#1f2a38]">
+                  <td className="text-center align-middle py-2 px-1 font-black text-[16px] text-slate-100 whitespace-normal break-words leading-tight">
+                    {l.batch || '—'}
+                  </td>
+                  <td className="text-center align-middle py-2 px-1 text-slate-200 text-[16px] leading-tight">
+                    {l.known || l.broken ? fmtNum(l.balance) : '—'}
+                    {/* A minus balance is not a good rate, so it is named
+                        rather than given a green percentage. */}
+                    <div data-rate className={`text-[13px] font-black leading-tight whitespace-normal break-words ${
+                      l.broken || !Number.isFinite(l.rate) ? 'text-amber-400'
+                        : l.rate > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
+                    }`}>
+                      {Number.isFinite(l.rate) ? `(${fmtPct(l.rate)})` : t('cull.checkStock')}
+                    </div>
+                  </td>
+                  <td className="text-center align-middle py-2 px-1">
+                    {l.editable ? (
+                      <button
+                        data-select={l.batch}
+                        /* MOVING TO ANOTHER BATCH KEEPS WHAT WAS KEYED
+                           INTO THIS ONE. It used to throw it away: 52 keyed
+                           into one batch, tap the next, and the 52 was
+                           gone with the row back to red. Committed first,
+                           so the count lands on the block it was walked
+                           in. */
+                        onClick={() => { if (active !== l.batch) { commit(); setActive(l.batch); } }}
+                        className={`min-w-[52px] rounded-lg px-2 py-1 font-black text-[16px] leading-tight cursor-pointer border transition-colors ${
+                          active === l.batch
+                            ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                            : 'bg-[#1c1c1e] border-[#2c2c2e] text-slate-100 hover:border-slate-500'
+                        }`}
+                      >
+                        {fmtNum(l.inang)}
+                      </button>
+                    ) : (
+                      <span className="text-slate-600 text-[16px]">{fmtNum(l.inang)}</span>
+                    )}
+                  </td>
+                  <td className="text-center align-middle py-2 px-1 text-slate-200 text-[16px] leading-tight">
+                    {l.known ? fmtNum(l.finalBalance) : '—'}
+                    <div data-final className={`text-[13px] font-black leading-tight whitespace-normal break-words ${
+                      !Number.isFinite(l.finalRate) ? 'text-amber-400'
+                        : l.finalRate > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
+                    }`}>
+                      {Number.isFinite(l.finalRate) ? `(${fmtPct(l.finalRate)})` : t('cull.checkStock')}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {anyBroken && (
+            <div className="text-[10px] font-bold text-amber-500/80 leading-snug pt-1 px-1">
               {t('cull.negativeNote')}
+            </div>
+          )}
+          {/* THE DRAFT DID NOT LAND. Said once, in a line, rather than per
+              keystroke — and the figure stays on screen and is still
+              sendable, because the hard save under each button is the one
+              that has to land and it refuses out loud when it does not. */}
+          {draftFailed && (
+            <div data-draftfailed className="text-[10px] font-bold text-rose-400 leading-snug pt-1 px-1">
+              {t('cull.draftFailed')}
             </div>
           )}
         </div>
 
-        <div className="bg-[#101013] rounded-2xl pt-2 pb-1.5 flex-1 min-h-0 flex flex-col">
-          <div className="px-4 text-right">
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-              {t('cull.selected')}
-            </div>
-            <div className="text-slate-500 text-[13px] font-mono min-h-[14px] truncate">
-              {[...terms, ...(typing === '' ? [] : [typing])].join(' + ') || ' '}
-            </div>
-            {/* Named, so a check on the running count does not have to find it
-                by whatever size it happens to be set at today. */}
-            <div
-              data-inang
-              className="text-white text-[clamp(24px,5.2dvh,42px)] font-light tabular-nums leading-none truncate"
+        {/* THE DRONE FLIGHT, which is only on when EVERY batch is clear. One
+            batch still over the line and the plot is not ready, however many
+            of the others are. */}
+        <button
+          data-drone
+          onClick={() => raise(action)}
+          disabled={!canDrone || busy}
+          className={`w-full rounded-2xl py-2.5 font-black text-[13px] uppercase tracking-widest transition-colors ${
+            canDrone
+              ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+              : 'bg-[#1c1c1e] text-slate-600 cursor-default'
+          }`}
+        >
+          {busy && canDrone ? t('common.saving') : t('cull.actDrone')}
+        </button>
+
+        {/* The keypad, typing into whichever batch was pressed. It says so
+            when nothing is: a keypad that quietly does nothing reads as a
+            broken screen. */}
+        <div className="bg-[#101013] rounded-2xl pt-1.5 pb-1.5 flex-1 min-h-0 flex flex-col">
+          <div className="px-3 flex items-start justify-between gap-2">
+            {/* Small and quiet, beside the keypad rather than below it: the
+                three buttons under this panel each raise a CASE, and a
+                fourth of that size would read as a fourth of those. This
+                one only writes down what is already on screen. */}
+            <button
+              data-save
+              onClick={saveDraftNow}
+              disabled={savingDraft || busy}
+              className="shrink-0 rounded-xl border border-[#2c2c2e] bg-[#1c1c1e] px-3 py-1.5
+                         text-[11px] font-black uppercase tracking-wider text-slate-200
+                         hover:border-slate-500 cursor-pointer disabled:opacity-50"
             >
-              {inang ? fmtNum(inang) : '0'}
+              {savingDraft ? t('common.saving') : t('cull.save')}
+            </button>
+            <div className="text-right min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                {active ? `${t('cull.batch')} ${active}` : t('cull.pickBatchFirst')}
+              </div>
+              <div data-typing className="text-slate-500 text-[13px] font-mono min-h-[14px] truncate">
+                {active
+                  ? ([...(termsBy[active] || []), ...(typing === '' ? [] : [typing])].join(' + ') || ' ')
+                  : ' '}
+              </div>
             </div>
           </div>
-
-          {/* The keypad belongs to the count, so it sits inside its panel
-              rather than floating under the whole card. */}
           <Keypad onPress={press} />
         </div>
 
-        {/* What the count leaves, and what that means.
+        {/* And the other way out: the plot is still over the line after
+            everything that could be selected off it, so somebody goes and
+            makes the final selection. Same case as before, under the same
+            category — only the wording on the button has changed, because
+            the category is what Nelos routes on.
 
-            This was a thin strip of small print under the keypad, sized as an
-            afterthought to the two figures above it. Those have gone under
-            the ! now, and this is what the counting is FOR: what is left
-            standing, and whether that clears ten percent. It is the answer
-            the Field Conductor walked the plot to get, so it is a panel like
-            the balance and reads at the same size. */}
-        <div className="bg-[#101013] rounded-2xl px-4 py-2 grid grid-cols-2 gap-3">
-          <div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-              {t('cull.left')}
-            </div>
-            <div className="text-[clamp(18px,3.1dvh,26px)] font-light tabular-nums leading-tight text-slate-300">
-              {known ? fmtNum(left) : '—'}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-              {t('cull.estRate')}
-            </div>
-            <div
-              data-est
-              className={`text-[clamp(18px,3.1dvh,26px)] font-light tabular-nums leading-tight ${
-              !known || !counted ? 'text-slate-600'
-                : rateAfter > CULL_LIMIT ? 'text-rose-400' : 'text-emerald-400'
-            }`}>
-              {known && counted ? fmtPct(rateAfter) : '—'}
-            </div>
-          </div>
+            BOTH OF THESE ARE RED, and the drone flight above them is green.
+            That is the whole of what the colours say on this screen: green
+            is a plot that got there, red is one that did not and is being
+            handed to somebody. The final selection used to be amber, which
+            read as a third state between the two and is not one — it is the
+            first of the two red answers, and HQ is the second. The office
+            asked for the pair to match. */}
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            data-final-selection
+            onClick={() => raise(action)}
+            disabled={!canFinal || busy}
+            className={`rounded-2xl py-2.5 px-2 font-black text-[11px] uppercase tracking-wider leading-tight transition-colors ${
+              canFinal
+                ? 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
+                : 'bg-[#1c1c1e] text-slate-600 cursor-default'
+            }`}
+          >
+            {busy && canFinal ? t('common.saving') : t('cull.actRecheck')}
+          </button>
+          {/* HQ, and only on the SECOND time round. A plot still over after
+              an auditor has already been sent and a second selection keyed
+              is not a figure to re-count — it is one somebody at HQ comes
+              and looks at. */}
+          <button
+            data-hq
+            onClick={() => raise(HQ_ACTION)}
+            disabled={!canHq || busy}
+            className={`rounded-2xl py-2.5 px-2 font-black text-[11px] uppercase tracking-wider leading-tight transition-colors ${
+              canHq
+                ? 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
+                : 'bg-[#1c1c1e] text-slate-600 cursor-default'
+            }`}
+          >
+            {busy && canHq ? t('common.saving') : t('cull.actHq')}
+          </button>
         </div>
-
-        {/* The one button that acts on it. The wording comes from the rule
-            that matched, so a new band added to cullingActions.js appears
-            here with nothing changed. */}
-        <button
-          onClick={raise}
-          disabled={!action || busy}
-          className={`w-full rounded-2xl py-2.5 font-black text-[13px] uppercase tracking-widest transition-colors ${
-            !action
-              ? 'bg-[#1c1c1e] text-slate-600 cursor-default'
-              : action.tone === 'ok'
-              ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
-              : 'bg-amber-500 hover:bg-amber-400 text-black cursor-pointer'
-          }`}
-        >
-          {busy ? t('common.saving') : action ? t(action.titleKey) : t('cull.enterCount')}
-        </button>
       </div>
 
       {picking && (
@@ -694,7 +976,7 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
           t={t}
           canRemove={canRemove}
           onRemove={removePlot}
-          onPick={(p) => { setPlotId(p); setTerms([]); setTyping(''); setPicking(false); }}
+          onPick={(p) => { setPlotId(p); setTermsBy({}); setTyping(''); setActive(null); setPicking(false); }}
           onClose={() => setPicking(false)}
         />
       )}
@@ -728,27 +1010,50 @@ function Keypad({ onPress }) {
   const grey = 'bg-[#333336] hover:bg-[#4a4a4d] text-white';
   const dark = 'bg-[#1c1c1e] hover:bg-[#2c2c2e] text-white';
   const amber = 'bg-amber-500 hover:bg-amber-400 text-white';
-  const key = (label, k, cls, span) => (
+  const key = (label, k, cls, span, extra) => (
     <button
       key={k}
       onClick={() => onPress(k)}
       aria-label={typeof label === 'string' ? undefined : 'delete'}
+      {...(extra || {})}
       className={`${cls} ${span || ''} grid place-items-center rounded-2xl text-[22px] font-medium tabular-nums transition-colors cursor-pointer active:scale-95`}
     >
       {label}
     </button>
   );
+  /* THE OFFICE DREW THIS ONE TOO, so it is four rows and not five: the
+     digits, + and = down the orange column, and the whole bottom row given
+     to 0 and the delete key.
+
+     AC AND 00 ARE GONE WITH IT, and the clear is not lost with them —
+     HOLDING the delete key clears the lot. A calculator with no way back to
+     nothing is one somebody has to tap six times to correct a mis-key, and
+     a long press is where every phone keypad already puts it. Nothing on
+     screen changes, which is the point: the board is the one the office
+     drew, and the shortcut is underneath it. */
+  const holdToClear = (() => {
+    let timer = null;
+    const start = () => { timer = setTimeout(() => { timer = null; onPress('AC'); }, 550); };
+    const stop = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    return {
+      onPointerDown: start,
+      onPointerUp: stop,
+      onPointerLeave: stop,
+      onPointerCancel: stop,
+      /* A long press has already cleared, so the click that follows it must
+         not delete a digit as well. */
+      onContextMenu: (e) => e.preventDefault(),
+    };
+  })();
   return (
-    <div className="grid grid-cols-4 grid-rows-5 gap-1.5 px-2 pb-1 pt-1.5 flex-1 min-h-0">
-      {key('AC', 'AC', grey, 'col-span-2')}
-      {key(<Backspace />, 'DEL', grey, 'col-span-2')}
+    <div className="grid grid-cols-4 grid-rows-4 gap-1.5 px-2 pb-1 pt-1.5 flex-1 min-h-0">
       {['7', '8', '9'].map((d) => key(d, d, dark))}
       {key('+', '+', amber, 'row-span-2')}
       {['4', '5', '6'].map((d) => key(d, d, dark))}
       {['1', '2', '3'].map((d) => key(d, d, dark))}
       {key('=', '=', amber, 'row-span-2')}
-      {key('0', '0', dark, 'col-span-2')}
-      {key('00', '00', dark)}
+      {key('0', '0', dark)}
+      {key(<Backspace />, 'DEL', grey, 'col-span-2', holdToClear)}
     </div>
   );
 }

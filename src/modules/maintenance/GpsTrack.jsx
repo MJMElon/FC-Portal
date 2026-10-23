@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { formatDistance, formatDuration } from './track/track.js';
+import Icon from '../../components/Icon.jsx';
 
 /* The map brings Leaflet with it, and Leaflet is most of a megabyte. Loaded
    the moment somebody presses the button and not one moment before — a Field
@@ -42,7 +43,7 @@ export default function GpsTrack({ value, onChange }) {
       {value && value.points ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
           <div className="flex items-center gap-2.5">
-            <span className="text-[17px] leading-none shrink-0" aria-hidden="true">🛰️</span>
+            <span className="shrink-0 text-emerald-700" aria-hidden="true"><Icon name="map" className="w-4 h-4" /></span>
             <div className="flex-1 min-w-0">
               <div className="text-[14px] font-black text-emerald-800 tabular-nums">
                 {formatDistance(value.distance_m)}
@@ -79,7 +80,7 @@ export default function GpsTrack({ value, onChange }) {
           onClick={() => setOpen(true)}
           className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-white px-3 py-3 text-[12px] font-black uppercase tracking-widest text-slate-600 hover:border-rose-400 hover:text-rose-700 transition-colors"
         >
-          <span aria-hidden="true">🛰️</span>
+          <span aria-hidden="true"><Icon name="map" className="w-4 h-4" /></span>
           {t('mt.trkRecord')}
         </button>
       )}

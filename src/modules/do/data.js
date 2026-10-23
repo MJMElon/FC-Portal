@@ -121,12 +121,24 @@ export async function loadIssuedQtyByALs(alNumbers) {
   if (!alNumbers || !alNumbers.length) return {};
   const { data, error } = await supabase
     .from('shared_do_records')
-    .select('al_number, total_qty')
+    .select('al_number, total_qty, status, remark')
     .in('al_number', alNumbers);
   if (error) throw error;
+  return issuedQtyByAL(data);
+}
+
+/* A cancelled DO took nothing away. Same test as the office Delivery page
+   (operation_delivery.html, its cumulMap), so the FC Portal and the AL
+   list agree on what has been collected -- they did not, and a cancelled
+   DO kept an order off the scan list while the office read a balance. */
+export function isCancelledDO(d) {
+  return !!d && (d.status === 'Cancelled' || String(d.remark || '').includes('[CANCELLED]'));
+}
+
+export function issuedQtyByAL(dos) {
   const map = {};
-  (data || []).forEach((d) => {
-    if (!d.al_number) return;
+  (dos || []).forEach((d) => {
+    if (!d || !d.al_number || isCancelledDO(d)) return;
     map[d.al_number] = (map[d.al_number] || 0) + (Number(d.total_qty) || 0);
   });
   return map;
@@ -177,6 +189,31 @@ export async function uploadDOPhoto(base64, alNumber, doNumber) {
     const { error } = await supabase.storage
       .from('documents')
       .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+    if (error) return base64;
+    const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
+    return data?.publicUrl || base64;
+  } catch (e) {
+    return base64;
+  }
+}
+
+// Upload the customer's signature to the `documents` bucket, same shape as
+// uploadDOPhoto — a reusable public URL rather than the signature living
+// only inside the one-off PDF attachDOToOrder generates. Without this, the
+// office's own DO print (operation_delivery.html) has no signature to show
+// even for a DO the FC Portal issued and signed minutes earlier: the pad's
+// data URL was never written onto the shared_do_records row at all.
+export async function uploadDOSignature(base64, alNumber, doNumber) {
+  try {
+    const filePath = `do_signatures/${alNumber}/${doNumber}_${Date.now()}.png`;
+    const b64 = base64.split(',')[1];
+    const bytes = atob(b64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blob = new Blob([arr], { type: 'image/png' });
+    const { error } = await supabase.storage
+      .from('documents')
+      .upload(filePath, blob, { contentType: 'image/png', upsert: true });
     if (error) return base64;
     const { data } = supabase.storage.from('documents').getPublicUrl(filePath);
     return data?.publicUrl || base64;
@@ -261,6 +298,7 @@ export async function persistDO({ payload, photoBase64, al, sigDataUrl, staff })
     try {
       const finalPayload = { ...payload };
       if (photoBase64) finalPayload.image_url = await uploadDOPhoto(photoBase64, al.al_number, payload.do_number);
+      if (sigDataUrl) finalPayload.signature_url = await uploadDOSignature(sigDataUrl, al.al_number, payload.do_number);
       const { row } = await saveDORecord(finalPayload, al);
       await attachDOToOrder({ payload: finalPayload, al, staff, sigDataUrl, photoBase64 });
       return { queued: false, payload: finalPayload, savedRow: row || null };
@@ -331,6 +369,9 @@ export async function flushDOQueue() {
       if (item.photoBase64) {
         payload.image_url = await uploadDOPhoto(item.photoBase64, payload.al_number, payload.do_number);
       }
+      if (item.sigDataUrl) {
+        payload.signature_url = await uploadDOSignature(item.sigDataUrl, payload.al_number, payload.do_number);
+      }
       const { error } = await supabase.from('shared_do_records').insert([payload]);
       if (error) {
         remaining.push(item);
@@ -370,6 +411,26 @@ export function nurseriesOfDO(d, plotMap) {
   return keys;
 }
 
+/* THE DELIVERY ORDERS STILL OWING THEIR LOADERS.
+   Narrowed by DATE in the query and by EMPTINESS in JS: the column is
+   jsonb, and "null or an object with nothing in it" is a test PostgREST
+   cannot be asked for cleanly, while `doNeedsWorkers` is the one rule the
+   card and its test already share. The window is the portal's single
+   answer to how far back a phone looks -- see VERIFY_WINDOW_DAYS.
+
+   `select('*')` because the card hands the whole row to openWorkerTick,
+   which reads plot_1..plot_5, worked_by_by_nursery and the lock. */
+export async function loadDOsMissingWorkers(sinceDate) {
+  let q = supabase
+    .from('shared_do_records')
+    .select('*')
+    .order('delivery_date', { ascending: false });
+  if (sinceDate) q = q.gte('delivery_date', sinceDate);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+}
+
 // Active workers for the "Who Loaded This DO" tick list. Same table, same
 // columns, same active-only filter as the maintenance module's own
 // loadWorkers() (mjmnpayroll_workers — the roster the 555 Worker Portal
@@ -404,7 +465,12 @@ export async function saveDOWorkers(doId, workedByByNursery, lockedBy) {
   if (error) throw error;
 }
 
-// Extract item rows (nursery/breed/qty) from a DO record's plot_n columns.
+// Extract item rows (plot/nursery/breed/qty) from a DO record's plot_n columns.
+/* `plot` is the column AS KEYED and `nursery` is it resolved -- two different
+   answers, and the screens want different ones. plot_N holds the plot where
+   one was chosen on the entry form and the NURSERY name where one was not
+   (EntryModal falls back), so the raw column is "what the DO says the
+   seedlings came off", which is what somebody standing at the lorry reads. */
 export function itemsFromRecord(d, plotMap = {}) {
   const lines = [];
   for (let i = 1; i <= 5; i++) {
@@ -412,8 +478,37 @@ export function itemsFromRecord(d, plotMap = {}) {
     const breed = d[`breed_${i}`];
     const qty = parseInt(d[`qty_${i}`]) || 0;
     if (plot || breed || qty > 0) {
-      lines.push({ nursery: plotMap[plot] || plot || '—', breed: breed || '—', qty });
+      lines.push({ plot: plot || '', nursery: plotMap[plot] || plot || '—', breed: breed || '—', qty });
     }
   }
   return lines;
+}
+
+/* The plots a DO names, in the order they were keyed and without repeats.
+   Read off itemsFromRecord rather than walking plot_1..plot_5 again, because
+   two loops over the same five columns is two rules the day one of them
+   grows a sixth. */
+export function plotsOfDO(d) {
+  const out = [];
+  itemsFromRecord(d || {}).forEach((l) => {
+    const name = String(l.plot || '').trim();
+    if (name && !out.includes(name)) out.push(name);
+  });
+  return out;
+}
+
+/* WHO THE DO IS FOR, which is not a column on every DO.
+
+   This portal writes the customer into `remark` -- EntryModal's payload is
+   `remark: al.customer_name` and names no customer column at all -- while a
+   DO raised elsewhere carries `customer_name`. Asking only for the column
+   therefore fell through to the AL NUMBER on every DO the FC Portal has
+   ever issued, and an AL number is a reference, not a name. The AL number
+   stays as the last resort, because a DO with nothing else on it still has
+   to say which order it came off. */
+export function customerOfDO(d) {
+  const r = d || {};
+  return [r.customer_name, r.remark, r.al_number]
+    .map((v) => String(v == null ? '' : v).trim())
+    .find(Boolean) || '';
 }

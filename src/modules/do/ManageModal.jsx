@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { loadDOsForAL, loadConsentsForAL, itemsFromRecord } from './data.js';
+import Icon from '../../components/Icon.jsx';
 
 // Manage DOs for one AL: shows AL details, issued DO records, signed consent
 // records, and an entry point to add a new DO.
@@ -43,7 +44,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
             <div className="text-[10px] font-black text-blue-300 uppercase tracking-widest mb-1">{t('do.deliveryOrders')}</div>
             <div className="text-xl font-black text-white tracking-wide">{t('do.manageForAL', { al: al.al_number })}</div>
           </div>
-          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-black text-lg flex items-center justify-center shrink-0 ml-4">✕</button>
+          <button onClick={onClose} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white font-black text-lg flex items-center justify-center shrink-0 ml-4"><Icon name="close" className="w-4 h-4" /></button>
         </div>
 
         <div className="p-5 sm:p-6 space-y-6">
@@ -72,7 +73,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
                   {dos === null ? (
                     <tr><td colSpan={6} className="text-center py-6 text-slate-400 text-xs font-bold uppercase tracking-widest">{t('common.loading')}</td></tr>
                   ) : dos.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-10"><div className="text-3xl mb-2">📭</div><div className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{t('do.noDOs')}</div></td></tr>
+                    <tr><td colSpan={6} className="text-center py-10"><Icon name="inboxEmpty" className="w-8 h-8 mx-auto mb-2 text-slate-300" /><div className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{t('do.noDOs')}</div></td></tr>
                   ) : (
                     dos.map((d) => {
                       const lines = itemsFromRecord(d, plotMap);
@@ -84,7 +85,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
                           <td><span className={`font-black ${cancelled ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{d.do_number || '—'}</span></td>
                           <td className="text-slate-600 text-xs">{lines.length ? lines.map((l, i) => <div key={i}>{l.nursery}</div>) : '—'}</td>
                           <td className="text-slate-600 text-xs">{lines.length ? lines.map((l, i) => <div key={i}>{l.breed}</div>) : '—'}</td>
-                          <td>{lines.length ? lines.map((l, i) => <div key={i} className="font-black text-emerald-700">{l.qty}</div>) : <span className="font-black text-emerald-700">{d.total_qty ?? '—'}</span>}</td>
+                          <td>{lines.length ? lines.map((l, i) => <div key={i} className="font-black text-emerald-700">{Number(l.qty || 0).toLocaleString()}</div>) : <span className="font-black text-emerald-700">{d.total_qty != null ? Number(d.total_qty).toLocaleString() : '—'}</span>}</td>
                           <td>
                             <div className="flex items-center gap-1.5">
                               {d.image_url ? (
@@ -95,7 +96,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
                                 <span className="text-slate-200 text-xs">—</span>
                               )}
                               <button onClick={() => onPrint(d)} title="Print" className="w-10 h-10 rounded-lg border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 flex items-center justify-center cursor-pointer bg-slate-50 text-slate-400 hover:text-emerald-600">
-                                🖨️
+                                <Icon name="printer" className="w-4 h-4" />
                               </button>
                               {onManageWorkers && (
                                 <button
@@ -107,9 +108,9 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
                                       : 'border-amber-200 bg-amber-50 text-amber-500 hover:border-amber-400 hover:bg-amber-100'
                                   }`}
                                 >
-                                  👷
+                                  <Icon name="worker" className="w-4 h-4" />
                                   {d.worked_by_locked_at ? (
-                                    <span className="absolute -top-1 -right-1 text-[9px]">🔒</span>
+                                    <Icon name="lock" className="w-3 h-3 absolute -top-1 -right-1 text-blue-600 bg-white rounded-full" />
                                   ) : (
                                     <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-amber-500 border border-white" />
                                   )}
@@ -126,7 +127,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
             </div>
             {dos && dos.length > 0 && (
               <div className="text-[10px] font-bold text-slate-400 mt-2 text-right">
-                {t('do.totalIssued', { issued: totalIssued, bal: al.balance_quantity ?? '—' })}
+                {t('do.totalIssued', { issued: Number(totalIssued || 0).toLocaleString(), bal: al.balance_quantity != null ? al.balance_quantity.toLocaleString() : '—' })}
               </div>
             )}
           </div>
@@ -137,7 +138,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
               <div className="text-center py-4 text-slate-300 text-xs font-bold uppercase tracking-widest">{t('common.loading')}</div>
             ) : consents.length === 0 ? (
               <div className="text-center py-5 bg-slate-50 rounded-xl border border-slate-100">
-                <div className="text-2xl mb-2">📋</div>
+                <Icon name="clipboard" className="w-7 h-7 mx-auto mb-2 text-slate-300" />
                 <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{t('do.noConsentRecords')}</div>
               </div>
             ) : (
@@ -161,19 +162,19 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
                     </div>
                     {c.ai_sticker_count != null && (
                       <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 inline-flex items-center gap-2 mt-2">
-                        <span className="text-[9px] font-black text-blue-700 uppercase tracking-widest">{t('do.aiCount')}</span>
+                        <span className="text-[9px] font-black text-blue-700 uppercase tracking-widest flex items-center gap-1"><Icon name="sparkles" className="w-3 h-3" /> {t('do.aiCount')}</span>
                         <span className="font-black text-blue-700">{c.ai_sticker_count.toLocaleString()}</span>
                       </div>
                     )}
                     {c.photo_url && (
                       <div className="mt-2">
-                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('do.stickerPhoto')}</div>
+                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Icon name="camera" className="w-3 h-3" /> {t('do.stickerPhoto')}</div>
                         <img src={c.photo_url} alt="sticker" className="rounded-xl border border-slate-200" style={{ maxHeight: 120, maxWidth: '100%', objectFit: 'contain' }} />
                       </div>
                     )}
                     {c.signature_data && (
                       <div className="mt-2">
-                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('do.signature')}</div>
+                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Icon name="pen" className="w-3 h-3" /> {t('do.signature')}</div>
                         <img src={c.signature_data} alt="signature" style={{ height: 48, borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc' }} />
                       </div>
                     )}

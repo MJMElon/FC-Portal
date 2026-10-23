@@ -6,6 +6,7 @@ import { workTypeByKey, workTypeLabel } from './data.js';
 import { formatDistance, mapsUrl } from './track/track.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
+import Icon from '../../components/Icon.jsx';
 
 /* Leaflet is most of a megabyte. A list of records that nobody opens a track
    from never downloads a byte of it — same lazy import GpsTrack and the
@@ -200,10 +201,10 @@ export default function RecordCard({
               onClick={openMap}
               className="inline-flex items-center gap-1.5 mt-1.5 text-[11px] font-bold text-slate-500 tabular-nums cursor-pointer hover:text-emerald-700"
             >
-              <span aria-hidden="true">🛰️</span>
+              <span aria-hidden="true"><Icon name="map" className="w-3.5 h-3.5 inline-block" /></span>
               {r.gps_distance_m != null && formatDistance(r.gps_distance_m)}
               {r.gps_points != null && (
-                <span className="text-slate-400">· {t('mt.trkPointsN', { n: r.gps_points })}</span>
+                <span className="text-slate-400">· {t('mt.trkPointsN', { n: Number(r.gps_points).toLocaleString() })}</span>
               )}
               {/* Says it is a button. The distance beside it looked like the
                   same dead text it used to be, and a link nobody knows is a
@@ -219,7 +220,7 @@ export default function RecordCard({
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 mt-1.5 text-[11px] font-bold text-slate-500 tabular-nums"
             >
-              <span aria-hidden="true">🛰️</span>
+              <span aria-hidden="true"><Icon name="map" className="w-3.5 h-3.5 inline-block" /></span>
               {r.gps_distance_m != null ? (
                 <>
                   {formatDistance(r.gps_distance_m)}
@@ -249,8 +250,8 @@ export default function RecordCard({
 
         {/* Done, or still on the phone waiting for a signal. */}
         {r._pending ? (
-          <span className="shrink-0 text-[9px] font-black uppercase tracking-widest bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2 py-1">
-            ⏳ {t('mt.waiting')}
+          <span className="shrink-0 text-[9px] font-black uppercase tracking-widest bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2 py-1 inline-flex items-center gap-1">
+            <Icon name="clock" className="w-2.5 h-2.5" /> {t('mt.waiting')}
           </span>
         ) : (
           <svg viewBox="0 0 24 24" aria-hidden="true"
@@ -278,7 +279,7 @@ export default function RecordCard({
                 ${mayVerify ? 'cursor-pointer hover:bg-emerald-100' : 'cursor-default'}`}
               title={mayVerify ? t('mt.unverify') : undefined}
             >
-              <span aria-hidden="true">✓</span>
+              <Icon name="check" className="w-3.5 h-3.5" />
               {t('mt.verifiedBy', { name: r.verified_by || '—' })}
             </button>
           ) : (

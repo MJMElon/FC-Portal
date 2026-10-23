@@ -4,6 +4,7 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import { WORK_TYPES, workTypeLabel } from './data.js';
 import { monthLabelOf, monthRank } from './schedule.js';
 import RecordCard from './RecordCard.jsx';
+import Icon from '../../components/Icon.jsx';
 
 /**
  * Everything that has been recorded, with the two questions actually asked of
@@ -54,11 +55,11 @@ export default function HistoryDialog({
                       shadow-2xl h-[92vh] sm:h-[85vh] flex flex-col overflow-hidden">
         <div className="shrink-0 bg-white border-b border-slate-200 px-5 pt-4 pb-3">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-black text-slate-800 text-[15px] uppercase tracking-wide">
-              🗂️ {t('mt.history')}
+            <h3 className="font-black text-slate-800 text-[15px] uppercase tracking-wide flex items-center gap-1.5">
+              <Icon name="folder" className="w-3.5 h-3.5" /> {t('mt.history')}
             </h3>
             <button onClick={onClose}
-              className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 text-xl">×</button>
+              className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 flex items-center justify-center"><Icon name="close" className="w-4 h-4" /></button>
           </div>
 
           <div className="flex flex-wrap gap-2">

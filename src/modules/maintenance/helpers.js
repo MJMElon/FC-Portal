@@ -8,10 +8,10 @@
  * of it. Do not "tidy" these strings.
  */
 export const WORK_TYPES = [
-  { key: 'pd',       icon: '🧪', jenis: 'Penyemburan racun kulat dan serangga', en: 'P & D Spraying',     ms: 'Penyemburan Racun Kulat & Serangga' },
+  { key: 'pd',       icon: '🧪', jenis: 'Penyemburan racun kulat dan serangga', en: 'P & D Spraying',     ms: 'Penyemburan Kulat & Serangga' },
   { key: 'manuring', icon: '🌾', jenis: 'Membaja',                              en: 'Manuring',           ms: 'Membaja' },
   { key: 'weeding',  icon: '🌿', jenis: 'Merumput',                             en: 'Weeding',            ms: 'Merumput' },
-  { key: 'interrow', icon: '💨', jenis: 'Meracun rumput secara selingan',       en: 'Interrow Spraying',  ms: 'Meracun Rumput Selingan' },
+  { key: 'interrow', icon: '💨', jenis: 'Meracun rumput secara selingan',       en: 'Interrow Spraying',  ms: 'Meracun Rumput' },
 ];
 
 export const workTypeLabel = (wt, lang) => (wt ? (lang === 'ms' ? wt.ms : wt.en) : '');

@@ -54,10 +54,14 @@ const body = [
   grab(hook, 'export function isMainNursery', 'isMainNursery'),
   grab(hook, 'export function otherNurseries', 'otherNurseries'),
   grab(hook, 'export function cleanPicks', 'cleanPicks'),
+  grab(data, 'export function itemsFromRecord', 'itemsFromRecord'),
+  grab(data, 'export function plotsOfDO', 'plotsOfDO'),
+  grab(data, 'export function customerOfDO', 'customerOfDO'),
 ].join('\n\n');
 
-const { sectionsForDO, isMainNursery, otherNurseries, cleanPicks } =
-  new Function(body + '\nreturn { sectionsForDO, isMainNursery, otherNurseries, cleanPicks };')();
+const { sectionsForDO, isMainNursery, otherNurseries, cleanPicks, plotsOfDO, customerOfDO } =
+  new Function(body + '\nreturn { sectionsForDO, isMainNursery, otherNurseries, cleanPicks,'
+    + ' plotsOfDO, customerOfDO };')();
 
 let bad = 0;
 const is = (got, want, what) => {
@@ -137,6 +141,34 @@ const none = sectionsForDO({ plot_1: '' }, PLOT_MAP);
 is(none, { own: [], extra: [] }, 'no section is derived');
 is(otherNurseries(BY_NURSERY, []), ['BNN', 'UNN1', 'UNN2'],
   'but every main nursery is offered, so the question can still be answered');
+
+/* ── WHAT THE DO IS, which the popup and the card both have to say ──
+   "Who Loaded This DO" carried a DO number and nothing else, and a DO
+   number is not a thing anybody recognises: the person ticking has to know
+   which delivery, off which plot, of how many. Both screens read these two
+   functions, so one answer, not two. */
+console.log('\n── 9. The customer is not simply customer_name ──');
+is(customerOfDO({ customer_name: 'Ladang Jaya', remark: 'x', al_number: 'C2A729' }),
+  'Ladang Jaya', 'the column wins where a DO carries one');
+/* THE ONE THAT WAS WRONG ON SCREEN. This portal writes the customer into
+   the REMARK and names no customer column -- EntryModal is `remark:
+   al.customer_name` -- so every DO it has ever issued fell through to the
+   AL number, and an AL number is a reference, not a name. */
+is(customerOfDO({ remark: 'Ladang Jaya', al_number: 'C2A729' }), 'Ladang Jaya',
+  'and the remark answers for every DO this portal issued');
+is(customerOfDO({ customer_name: '   ', remark: '', al_number: 'C2A729' }), 'C2A729',
+  'the AL number is the last resort, never the first');
+is(customerOfDO({}), '', 'and a DO with none of the three says nothing rather than "undefined"');
+is(customerOfDO(null), '', 'a missing record does not throw');
+
+console.log('\n── 10. The plots a DO names ──');
+is(plotsOfDO({ plot_1: 'B4', qty_1: 60, plot_2: 'N3', qty_2: 40 }), ['B4', 'N3'],
+  'every plot on the DO, in the order it was keyed');
+is(plotsOfDO({ plot_1: 'B4', qty_1: 60, plot_2: 'B4', qty_2: 40 }), ['B4'],
+  'a plot twice is one plot — the card has one line for it');
+is(plotsOfDO({ plot_1: '', breed_1: 'DxP', qty_1: 60 }), [],
+  'a line with no plot adds nothing, so the card reads as the DO naming none');
+is(plotsOfDO({}), [], 'and an empty DO does not throw');
 
 console.log('\n' + (bad ? 'FAILURES: ' + bad : 'all good'));
 process.exit(bad ? 1 : 0);

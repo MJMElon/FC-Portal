@@ -1,21 +1,26 @@
 /* ══════════════════════════════════════════════════════════════════════
-   ONE FLOATING BUTTON, TWO THINGS BEHIND IT
+   ONE FLOATING BUTTON, UP TO FOUR THINGS BEHIND IT
 
-   PALMS and Nelos both want to follow the Field Conductor around the
-   portal: the plot round is the first job of the morning, and a case can
-   land while somebody is halfway through a scan. Two floating buttons is
-   one too many — on a 360px screen the second one always ends up sitting
-   on the thing that needs tapping, and both of them want the bottom-right
+   PALMS, Nelos, Pending Verification and the Culling Calculator all want
+   to follow the Field Conductor around the portal: the plot round is the
+   first job of the morning, a case can land while somebody is halfway
+   through a scan, a DO or a transplanted plot can go unanswered, and the
+   calculator is reached for mid-walk. Four floating buttons is three too
+   many — on a 360px screen the second one already started sitting on the
+   thing that needed tapping, and every one of them wants the bottom-right
    corner a thumb reaches.
 
-   So there is one. Tap it and it fans open into the two; tap one of those
-   and its window opens over whatever screen you were on. Tap the trigger
-   again, tap away, or press Escape and it folds back.
+   So there is one. Tap it and it fans open into whichever of the four this
+   login may open; tap one of those and its window opens over whatever
+   screen you were on. Tap the trigger again, tap away, or press Escape and
+   it folds back.
 
-   The trigger carries the WORSE of the two states, because the point of a
-   button that follows you is to be answerable at a glance: a red count
-   when either PALMS has plots left or Nelos has cases pending, and quiet
-   only when both are clear. Opening it shows which is which.
+   The trigger carries the WORST of the states that carry a count — PALMS
+   plots left, Nelos cases pending, work still to verify — because the
+   point of a button that follows you is to be answerable at a glance: a
+   red count when anything is waiting, quiet only when all three are clear.
+   The Culling Calculator carries no count; it is a tool, not a worklist.
+   Opening the dock shows which is which.
 
    Drag and position are here, once, rather than in each of them — see
    PalmsDock, which is where this drag maths came from and which still
@@ -25,14 +30,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
-import { canPalms } from '../lib/access.js';
+import { allowedNurseries, canCulling, canDo, canMaintain, canPalms } from '../lib/access.js';
 import { NURSERIES } from '../modules/palms/data.js';
 import { applyCachedOfficeConfig, refreshOfficeConfig } from '../modules/palms/officeConfig.js';
 import { visibleNurseries } from '../lib/access.js';
 import { pendingCases } from '../lib/nelos.js';
+import { pendingVerifyCount } from '../lib/verifyCount.js';
 import Coin from './Coin.jsx';
+import Icon from './Icon.jsx';
 import PalmsWindow from './PalmsWindow.jsx';
 import NelosWindow from './NelosWindow.jsx';
+import VerifyWindow from './VerifyWindow.jsx';
+import CullingWindow from './CullingWindow.jsx';
 import { Train, todayProgress } from './PalmsDock.jsx';
 
 const POS_KEY = 'mjm_dock_pos_v1';
@@ -78,6 +87,20 @@ function NelosMark() {
   );
 }
 
+/* Pending Verification's own mark in the fan — the same hourglass its
+   window opens with, amber like the card it replaced. */
+function VerifyMark() {
+  return <Icon name="hourglass" className="w-[22px] h-[22px] text-amber-800" />;
+}
+
+/* The Culling Calculator's own mark — the same calculator its dashboard
+   tile used to wear, rose like that tile's icon box. It carries no badge:
+   counting pokok inang is a tool somebody reaches for, not a worklist with
+   something pending. */
+function CullingMark() {
+  return <Icon name="calculator" className="w-[22px] h-[22px] text-rose-700" />;
+}
+
 /* The trigger's own face — neither module's. It used to wear the train,
    which is PALMS's engine and stays there, in the fan, as PALMS's own
    button below. What opens the fan belongs to both, so it wears the MJM
@@ -98,10 +121,11 @@ export default function FloatingDock() {
 
   const [pos, setPos] = useState(null);          // set on mount, once measurable
   const [dragging, setDragging] = useState(false);
-  const [fan, setFan] = useState(false);         // the two actions showing
-  const [open, setOpen] = useState(null);        // 'palms' | 'nelos' | null
+  const [fan, setFan] = useState(false);         // the actions showing
+  const [open, setOpen] = useState(null);        // 'palms' | 'nelos' | 'verify' | null
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [cases, setCases] = useState(null);      // null until the first read
+  const [verifyCount, setVerifyCount] = useState(null); // null until the first read
   const drag = useRef(null);
   /* The tap handler runs before the render that decides this, so it is read
      through a ref rather than closing over a stale value. */
@@ -130,6 +154,22 @@ export default function FloatingDock() {
     }
   }, []);
 
+  /* Same shape as refreshCases — the badge's own light read, not the
+     window's. See lib/verifyCount.js: this is the SAME query the window
+     draws its cards from, not a second copy of it.
+
+     Keyed on a signature rather than the permissions object itself, for
+     the same reason scopeSig is above it: a fresh object every render
+     would make this callback — and everything that depends on it — new
+     every render too. */
+  const verifySig = `${canDo(permissions, 'view') ? 1 : 0}${canMaintain(permissions, 'view') ? 1 : 0}|` +
+    (allowedNurseries(permissions, 'maintenance') || []).join(',');
+  const refreshVerify = useCallback(
+    async () => setVerifyCount(await pendingVerifyCount(permissions)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [verifySig]
+  );
+
   /* The office's plot list. Without it the button counts the built-in 52 and
      would say "5 left" on a nursery that has 40 plots. */
   useEffect(() => {
@@ -148,21 +188,23 @@ export default function FloatingDock() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  /* Both halves have to react to work done on another screen: PALMS to the
-     round being saved, Nelos to a case being raised or settled. Re-read on
-     every navigation, and again when the tab comes back to the front — a
-     phone that was in a pocket over midnight is looking at yesterday. */
-  useEffect(() => { refreshPalms(); refreshCases(); }, [location.pathname, refreshPalms, refreshCases]);
+  /* All three have to react to work done on another screen: PALMS to the
+     round being saved, Nelos to a case being raised or settled, Verify to a
+     DO or a transplant plot being answered. Re-read on every navigation,
+     and again when the tab comes back to the front — a phone that was in a
+     pocket over midnight is looking at yesterday. */
+  useEffect(() => { refreshPalms(); refreshCases(); refreshVerify(); },
+    [location.pathname, refreshPalms, refreshCases, refreshVerify]);
 
   useEffect(() => {
-    const onWake = () => { if (!document.hidden) { refreshPalms(); refreshCases(); } };
+    const onWake = () => { if (!document.hidden) { refreshPalms(); refreshCases(); refreshVerify(); } };
     document.addEventListener('visibilitychange', onWake);
     window.addEventListener('focus', onWake);
     return () => {
       document.removeEventListener('visibilitychange', onWake);
       window.removeEventListener('focus', onWake);
     };
-  }, [refreshPalms, refreshCases]);
+  }, [refreshPalms, refreshCases, refreshVerify]);
 
   // Escape folds the fan, as it would any transient thing.
   useEffect(() => {
@@ -223,18 +265,27 @@ export default function FloatingDock() {
   /* Nelos is not a PALMS permission. Anybody signed in to the portal can be
      sent a case, so anybody signed in can read their own list — what they
      may see inside it is nelos_my_scope()'s answer, not this button's. */
+  const mayVerify = canDo(permissions, 'view') || canMaintain(permissions, 'view');
+  const mayCulling = canCulling(permissions, 'view') && !location.pathname.startsWith('/culling');
   const actions = [];
   if (mayPalms) actions.push('palms');
   actions.push('nelos');
+  if (mayVerify) actions.push('verify');
+  if (mayCulling) actions.push('culling');
   // One thing behind it is not a fan. Tapping opens that one thing.
   soloRef.current = actions.length === 1 ? actions[0] : null;
 
   const steaming = progress.total > 0 && progress.done >= progress.total;
   const plotsLeft = mayPalms ? Math.max(0, progress.total - progress.done) : 0;
   const casesLeft = cases || 0;
-  const total = plotsLeft + casesLeft;
+  const verifyLeft = mayVerify ? (verifyCount || 0) : 0;
+  const total = plotsLeft + casesLeft + verifyLeft;
   const label = total
-    ? `${plotsLeft ? `${plotsLeft} plots` : ''}${plotsLeft && casesLeft ? ', ' : ''}${casesLeft ? `${casesLeft} cases` : ''} waiting`
+    ? [
+        plotsLeft ? `${plotsLeft} plots` : '',
+        casesLeft ? `${casesLeft} cases` : '',
+        verifyLeft ? `${verifyLeft} to verify` : '',
+      ].filter(Boolean).join(', ') + ' waiting'
     : t('dock.done');
 
   /* The fan opens towards the middle of the screen, so the two actions
@@ -259,6 +310,7 @@ export default function FloatingDock() {
   function closeCurrent() {
     if (open === 'palms') refreshPalms();
     else if (open === 'nelos') refreshCases();
+    else if (open === 'verify') refreshVerify();
     setOpen(null);
   }
 
@@ -266,6 +318,17 @@ export default function FloatingDock() {
     setFan(false);
     if (open === which) closeCurrent(); else setOpen(which);
   }
+
+  // Each fan action's face, badge count and style — one place for all three
+  // rather than an on/off branch that only ever knew how to tell two apart.
+  const FACE = {
+    palms:  { label: 'PALMS', cls: 'bg-white border-teal-500',
+              icon: <span style={{ transform: 'scale(.62)' }}><Train steaming={steaming} /></span>,
+              n: plotsLeft },
+    nelos:  { label: 'Nelos', cls: 'bg-[#efc7e2] border-[#cf6eaf]', icon: <NelosMark />, n: casesLeft },
+    verify: { label: t('vrf.title'), cls: 'bg-amber-100 border-amber-400', icon: <VerifyMark />, n: verifyLeft },
+    culling: { label: t('cull.title'), cls: 'bg-rose-100 border-rose-400', icon: <CullingMark />, n: 0 },
+  };
 
   return (
     <>
@@ -275,28 +338,21 @@ export default function FloatingDock() {
 
       {fan && actions.map((a, i) => {
         const p = miniAt(i);
-        const on = a === 'palms';
+        const face = FACE[a];
         return (
           <button
             key={a}
             type="button"
             onClick={() => choose(a)}
-            title={on ? 'PALMS' : 'Nelos'}
-            aria-label={on ? 'PALMS' : 'Nelos'}
+            title={face.label}
+            aria-label={face.label}
             style={{ left: p.left, top: p.top, width: MINI, height: MINI, zIndex: 41 }}
-            className={`${miniCls} ${on ? 'bg-white border-teal-500' : 'bg-[#efc7e2] border-[#cf6eaf]'}`}
+            className={`${miniCls} ${face.cls}`}
           >
-            {on
-              ? <span style={{ transform: 'scale(.62)' }}><Train steaming={steaming} /></span>
-              : <NelosMark />}
-            {on && plotsLeft > 0 && (
+            {face.icon}
+            {face.n > 0 && (
               <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 grid place-items-center rounded-full bg-rose-600 text-white text-[10px] font-black tabular-nums border-2 border-white">
-                {plotsLeft}
-              </span>
-            )}
-            {!on && casesLeft > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 grid place-items-center rounded-full bg-rose-600 text-white text-[10px] font-black tabular-nums border-2 border-white">
-                {casesLeft}
+                {face.n}
               </span>
             )}
           </button>
@@ -352,11 +408,22 @@ export default function FloatingDock() {
         )}
       </button>
 
+      {/* All four present the same way now — the Nelos pop-out, anchored
+          to wherever the button sits, each at its own size. */}
       {open === 'palms' && (
-        <PalmsWindow onClose={() => { setOpen(null); refreshPalms(); }} onDayChange={refreshPalms} />
+        <PalmsWindow onClose={() => { setOpen(null); refreshPalms(); }} onDayChange={refreshPalms}
+          anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
       )}
       {open === 'nelos' && (
         <NelosWindow onClose={() => { setOpen(null); refreshCases(); }} onCount={setCases}
+          anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
+      )}
+      {open === 'verify' && (
+        <VerifyWindow onClose={() => { setOpen(null); refreshVerify(); }} onCount={setVerifyCount}
+          anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
+      )}
+      {open === 'culling' && (
+        <CullingWindow onClose={() => setOpen(null)}
           anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
       )}
     </>

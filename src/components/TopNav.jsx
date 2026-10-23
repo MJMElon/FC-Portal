@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang, LangToggle } from '../context/LanguageContext.jsx';
 import { supabase } from '../lib/supabase.js';
+import Icon from './Icon.jsx';
 
 // A plain left arrow. Every "go back" control in the app is just this — the
 // destination is obvious from context, so the words were only taking room.
@@ -37,6 +38,8 @@ function CogIcon() {
 // - `theme`: 'light' (default) or 'dark' to match a dark page background
 // - `book`: stack the title the way the 555 book cover on the login screen
 //   reads — house name, 555, then the portal. Dashboard only
+// - `left`: extra content before the Back arrow (or in its place, when there
+//   is none) — the Dashboard's Sync button, so far the only user of it
 export default function TopNav({
   title,
   subtitle,
@@ -46,6 +49,7 @@ export default function TopNav({
   settingsOn,
   theme = 'light',
   book,
+  left,
 }) {
   const { signOut } = useAuth();
   const { t } = useLang();
@@ -94,6 +98,7 @@ export default function TopNav({
 
   const leftControls = (
     <>
+      {left}
       {back && (
         <Link
           to={back}
@@ -139,7 +144,7 @@ export default function TopNav({
         className={`text-[10px] font-bold ${signOutCls} uppercase tracking-wider sm:tracking-widest px-2.5 sm:px-3 py-2 rounded-full border cursor-pointer transition-colors shrink-0`}
       >
         <span className="hidden sm:inline">{t('common.signOut')}</span>
-        <span className="sm:hidden text-[13px] leading-none">⏻</span>
+        <Icon name="power" className="sm:hidden w-3.5 h-3.5" />
       </button>
     </>
   );

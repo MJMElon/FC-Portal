@@ -60,10 +60,63 @@ export const CULLING_ACTIONS = [
   },
 ];
 
+/**
+ * THE THIRD WAY OUT, and it is not decided by a rate.
+ *
+ * The other two are bands: where the figure lands says what happens. This
+ * one is decided by how many times the plot has been round the loop. A
+ * selection made, an auditor sent, a second selection made, and the block is
+ * STILL over ten percent — that is not a figure to be re-counted, it is a
+ * plot somebody at HQ has to come and look at. So it is kept out of
+ * CULLING_ACTIONS: a rule in that list answers "what does this rate mean",
+ * and this one answers a different question.
+ *
+ * It routes to HQ Operation (`nursery_ops` in nelos_modules), which is the
+ * one thing about it that must match the database: nelos_routes matches a
+ * case by the WORDS in its category. The category here, the nelos_categories
+ * row and the nelos_routes rule are three spellings of one string, and a
+ * change to any of them without the other two sends every HQ verification
+ * back to the Field Conductor who raised it. shared/RUN_ME_culling_inang.sql
+ * in mjm-ai-system is the other two.
+ */
+export const HQ_ACTION = {
+  key: 'hq',
+  titleKey: 'cull.actHq',
+  caseTitle: (plot) => `Request HQ verification for culling at plot "${plot}"`,
+  category: 'From Culling Calculator - Request HQ Verification',
+  priority: 'normal',
+  tone: 'warn',
+};
+
 /** The rule that applies to a rate, or null when there is nothing to say. */
 export function actionFor(rate) {
   if (!Number.isFinite(rate)) return null;
   return CULLING_ACTIONS.find((a) => a.when(rate)) || null;
+}
+
+/**
+ * The rule that applies to a WHOLE PLOT, which is a list of rates — one per
+ * batch standing in it.
+ *
+ * The calculator shows every batch at once now, so the decision is about all
+ * of them together and the question is not "what does this rate mean" but
+ * "is every one of them clear". THE WORST BATCH DECIDES. Averaging them
+ * would hide the one in trouble behind the ones that are fine, which is the
+ * same reason the screen never offered an all-batches figure to act on.
+ *
+ * A rate that is not a number — a batch whose ledger does not add up — is
+ * not clear and is not ignorable: it answers null, so no button is offered
+ * at all. "Cannot say" must never read as "yes".
+ *
+ * It is the same CULL_LIMIT and the same two rules as actionFor, asked of a
+ * set instead of one, so a third band added above still arrives here with
+ * nothing changed.
+ */
+export function actionForPlot(rates) {
+  const list = rates || [];
+  if (!list.length) return null;
+  if (list.some((r) => !Number.isFinite(r))) return null;
+  return actionFor(Math.max(...list));
 }
 
 /**
@@ -73,20 +126,31 @@ export function actionFor(rate) {
  * calculator does touches stock. Whoever picks the case up has to be able to
  * see what was counted and what it left the rate at, without opening the
  * calculator or taking the Field Conductor's word for it.
+ *
+ * ONE LINE PER BATCH, because the calculator now shows the whole plot at
+ * once and the decision was made over all of them. A case that named only
+ * the batch somebody happened to have selected would be a record of a
+ * different decision from the one that was taken, and it would send the
+ * auditor to part of a plot.
+ *
+ * The separate counts are kept beside the total — "300 + 250 + 180" is a
+ * walk round the plot in three goes, and a single 730 hides that.
  */
-export function caseBody({ t, plot, nursery, balance, inang, rate, terms, by, date, batch }) {
+export function caseBody({ t, plot, nursery, rows, by, date }) {
   const lines = [
     `${t('cull.plot')}: ${plot}${nursery ? ` (${nursery})` : ''}`,
-    /* Which block of the plot. A plot holds several batches and they are
-       collected on their own timetables, so "U4" on its own sends the auditor
-       to the right field and leaves them to guess which part of it. */
-    ...(batch ? [`${t('cull.batchField')}: ${batch}`] : []),
-    `${t('cull.balance')}: ${fmtNum(balance)}`,
-    // The separate counts are kept, not just their total: "300 + 250 + 180"
-    // is a walk round the plot in three goes, and a single 730 hides that.
-    `${t('cull.inangCounted')}: ${fmtNum(inang)}${terms && terms.length > 1 ? `  (${terms.map(fmtNum).join(' + ')})` : ''}`,
-    `${t('cull.estRate')}: ${fmtPct(rate)}`,
-    `${t('cull.raisedBy')}: ${by || '—'} · ${date}`,
+    '',
   ];
+  (rows || []).forEach((r) => {
+    const terms = (r.terms && r.terms.length > 1) ? `  (${r.terms.map(fmtNum).join(' + ')})` : '';
+    lines.push(
+      `${t('cull.batchField')} ${r.batch || '—'}: ` +
+      `${t('cull.balance')} ${fmtNum(r.balance)} (${fmtPct(r.rate)})` +
+      ` · ${t('cull.selected')} ${fmtNum(r.inang)}${terms}` +
+      ` · ${t('cull.finalBalance')} ${fmtNum(r.finalBalance)} (${fmtPct(r.finalRate)})`
+    );
+  });
+  lines.push('');
+  lines.push(`${t('cull.raisedBy')}: ${by || '—'} · ${date}`);
   return lines.join('\n');
 }

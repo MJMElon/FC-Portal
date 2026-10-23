@@ -4,6 +4,7 @@ import ProgressDial from './ProgressDial.jsx';
 import { weekDates } from './schedule.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
+import Icon from '../../components/Icon.jsx';
 
 /** One week-stepper arrow, the same control the front page's board uses. */
 function NavArrow({ dir, onClick, label }) {
@@ -62,8 +63,8 @@ export default function WeekBoard({
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,.06)]">
       <div className="px-4 py-2.5 border-b border-slate-200 bg-teal-50">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate">
-            🛠️ {t('mt.weeklyTasks')}
+          <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-teal-800 truncate flex items-center gap-1.5">
+            <Icon name="tool" className="w-3.5 h-3.5 shrink-0" /> {t('mt.weeklyTasks')}
           </span>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[10px] font-black text-teal-700">{month}</span>
@@ -134,9 +135,9 @@ export default function WeekBoard({
                 {total ? (
                   <>
                     <span className={clear ? 'text-emerald-600' : 'text-slate-700'}>
-                      {clear ? '✓' : doneN}
+                      {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : doneN.toLocaleString()}
                     </span>
-                    {!clear && `/${total}`}
+                    {!clear && `/${total.toLocaleString()}`}
                   </>
                 ) : (
                   t('mtb.none')
@@ -173,7 +174,7 @@ export default function WeekBoard({
                      : t('mt.weekClear')}
         </span>
         {totalDue > 0 && (
-          <span className="shrink-0 tabular-nums">{t('mt.weekTally', { done: totalDone, n: totalDue })}</span>
+          <span className="shrink-0 tabular-nums">{t('mt.weekTally', { done: totalDone.toLocaleString(), n: totalDue.toLocaleString() })}</span>
         )}
       </div>
     </div>

@@ -44,7 +44,6 @@ import { formatDistance, mapsUrl } from './track/track.js';
 import GpsTrack from './GpsTrack.jsx';
 import HistoryDialog from './HistoryDialog.jsx';
 import PhotoSlots from './PhotoSlots.jsx';
-import TransplantSheet from './TransplantSheet.jsx';
 import VerifyHub from './VerifyHub.jsx';
 import WeekBoard from './WeekBoard.jsx';
 import WorkIcon from './WorkIcons.jsx';
@@ -54,6 +53,7 @@ import { batchesIn, plotKey } from './plotBatches.js';
 import { makeCapacity, makeCoverage, weekUsage } from './usage.js';
 import RecordCard from './RecordCard.jsx';
 import { tintOf } from './tints.js';
+import Icon from '../../components/Icon.jsx';
 import {
   WEEKS,
   isDone as isJobDone,
@@ -119,6 +119,18 @@ export default function MaintenanceModule({
   plotFilter = null,
   subtitle = 'FC Portal',
   back = '/dashboard',
+  /* { week, workTypeKey } — opens straight to that job's record form,
+     skipping the week board. The dashboard's own maintenance dials use
+     this: tapping one pops the form directly rather than landing on the
+     whole module first. The task list it needs (tasksByWeek) is still
+     built the ordinary way below and fills in once the schedule has
+     loaded, same as it would after a tap from WeekBoard itself. */
+  initialSheet = null,
+  /* Closes the WHOLE thing when the sheet initialSheet opened is
+     dismissed, instead of revealing the module page behind it — a
+     dashboard dial only ever asked for the one form, not a landing on
+     this page. Ignored without initialSheet. */
+  onQuickClose = null,
 }) {
   const auth = useAuth();
   const staffName   = identity ? identity.name        : auth.staffName;
@@ -143,9 +155,10 @@ export default function MaintenanceModule({
      worked out from. Null until read, and null forever on a source that
      cannot read it, which the board takes as "say nothing". */
   const [cap, setCap] = useState(null);
-  const [sheet, setSheet] = useState(null);         // { week, workType }
+  const [sheet, setSheet] = useState(() => (initialSheet
+    ? { week: initialSheet.week, workType: workTypeByKey(initialSheet.workTypeKey) }
+    : null));                                       // { week, workType }
   const [history, setHistory] = useState(false);
-  const [transplant, setTransplant] = useState(false);
   const [saving, setSaving] = useState(false);
   const [workers, setWorkers] = useState([]);   // the roster a conductor may credit work to
   const [pending, setPending] = useState([]);   // records the queue is holding
@@ -169,12 +182,6 @@ export default function MaintenanceModule({
      the screen lying in the expensive direction. See canMaintCorrect. */
   const mayEdit   = canMaintCorrect(permissions, 'edit');
   const mayDelete = canMaintCorrect(permissions, 'delete');
-  /* And the Transplanting Job sheet's own, which is NOT `edit`. A
-     transplanting record is the crew for a plot, and the payroll divides that
-     plot's quantity among exactly those names — so reopening one moves a
-     day's pay. Somebody trusted to fix a quantity on a spraying record is not
-     automatically trusted with that. Fails closed, like the other two. */
-  const mayEditTransplant = canMaintCorrect(permissions, 'transplant_edit');
   const mayExport = canMaintain(permissions, 'export');
   /* Not a permission — what the work sheet uses to decide whether a job
      already ticked off can be opened again. Nothing is changed or removed by
@@ -374,9 +381,6 @@ export default function MaintenanceModule({
       ? visiblePlots.filter((p) => nurseryKey(p.nursery_name) === want)
       : visiblePlots;
   }, [visiblePlots, nursery]);
-
-  const transplantPlots = useMemo(
-    () => nurseryPlots.map((p) => p.plot_name), [nurseryPlots]);
 
   const nurseryOptions = useMemo(
     () => [...new Set(visiblePlots.map((p) => p.nursery_name).filter(Boolean))].sort(),
@@ -685,17 +689,17 @@ export default function MaintenanceModule({
           )}
           <button
             onClick={() => setHistory(true)}
-            className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-widest rounded-xl px-4 py-2.5"
+            className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-widest rounded-xl px-4 py-2.5 inline-flex items-center gap-1.5"
           >
-            🗂️ {t('mt.history')}
+            <Icon name="folder" className="w-3.5 h-3.5" /> {t('mt.history')}
           </button>
           <div className="flex-1" />
           {mayExport && !!visible.length && (
             <button
               onClick={handleExport}
-              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-widest rounded-xl px-4 py-2.5"
+              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-widest rounded-xl px-4 py-2.5 inline-flex items-center gap-1.5"
             >
-              {t('mt.exportCsv')}
+              <Icon name="download" className="w-3.5 h-3.5" /> {t('mt.exportCsv')}
             </button>
           )}
         </div>
@@ -832,20 +836,19 @@ export default function MaintenanceModule({
           </button>
         )}
 
-        {/* The jobs a plot needs when seedlings go INTO it. Its own button
-            rather than a fifth work type on the week board: these four are
-            not planned by the month's schedule at all — the operation report
-            decides which plots they apply to, by having transplanted into
-            them. */}
-        {mayRecord && (
-          <button
-            onClick={() => setTransplant(true)}
-            disabled={setup || !visiblePlots.length}
-            className="w-full bg-white hover:bg-slate-50 border-2 border-emerald-600 disabled:opacity-40 text-emerald-700 font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors"
-          >
-            🌱 {t('tp.button')}
-          </button>
-        )}
+        {/* TRANSPLANTING HAS LEFT THIS MODULE. The jobs a plot needs when
+            seedlings go INTO it were never planned by the month's schedule —
+            the operation report decides which plots they apply to, by having
+            transplanted into them — so they sat here as a button beside four
+            jobs they had nothing to do with. The office asked for them out,
+            and they are now the right-hand half of Pending Verification on
+            the dashboard, which raises a plot while any of its four jobs is
+            unrecorded and opens this same sheet.
+
+            What that costs is written up in CLAUDE.md and was taken
+            knowingly: the section hides itself when nothing is outstanding,
+            so a nursery-month with every job recorded has no door until the
+            next plot is transplanted. */}
 
         {setup && (
           <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm font-bold">
@@ -879,7 +882,7 @@ export default function MaintenanceModule({
               workTypeKey: sheet.workType.key, plot: task.plot,
               chemical: task.chemical, week: sheet.week, month })}
             onSave={handleSheetSave}
-            onClose={() => setSheet(null)}
+            onClose={() => { setSheet(null); if (onQuickClose) onQuickClose(); }}
           />
         )}
 
@@ -897,23 +900,6 @@ export default function MaintenanceModule({
           </div>
         )}
       </div>
-
-      {transplant && (
-        <TransplantSheet
-          nursery={nursery}
-          month={month}
-          plotNames={transplantPlots}
-          /* The nursery's general workers, and the whole register only if
-             that narrowing leaves nobody. Not gated on the `workers`
-             function switch the way the maintenance form is: crediting the
-             work IS this screen, so turning it off would leave a form that
-             cannot be filled in. */
-          workers={nurseryWorkers.length ? nurseryWorkers : workers}
-          staffName={staffName}
-          mayEdit={mayEditTransplant}
-          onClose={() => setTransplant(false)}
-        />
-      )}
 
       {history && (
         <HistoryDialog
@@ -1042,10 +1028,10 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
       <div className="relative bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 pb-7 shadow-2xl max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-black text-slate-800 text-[15px] uppercase tracking-wide">
-            🛠️ {record ? t('mt.editTitle') : t('mt.newTitle')}
+            <Icon name="tool" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {record ? t('mt.editTitle') : t('mt.newTitle')}
           </h3>
-          <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 text-xl">
-            ×
+          <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-slate-100 text-slate-500 flex items-center justify-center">
+            <Icon name="close" className="w-4 h-4" />
           </button>
         </div>
 

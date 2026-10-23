@@ -5,8 +5,9 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { printDO } from '../../lib/pdf.js';
+import { compressSeals, formatSealRanges, sealDigits, rangeQty, rangeHolding, SHOW_SEALS_ON_DO } from '../../lib/sealRanges.js';
 import EntryModal from '../do/EntryModal.jsx';
-import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs } from '../do/data.js';
+import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs, issuedQtyByAL, readDOQueue } from '../do/data.js';
 import { useWorkerTick } from '../do/useWorkerTick.js';
 import WorkerTickModal from '../do/WorkerTickModal.jsx';
 import {
@@ -23,6 +24,8 @@ import {
   saveProgress,
   defaultProgress,
   mergeConsents,
+  issuedShares,
+  applyIssuedShares,
   statusOf,
   saveScanRecord,
   flushScanRecords,
@@ -30,8 +33,17 @@ import {
   subscribeScanRecords,
   unsubscribeScanRecords,
   findBarcodeElsewhere,
+  cachedSealAllocations,
+  fetchSealAllocations,
+  sealFeatureLive,
+  allocationsOf,
+  sealVerdict,
+  sealsForNextDO,
+  markSealsOnDO,
+  fetchSealsOnDO,
 } from './store.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
+import Icon from '../../components/Icon.jsx';
 
 const DEDUPE_DEBOUNCE_MS = 800;
 const OVER_REPEAT_MS = 1200;
@@ -47,6 +59,14 @@ export default function ScanModule() {
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState(null);
   const [lastInfo, setLastInfo] = useState({ key: 'scan.waitingFirst' });
+  /* The seal ranges handed to each customer (see fetchSealAllocations).
+     null = never read, which is "no seal feature" everywhere it is asked. */
+  const [sealAllocs, setSealAllocs] = useState(() => cachedSealAllocations());
+  const sealAllocsRef = useRef(sealAllocs);
+  sealAllocsRef.current = sealAllocs;
+  /* The seals the DO being saved right now carries, so onDoSaved can mark
+     them as gone once the save (or the queue) has taken it. */
+  const doSealsRef = useRef(null);
 
   // Issue DO popup state (opens the DO entry form in-place, no navigation).
   const [doEntry, setDoEntry] = useState(null); // { al, suggestQty, scannedQty, consentId }
@@ -85,6 +105,22 @@ export default function ScanModule() {
   const consents = useMemo(() => mergeConsents(serverConsents, progress), [serverConsents, progress]);
   consentsRef.current = consents;
   const active = consents.find((c) => c.id === activeId) || null;
+
+  /* How much has gone out on THIS card. activeDOs is every DO on the AL,
+     and it used to be compared whole against this one card's quantity, so
+     0HVUL3's 300 consent opened reading Fully Collected off the 700 DO
+     of the consent before it. It is this card's SHARE now, the same
+     oldest-first split the list uses (issuedShares). With no DOs read yet
+     the phone's own figure stands, and so does a higher one while a DO
+     for this AL is still waiting on the phone to be sent. */
+  function cardIssued(card) {
+    if (!card) return 0;
+    const local = progress[card.id]?.issuedQty || 0;
+    if (!activeDOs.length || !card.al_number || activeDOs[0].al_number !== card.al_number) return local;
+    const cards = consents.filter((c) => c.al_number === card.al_number);
+    const share = issuedShares(cards, issuedQtyByAL(activeDOs))[card.id] || 0;
+    return queuedDOALs().has(card.al_number) ? Math.max(local, share) : share;
+  }
   activeRef.current = active;
 
   const sync = useCallback(async () => {
@@ -95,6 +131,11 @@ export default function ScanModule() {
       const [data, today] = await Promise.all([fetchConsents(), fetchTodayBookingALs().catch(() => null)]);
       setServerConsents(data);
       if (today) setTodayALs(today);
+      /* Best effort beside the list: a failure (no SQL yet, a flaky line)
+         leaves the cached ranges, or none, and scanning goes on as it was. */
+      fetchSealAllocations(data.map((c) => c.al_number))
+        .then(setSealAllocs)
+        .catch(() => {});
       flash(t('scan.synced', { n: data.length }), 'done');
     } catch (e) {
       flash(t('scan.syncFailed', { msg: e.message }), 'danger');
@@ -148,22 +189,13 @@ export default function ScanModule() {
     if (!navigator.onLine) return;
     loadDOsForAL(alNumber).then((dos) => {
       setActiveDOs(dos);
-      if (!consentId || !dos.length) return;
-      const serverIssuedQty = dos.reduce((sum, d) => sum + (d.total_qty || 0), 0);
+      if (!consentId) return;
+      // The AL total is shared over the AL's cards -- see issuedShares.
+      const cards = consentsRef.current.filter((c) => c.al_number === alNumber);
+      const shares = issuedShares(cards, { [alNumber]: issuedQtyByAL(dos)[alNumber] || 0 });
       setProgress((prev) => {
-        const cur = prev[consentId] || defaultProgress();
-        if ((cur.issuedQty || 0) >= serverIssuedQty) return prev;
-        const map = {
-          ...prev,
-          [consentId]: { ...cur, issuedQty: serverIssuedQty, doIssued: serverIssuedQty > 0 },
-        };
-        if (serverIssuedQty > 0) {
-          (active?.memberIds || [consentId]).forEach((id) => {
-            if (id === consentId) return;
-            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-          });
-        }
-        saveProgress(map);
+        const map = applyIssuedShares(prev, cards, shares, queuedDOALs());
+        if (map !== prev) saveProgress(map);
         return map;
       });
     }).catch(() => {});
@@ -182,26 +214,17 @@ export default function ScanModule() {
     )];
     if (!alNumbers.length) return;
     loadIssuedQtyByALs(alNumbers).then((byAL) => {
+      // Every AL asked about has an answer, nought included: an AL with no
+      // DO left standing is one whose cards have collected nothing.
+      const full = {};
+      alNumbers.forEach((al) => { full[al] = byAL[al] || 0; });
+      const cards = consentsRef.current;
+      const shares = issuedShares(cards, full);
       setProgress((prev) => {
-        let changed = false;
-        const map = { ...prev };
-        consentsRef.current.forEach((c) => {
-          const serverIssuedQty = byAL[c.al_number] || 0;
-          if (!serverIssuedQty) return;
-          const cur = map[c.id] || defaultProgress();
-          if ((cur.issuedQty || 0) >= serverIssuedQty) return;
-          map[c.id] = { ...cur, issuedQty: serverIssuedQty, doIssued: true };
-          // Same reason as onDoSaved: every member of a merged card has to
-          // carry doIssued, or the ones besides the anchor fall back out of
-          // the group and reappear as their own "Pending to Scan" cards.
-          (c.memberIds || [c.id]).forEach((id) => {
-            if (id === c.id) return;
-            map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-          });
-          changed = true;
-        });
-        if (!changed) return prev;
-        saveProgress(map);
+        // applyIssuedShares also marks a merged card's other members, for
+        // the reason onDoSaved gives.
+        const map = applyIssuedShares(prev, cards, shares, queuedDOALs());
+        if (map !== prev) saveProgress(map);
         return map;
       });
     }).catch(() => {});
@@ -258,6 +281,23 @@ export default function ScanModule() {
       });
     }).catch(() => {/* stay with localStorage */});
 
+    /* Seals another device already put on a DO for this card, so the next
+       DO here does not name them again. Only once the seal SQL is known to
+       be in -- the column it asks about does not exist before that. */
+    if (sealFeatureLive()) {
+      fetchSealsOnDO(scanIds).then((codes) => {
+        if (!codes.length) return;
+        setProgress((prev) => {
+          const cur = prev[activeId] || defaultProgress();
+          const next = markSealsOnDO(cur, codes);
+          if ((next.doSeals || []).length === (cur.doSeals || []).length && Array.isArray(cur.doSeals)) return prev;
+          const map = { ...prev, [activeId]: next };
+          saveProgress(map);
+          return map;
+        });
+      }).catch(() => {});
+    }
+
     // Subscribe to live INSERTs from other devices scanning the same consent.
     realtimeChannelRef.current = subscribeScanRecords(scanIds, (barcode) => {
       if (seenRef.current.has(barcode)) return;
@@ -276,14 +316,37 @@ export default function ScanModule() {
     });
   }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ONE DOOR, and a seal keyed by hand comes through it too.
+     `opts.typed` is the Add button on the scan log -- the seal whose
+     sticker will not read. It is the SAME seal and the same record, so it
+     takes the same path: the duplicate guard, the spoken-for guard, the
+     consent's own seal ranges, the server write, the over-quota count.
+     A second writer would be a second set of rules to keep in step, and
+     the one it would skip is the one that catches a typo.
+
+     Two things differ, and only two:
+
+     - The DEBOUNCE is skipped. It exists because a camera reads the same
+       barcode ten times a second; a person pressing Add has done one
+       deliberate thing, and swallowing it would be silence where the
+       answer matters most.
+     - It RETURNS its verdict, so the dialog can print the very sentence
+       the toast prints. The toast is behind the dialog at that moment,
+       and two wordings for one outcome is how they drift apart.
+
+     The camera and the hardware wedge ignore the return, as they always
+     have. */
   const recordScan = useCallback(
-    (rawCode) => {
+    (rawCode, opts) => {
+      const typed = !!(opts && opts.typed);
       const a = activeRef.current;
-      if (!a) return;
+      if (!a) return { ok: false };
       const code = String(rawCode).trim();
-      if (!code) return;
+      if (!code) return { ok: false, key: 'scan.manualEmpty' };
       const now = Date.now();
-      if (code === lastCodeRef.current && now - lastTimeRef.current < DEDUPE_DEBOUNCE_MS) return;
+      if (!typed && code === lastCodeRef.current && now - lastTimeRef.current < DEDUPE_DEBOUNCE_MS) {
+        return { ok: false };
+      }
       lastCodeRef.current = code;
       lastTimeRef.current = now;
 
@@ -291,7 +354,7 @@ export default function ScanModule() {
         beepDuplicate();
         vibrate([20, 40, 20]);
         flash(t('scan.duplicate', { code }), 'warn');
-        return;
+        return { ok: false, key: 'scan.duplicate', vars: { code } };
       }
 
       /* A seal counted onto an earlier customer's lorry is spoken for, so
@@ -321,7 +384,43 @@ export default function ScanModule() {
         vibrate([120, 60, 120, 60, 200]);
         setLastInfo({ key: 'scan.notCountedElsewhere', vars: { code, who } });
         flash(t('scan.notCountedElsewhere', { code, who }), 'danger');
-        return;
+        return { ok: false, key: 'scan.notCountedElsewhere', vars: { code, who } };
+      }
+
+      /* IS THIS SEAL THIS CUSTOMER'S? Only asked of an order whose consent
+         named seal ranges -- one signed before they existed has none, and
+         scans exactly as it always did. Answered off the cached
+         allocations, so it needs no line. A seal that slips past (a phone
+         that has not synced the newest consent) is caught by the database
+         when the scan arrives, and the case is raised there, not here. */
+      const verdict = sealVerdict(code, a, sealAllocsRef.current);
+      if (verdict && !verdict.ok) {
+        const current = a.customer + (a.al_number ? ' (' + a.al_number + ')' : '');
+        let key, vars;
+        if (verdict.kind === 'other') {
+          const o = verdict.other;
+          const who = (o.customer_name || t('scan.anotherOrder')) + (o.al_number ? ' (' + o.al_number + ')' : '');
+          key = 'scan.sealOtherCustomer';
+          vars = { code, customer: o.customer_name || t('scan.anotherOrder'), al: o.al_number || '—', current };
+          /* Remembered like any seal that is somebody else's, so it reads
+             as rejected the next time it is waved. */
+          setProgress((prev) => {
+            const map = { ...prev, [a.id]: rememberElsewhere(prev[a.id] || defaultProgress(), code, who) };
+            saveProgress(map);
+            return map;
+          });
+        } else {
+          /* Not remembered: the remembered message says whose a seal is,
+             and this one is nobody's. The check is instant and needs no
+             line, so the next wave is refused the same way anyway. */
+          key = 'scan.sealNotOnConsent';
+          vars = { code, ranges: sealRangesText(allocationsOf(a, sealAllocsRef.current)) };
+        }
+        beepAlarm();
+        vibrate([120, 60, 120, 60, 200]);
+        setLastInfo({ key, vars });
+        flash(t(key, vars), 'danger');
+        return { ok: false, key, vars };
       }
 
       seenRef.current.add(code);
@@ -370,7 +469,7 @@ export default function ScanModule() {
           lastOverRef.current = now;
         }
         vibrate([120, 60, 120, 60, 200]);
-        flash(t('scan.overQuota', { u: unique, q: a.qty }), 'danger');
+        flash(t('scan.overQuota', { u: unique.toLocaleString(), q: a.qty.toLocaleString() }), 'danger');
         next.overFired = true;
       } else {
         setLastInfo({ key: 'scan.latest', vars: { code } });
@@ -382,7 +481,7 @@ export default function ScanModule() {
         next.completedAt = Date.now();
         beepComplete();
         vibrate([80, 60, 80, 60, 200]);
-        flash(t('scan.targetReached', { q: a.qty }), 'done');
+        flash(t('scan.targetReached', { q: a.qty.toLocaleString() }), 'done');
       }
 
       setProgress((prev) => {
@@ -390,6 +489,9 @@ export default function ScanModule() {
         saveProgress(map);
         return map;
       });
+      return willBeOver
+        ? { ok: true, key: 'scan.overItem', vars: { code } }
+        : { ok: true, key: 'scan.manualAdded', vars: { code } };
     },
     [flash, t]
   );
@@ -475,9 +577,8 @@ export default function ScanModule() {
       loadBatchData().then(({ batchMap }) => setDoBatchMap(batchMap), () => {});
     }
     setIssuing(false);
-    // Use the higher of localStorage-tracked qty and server-derived qty from activeDOs.
-    const serverIssuedQty = activeDOs.reduce((sum, d) => sum + (d.total_qty || 0), 0);
-    const issuedQty = Math.max(progress[consent.id]?.issuedQty || 0, serverIssuedQty);
+    // This card's own share of what has gone out -- see cardIssued.
+    const issuedQty = cardIssued(consent);
     const newScans = Math.max(0, consent.unique - issuedQty);
     const remainingBalance = Math.max(0, consent.qty - issuedQty);
     const suggestQty = newScans > 0 ? newScans : remainingBalance;
@@ -493,14 +594,45 @@ export default function ScanModule() {
     setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
   }
 
+  /* THE SEALS THAT WENT OUT ON THIS DO: everything scanned on the card
+     since its last DO. Added here and not in EntryModal, because the DO
+     module's own DOs are keyed with no scanner and carry no seals.
+
+     The keys are put on the payload ONLY when there is a seal to name AND
+     this phone has read seal_allocations at least once. That read is the
+     proof the seal SQL is in: before it, shared_do_records has no
+     seal_ranges column, and a DO naming one would be refused -- online, and
+     then from the offline queue on every sync after. A DO with no seals
+     carries no keys at all, which is what it looked like before.
+
+     The payload is queued as it stands, so an offline DO takes its seals
+     with it. */
+  function withSeals(args, consentId) {
+    doSealsRef.current = null;
+    if (!consentId) return args;
+    const codes = sealsForNextDO(progressRef.current[consentId] || defaultProgress());
+    doSealsRef.current = { consentId, codes };
+    const seals = codes.filter((c) => sealDigits(c) != null);
+    if (!seals.length || !sealFeatureLive()) return args;
+    const ranges = compressSeals(seals);
+    return {
+      ...args,
+      payload: { ...args.payload, seal_ranges: ranges, seal_qty: ranges.reduce((n, r) => n + r.qty, 0) },
+    };
+  }
+
   function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     const al = doEntry?.al || {};
     const consentId = doEntry?.consentId;
     const memberIds = doEntry?.memberIds || (consentId ? [consentId] : []);
+    const sealsOut = doSealsRef.current && doSealsRef.current.consentId === consentId ? doSealsRef.current.codes : [];
+    doSealsRef.current = null;
     setDoEntry(null);
     if (consentId) {
       setProgress((prev) => {
-        const cur = prev[consentId] || defaultProgress();
+        /* Marked as gone whether or not the DO could name them -- they went
+           out on this lorry either way, and must not reappear on the next. */
+        const cur = markSealsOnDO(prev[consentId] || defaultProgress(), sealsOut);
         const map = {
           ...prev,
           [consentId]: {
@@ -572,6 +704,9 @@ export default function ScanModule() {
     }
 
     lines.push('', `*Total Qty: ${p.total_qty || 0}*`);
+    if (SHOW_SEALS_ON_DO && Array.isArray(p.seal_ranges) && p.seal_ranges.length) {
+      lines.push(`Seal No: ${formatSealRanges(p.seal_ranges)}`, `Seal Qty: ${p.seal_qty || 0}`);
+    }
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
   }
 
@@ -584,6 +719,8 @@ export default function ScanModule() {
           lastInfo={lastInfo}
           issuing={issuing}
           activeDOs={activeDOs}
+          issuedQty={cardIssued(active)}
+          sealAllocs={sealAllocs}
           onScan={recordScan}
           onBack={() => setActiveId(null)}
           onIssueDO={() => openIssueDO(active)}
@@ -602,7 +739,7 @@ export default function ScanModule() {
           initialQty={doEntry.suggestQty}
           scannedQty={doEntry.scannedQty}
           toast={(m) => flash(m, 'warn')}
-          onSubmit={(args) => persistDO({ ...args, staff: staffName })}
+          onSubmit={(args) => persistDO({ ...withSeals(args, doEntry.consentId), staff: staffName })}
           onSaved={onDoSaved}
           onClose={() => setDoEntry(null)}
         />
@@ -611,17 +748,17 @@ export default function ScanModule() {
       {printPrompt && (
         <div className="modal-overlay open" onClick={() => setPrintPrompt(null)}>
           <div className="bg-white rounded-3xl p-7 w-full max-w-sm shadow-2xl text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="text-4xl mb-3">✅</div>
+            <Icon name="checkCircle" className="w-10 h-10 mx-auto mb-3 text-emerald-500" />
             <div className="font-black text-slate-800 text-lg uppercase tracking-wide mb-1">{t('do.doSavedTitle')}</div>
             <div className="text-sm font-bold text-slate-500 mb-1">{printPrompt.payload.do_number}</div>
             <div className="text-xs font-bold text-slate-400 mb-5">{t('do.printPrompt')}</div>
             <div className="flex flex-col gap-3">
               <button
                 onClick={() => { shareWhatsApp(printPrompt); setPrintPrompt(null); }}
-                className="w-full py-3 text-white font-black text-[11px] uppercase tracking-widest rounded-xl border-none cursor-pointer"
+                className="w-full py-3 text-white font-black text-[11px] uppercase tracking-widest rounded-xl border-none cursor-pointer flex items-center justify-center gap-1.5"
                 style={{ background: '#25D366' }}
               >
-                {t('scan.shareWhatsApp')}
+                <Icon name="share" className="w-4 h-4" /> {t('scan.shareWhatsApp')}
               </button>
               <button
                 onClick={() => { doPrint(printPrompt); setPrintPrompt(null); }}
@@ -644,7 +781,7 @@ export default function ScanModule() {
 
       {toast && (
         <div
-          className={`fixed left-1/2 bottom-6 -translate-x-1/2 px-5 py-3 rounded-xl font-mono text-xs tracking-wider z-50 border bg-[#111821] ${
+          className={`fixed left-1/2 bottom-6 -translate-x-1/2 px-5 py-3 rounded-xl font-mono text-xs tracking-wider z-50 border bg-[#111821] flex items-center gap-2 ${
             toast.kind === 'danger'
               ? 'border-red-500 text-red-400'
               : toast.kind === 'warn'
@@ -654,6 +791,10 @@ export default function ScanModule() {
               : 'border-slate-600 text-slate-200'
           }`}
         >
+          <Icon
+            name={toast.kind === 'danger' ? 'blocked' : toast.kind === 'warn' ? 'warning' : toast.kind === 'done' ? 'checkCircle' : 'sparkles'}
+            className="w-4 h-4 shrink-0"
+          />
           {toast.text}
         </div>
       )}
@@ -735,7 +876,7 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
                   <div className="min-w-0">
                     {bookedToday(c) && (
                       <span className="inline-block bg-amber-400 text-[#0a0f14] text-[9px] font-black rounded px-1.5 py-0.5 uppercase tracking-wider mb-1">
-                        📅 {t('scan.today')} {todayALs[c.al_number]}
+                        <Icon name="calendar" className="w-2.5 h-2.5 inline-block align-[-1px]" /> {t('scan.today')} {todayALs[c.al_number]}
                       </span>
                     )}
                     <div className="font-semibold text-base break-words">{c.customer}</div>
@@ -751,8 +892,8 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
                     {c.unique > collected ? t('scan.pendingIssueDO') : t('scan.pendingToScan')}
                   </span>
                   {collected > 0 && balance > 0
-                    ? <>{t('scan.qty')} {c.qty} · Collected <b className="text-emerald-300">{collected}</b> · Balance <b className="text-amber-300">{balance}</b></>
-                    : <>{t('scan.qty')} <b className="text-slate-200">{c.qty}</b> · {t('scan.scanned')} <b className="text-slate-200">{c.unique}</b></>
+                    ? <>{t('scan.qty')} {c.qty.toLocaleString()} · Collected <b className="text-emerald-300">{collected.toLocaleString()}</b> · Balance <b className="text-amber-300">{balance.toLocaleString()}</b></>
+                    : <>{t('scan.qty')} <b className="text-slate-200">{c.qty.toLocaleString()}</b> · {t('scan.scanned')} <b className="text-slate-200">{c.unique.toLocaleString()}</b></>
                   }
                   {c.over ? (
                     <>
@@ -775,7 +916,7 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
 }
 
 // ── Scanner view ──────────────────────────────────────
-function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssueDO }) {
+function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, onScan, onBack, onIssueDO }) {
   const { t } = useLang();
   const [scanning, setScanning] = useState(false);
   const [statusKey, setStatusKey] = useState('ready');
@@ -796,14 +937,30 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
   });
   const hwModeRef = useRef(hwMode);
   hwModeRef.current = hwMode;
+  /* THE SEAL THAT WILL NOT READ. A sticker gets wet, creased or printed
+     short, and the conductor is standing at the lorry with it in his hand.
+     Without this the only ways on are to wave it until the battery goes or
+     to leave the order short, and a count that is short for a reason
+     nobody wrote down is the one the office cannot settle later.
+
+     It is a DIALOG rather than a prompt(): a prompt is dismissed out of
+     habit, and a cancel that looks like a save is the one shape of wrong
+     this screen must not have. It stays OPEN after each seal, because the
+     reason a sticker is unreadable -- a wet roll, a bad print run -- is
+     usually true of the next one too, and reopening it per seal is the
+     work done twice. */
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const [manualSaid, setManualSaid] = useState(null);   // { ok, key, vars }
+  const [manualCount, setManualCount] = useState(0);
+  const manualInputRef = useRef(null);
   const wedgeRef = useRef({ chars: '', last: 0, timer: null });
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
 
-  // Use the higher of localStorage-tracked qty and server-derived qty from activeDOs.
-  // This ensures the correct balance even when DOs were issued through the AI system.
-  const serverIssuedQty = activeDOs.reduce((sum, d) => sum + (d.total_qty || 0), 0);
-  const issuedQty = Math.max(consent.issuedQty || 0, serverIssuedQty);
+  // issuedQty is THIS card's share of the AL's DOs, worked out by the
+  // parent (cardIssued) -- never the AL total, which belongs to every
+  // consent on the order at once.
   // No floor here — a consent whose whole qty is already issued (balance 0)
   // has nothing left to scan for, and used to show a phantom "0/1, 1
   // remaining" from Math.max(1, ...) that let scanning carry on past a
@@ -819,6 +976,13 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
     : Math.max(0, consent.unique - issuedQty);
   const remain = Math.max(0, sessionQty - sessionUnique);
   const st = statusOf(consent);
+  /* The seals the customer was given on the consent, so the conductor
+     knows what to expect on the lorry -- and how many of them are in. */
+  const ownSeals = allocationsOf(consent, sealAllocs);
+  const ownSealQty = ownSeals.reduce((n, r) => n + rangeQty(r.start_no, r.end_no), 0);
+  const inRangeCount = ownSeals.length
+    ? (consent.seen || []).filter((c) => rangeHolding(c, ownSeals)).length
+    : 0;
   const pct = sessionQty > 0 ? Math.min(100, (sessionUnique / sessionQty) * 100) : 0;
   const statusText = scanning
     ? st === 'over'
@@ -881,26 +1045,68 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
       experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     };
 
-    const adv = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+    /* html5-qrcode's own cameraIdOrConfig validation only accepts a
+       deviceId string, or an object with EXACTLY ONE key -- facingMode or
+       deviceId (createVideoConstraints in the library). `{facingMode:
+       {ideal:'environment'}, ...adv}` carried THREE keys (facingMode,
+       width, height) and `true` is neither a string nor an object, so
+       both threw synchronously before ever touching the camera -- "Camera
+       error: Invalid type of 'cameraIdOrConfig' = boolean" is the
+       library's own validator refusing the LAST attempt in this list, not
+       a real camera failure. Three of the four attempts never worked;
+       only the two plain facingMode ones ever got as far as asking the
+       OS for a camera, and whichever real error those hit (permission
+       denied, no camera) was always masked by this one.
+
+       The resolution hint belongs in `config.videoConstraints` instead --
+       the library uses that in place of cameraIdOrConfig entirely when
+       it is a valid MediaTrackConstraints object, so it can carry
+       facingMode AND width/height together without hitting the
+       one-key rule. And the real "try anything" last resort is
+       `Html5Qrcode.getCameras()`, which asks the OS to list cameras
+       rather than guessing a shape the library will accept. */
+    const hdHint = { width: { ideal: 1920 }, height: { ideal: 1080 } };
     const attempts = [
-      { facingMode: { ideal: 'environment' }, ...adv },
-      { facingMode: 'environment' },
-      { facingMode: 'user' },
-      true,
+      { cam: { facingMode: 'environment' }, videoConstraints: { facingMode: 'environment', ...hdHint } },
+      { cam: { facingMode: 'environment' } },
+      { cam: { facingMode: 'user' } },
     ];
 
     let started = false;
     let lastErr = null;
-    for (const cam of attempts) {
+    for (const a of attempts) {
       const qr = new Html5Qrcode('reader', { verbose: false });
       try {
-        await qr.start(cam, config, onScan, () => {});
+        const cfg = a.videoConstraints ? { ...config, videoConstraints: a.videoConstraints } : config;
+        await qr.start(a.cam, cfg, onScan, () => {});
         qrRef.current = qr;
         started = true;
         break;
       } catch (e) {
         lastErr = e;
         try { await qr.clear(); } catch (_) { /* ignore */ }
+      }
+    }
+    // Last resort: ask the OS what cameras exist at all, rather than
+    // guessing facingMode values it may not recognise. A device whose
+    // only camera answers to neither 'environment' nor 'user' still has
+    // a device id this finds.
+    if (!started) {
+      try {
+        const cams = await Html5Qrcode.getCameras();
+        if (cams && cams.length) {
+          const qr = new Html5Qrcode('reader', { verbose: false });
+          try {
+            await qr.start(cams[0].id, config, onScan, () => {});
+            qrRef.current = qr;
+            started = true;
+          } catch (e) {
+            lastErr = e;
+            try { await qr.clear(); } catch (_) { /* ignore */ }
+          }
+        }
+      } catch (e) {
+        lastErr = lastErr || e;
       }
     }
     if (!started) {
@@ -1034,6 +1240,31 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* Hands the typed seal to the ONE writer and prints back whatever it
+     says. `sealDigits` only normalises what was typed -- a gun sends a
+     stray space or newline and a thumb adds one too -- it does not judge
+     it: whether the seal is this customer's, already counted, or spoken
+     for by another lorry is recordScan's to answer, and it answers it the
+     same way for a wave of the camera.
+
+     The box is cleared only on a seal that went IN. A refused one stays in
+     it, because a refusal is usually a typo and retyping seven digits to
+     fix one of them is how the second typo happens. */
+  function submitManual() {
+    const code = sealDigits(manualCode);
+    if (!code) {
+      setManualSaid({ ok: false, key: 'scan.manualEmpty' });
+      return;
+    }
+    const said = onScanRef.current(code, { typed: true }) || { ok: false };
+    setManualSaid(said);
+    if (said.ok) {
+      setManualCount((n) => n + 1);
+      setManualCode('');
+    }
+    try { manualInputRef.current && manualInputRef.current.focus(); } catch (e) { /* ignore */ }
+  }
+
   async function handleBack() {
     await stopCamera();
     onBack();
@@ -1058,10 +1289,16 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
           <h2 className="text-lg font-bold leading-tight break-words">{consent.customer}</h2>
           <div className="font-mono text-[11px] text-slate-400">
             {issuedQty > 0
-              ? `${t('scan.qty')} ${consent.qty} · Collected ${issuedQty} · Balance ${consent.qty - issuedQty}`
-              : `${t('scan.qty')} ${consent.qty}`}
+              ? `${t('scan.qty')} ${consent.qty.toLocaleString()} · Collected ${issuedQty.toLocaleString()} · Balance ${(consent.qty - issuedQty).toLocaleString()}`
+              : `${t('scan.qty')} ${consent.qty.toLocaleString()}`}
             {consent.al_number && !/^MANUAL-/i.test(consent.al_number) ? ` · ${consent.al_number}` : ''}
           </div>
+          {ownSeals.length > 0 && (
+            <div className="font-mono text-[11px] text-sky-300 mt-0.5 break-words">
+              {t('scan.sealRangesLine', { ranges: sealRangesText(ownSeals), n: ownSealQty.toLocaleString() })}
+              {' · '}{t('scan.sealInRange', { x: inRangeCount.toLocaleString(), y: ownSealQty.toLocaleString() })}
+            </div>
+          )}
         </div>
         <div className={`ml-auto font-mono text-[11px] tracking-wider ${st === 'over' ? 'text-red-400' : st === 'done' ? 'text-amber-300' : scanning ? 'text-emerald-400' : 'text-slate-400'}`}>
           {statusText}
@@ -1070,7 +1307,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
 
       {fullyCollected ? (
         <div className="bg-[#0f1620] border border-emerald-600/40 rounded-2xl p-6 mb-3 flex flex-col items-center text-center gap-1.5">
-          <div className="text-3xl">✅</div>
+          <Icon name="checkCircle" className="w-8 h-8 text-emerald-500" />
           <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider">{t('scan.fullyCollected')}</div>
           <div className="font-mono text-[11px] text-slate-400">{t('scan.fullyCollectedHint')}</div>
         </div>
@@ -1089,7 +1326,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
               </span>
-              <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider">🔗 {t('scan.hwTitle')}</div>
+              <div className="font-mono text-sm font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5"><Icon name="refresh" className="w-3.5 h-3.5" /> {t('scan.hwTitle')}</div>
               <div className="font-mono text-[11px] text-slate-400">{t('scan.hwReady')}</div>
             </div>
           )}
@@ -1104,9 +1341,9 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                   try { localStorage.removeItem('mjm_hw_scanner'); } catch (e) { /* ignore */ }
                   setTimeout(() => startCamera().catch((e) => { setStatusKey('error'); alert(t('scan.cameraError', { msg: e?.message || e })); }), 50);
                 }}
-                className="flex-1 bg-[#111821] border border-[#1f2a38] text-slate-200 font-mono font-bold text-xs uppercase tracking-wider rounded-lg py-3.5"
+                className="flex-1 bg-[#111821] border border-[#1f2a38] text-slate-200 font-mono font-bold text-xs uppercase tracking-wider rounded-lg py-3.5 flex items-center justify-center gap-1.5"
               >
-                {t('scan.hwUseCamera')}
+                <Icon name="camera" className="w-3.5 h-3.5" /> {t('scan.hwUseCamera')}
               </button>
             ) : (
               <>
@@ -1121,7 +1358,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                     onClick={refocus}
                     className="shrink-0 bg-[#111821] border border-[#1f2a38] text-emerald-400 font-mono font-bold text-xs uppercase tracking-wider rounded-lg px-4 py-3.5"
                   >
-                    🎯 {t('scan.refocus')}
+                    <Icon name="search" className="w-3 h-3 inline-block align-[-2px]" /> {t('scan.refocus')}
                   </button>
                 )}
               </>
@@ -1136,21 +1373,21 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
       <div className={`bg-[#0f1620] border rounded-2xl px-5 py-4 text-center mb-3 ${st === 'over' ? 'border-red-500' : 'border-[#1f2a38]'}`}>
         <div className="font-mono text-[10px] tracking-[0.3em] text-slate-400 uppercase mb-1.5">{t('scan.sealsScanned')}</div>
         <div className={`font-mono text-[56px] font-extrabold leading-none ${st === 'over' ? 'text-red-500' : st === 'done' ? 'text-amber-400' : 'text-emerald-400'}`}>
-          {sessionUnique}
-          <span className="text-[22px] text-slate-500 ml-1">/{sessionQty}</span>
+          {sessionUnique.toLocaleString()}
+          <span className="text-[22px] text-slate-500 ml-1">/{sessionQty.toLocaleString()}</span>
         </div>
         <div className="h-1.5 bg-[#0a0f14] rounded-full overflow-hidden mt-2.5 border border-[#1f2a38]">
           <div className={`h-full ${st === 'over' ? 'bg-red-500' : st === 'done' ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: pct + '%' }} />
         </div>
         {st === 'over' && (
           <div className="mt-3 bg-red-500/10 border border-red-500 text-red-400 rounded-lg p-3 font-mono text-xs">
-            {t('scan.overBanner', { u: sessionUnique, q: sessionQty, e: sessionUnique - sessionQty })}
+            {t('scan.overBanner', { u: sessionUnique.toLocaleString(), q: sessionQty.toLocaleString(), e: (sessionUnique - sessionQty).toLocaleString() })}
           </div>
         )}
         <div className="grid mt-2.5">
           <div className="bg-[#0a0f14] border border-[#1f2a38] rounded-lg px-3 py-2 flex justify-between items-center">
             <span className="font-mono text-[10px] tracking-widest text-slate-400 uppercase">{t('scan.remaining')}</span>
-            <span className={`font-mono text-lg font-bold ${sessionUnique > sessionQty ? 'text-red-400' : 'text-slate-100'}`}>{remain}</span>
+            <span className={`font-mono text-lg font-bold ${sessionUnique > sessionQty ? 'text-red-400' : 'text-slate-100'}`}>{remain.toLocaleString()}</span>
           </div>
         </div>
         <div className={`mt-2 font-mono text-xs break-all ${st === 'over' ? 'text-red-400' : 'text-slate-400'}`}>{t(lastInfo.key, lastInfo.vars)}</div>
@@ -1159,7 +1396,24 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
       <div className="bg-[#0f1620] border border-[#1f2a38] rounded-2xl p-5 mb-3">
         <div className="flex justify-between items-center mb-3">
           <div className="font-mono text-[11px] tracking-[0.3em] text-slate-400 uppercase">{t('scan.scanLog')}</div>
-          <div className="font-mono text-[11px] text-emerald-400">{t('scan.entries', { n: consent.scans.length })}</div>
+          <div className="flex items-center gap-3">
+            <div className="font-mono text-[11px] text-emerald-400">{t('scan.entries', { n: consent.scans.length.toLocaleString() })}</div>
+            {/* Off on a card with nothing left to collect, the same as the
+                camera -- there is no seal to key against a finished order. */}
+            <button
+              type="button"
+              disabled={fullyCollected}
+              onClick={() => {
+                setManualCode('');
+                setManualSaid(null);
+                setManualCount(0);
+                setManualOpen(true);
+              }}
+              className="font-mono text-[11px] uppercase tracking-wider text-emerald-400 border border-emerald-700/60 disabled:opacity-40 rounded-lg px-3 py-1 hover:bg-emerald-600 hover:text-white transition-colors"
+            >
+              + {t('scan.manualAdd')}
+            </button>
+          </div>
         </div>
         <div className="max-h-[240px] overflow-y-auto font-mono text-xs">
           {consent.scans.length === 0 ? (
@@ -1192,6 +1446,69 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
         </div>
       </div>
 
+      {manualOpen && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center p-4"
+          onClick={() => setManualOpen(false)}
+        >
+          <div
+            className="bg-[#0f1620] border border-[#1f2a38] rounded-3xl w-full max-w-sm p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="font-mono text-[11px] tracking-[0.3em] text-slate-400 uppercase mb-1">
+              {t('scan.manualTitle')}
+            </div>
+            <div className="text-xs text-slate-500 mb-4">{t('scan.manualHint')}</div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitManual();
+              }}
+            >
+              {/* The wedge listener lets a real INPUT keep its own
+                  keystrokes (see its onKey), so typing here is never
+                  swallowed and Enter reaches this form. A Bluetooth gun
+                  fired while this is open simply fills the box, which is
+                  the sensible thing for it to do. */}
+              <input
+                ref={manualInputRef}
+                value={manualCode}
+                onChange={(e) => setManualCode(e.target.value)}
+                inputMode="numeric"
+                autoComplete="off"
+                autoFocus
+                placeholder={t('scan.manualPlaceholder')}
+                className="w-full bg-[#0b1118] border border-[#243244] rounded-xl px-4 py-3 font-mono text-lg tracking-widest text-slate-100 placeholder:text-slate-600 focus:border-emerald-600 focus:outline-none"
+              />
+
+              {manualSaid && (
+                <div className={`mt-3 font-mono text-xs break-all ${manualSaid.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {t(manualSaid.key, manualSaid.vars)}
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setManualOpen(false)}
+                  className="flex-1 border border-[#243244] text-slate-300 font-mono text-xs uppercase tracking-wider rounded-xl py-3"
+                >
+                  {manualCount > 0 ? t('scan.manualDone', { n: manualCount }) : t('common.cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!manualCode.trim()}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-mono text-xs font-bold uppercase tracking-wider rounded-xl py-3"
+                >
+                  {t('scan.manualAdd')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <button
         disabled={issuing || fullyCollected}
         onClick={async () => {
@@ -1200,7 +1517,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
         }}
         className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-mono font-bold text-sm uppercase tracking-wider rounded-xl py-4 mb-3 flex items-center justify-center gap-2"
       >
-        📋 {issuing ? t('do.saving') : t('scan.issueDO')}
+        <Icon name="clipboard" className="w-4 h-4" /> {issuing ? t('do.saving') : t('scan.issueDO')}
       </button>
 
       {activeDOs.length > 0 && (
@@ -1256,7 +1573,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                     viewDO.worked_by_locked_at ? 'bg-[#1f2a38] text-slate-300 hover:text-white' : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
                   }`}
                 >
-                  👷
+                  <Icon name="worker" className="w-4 h-4" />
                   {!viewDO.worked_by_locked_at && (
                     <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-400" />
                   )}
@@ -1265,7 +1582,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                   onClick={closeViewDO}
                   className="w-8 h-8 rounded-xl bg-[#1f2a38] text-slate-300 hover:text-white font-bold flex items-center justify-center shrink-0"
                 >
-                  ✕
+                  <Icon name="close" className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -1294,7 +1611,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
               {/* Signed DO photo */}
               {viewDO.image_url && (
                 <div>
-                  <div className="font-mono text-[9px] tracking-[0.3em] text-slate-400 uppercase mb-2">📄 Signed DO</div>
+                  <div className="font-mono text-[9px] tracking-[0.3em] text-slate-400 uppercase mb-2 flex items-center gap-1"><Icon name="document" className="w-3 h-3" /> Signed DO</div>
                   <a
                     href={viewDO.image_url}
                     target="_blank"
@@ -1307,14 +1624,14 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                       className="w-full object-contain"
                       style={{ maxHeight: '200px' }}
                     />
-                    <div className="text-center font-mono text-[9px] text-slate-500 py-1.5">Tap to open full size ↗</div>
+                    <div className="text-center font-mono text-[9px] text-slate-500 py-1.5">Tap to open full size</div>
                   </a>
                 </div>
               )}
 
               {/* Signed consent */}
               <div>
-                <div className="font-mono text-[9px] tracking-[0.3em] text-slate-400 uppercase mb-2">✍️ Signed Consent</div>
+                <div className="font-mono text-[9px] tracking-[0.3em] text-slate-400 uppercase mb-2 flex items-center gap-1"><Icon name="pen" className="w-3 h-3" /> Signed Consent</div>
                 {loadingConsents || viewConsents === null ? (
                   <div className="font-mono text-[10px] text-slate-500 text-center py-3">Loading…</div>
                 ) : viewConsents.length === 0 ? (
@@ -1328,12 +1645,12 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                             ? new Date(c.created_at).toLocaleString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                             : '—'}
                         </div>
-                        <span className="font-mono text-[10px] font-bold text-emerald-400">{(c.consent_qty || 0)} seedlings</span>
+                        <span className="font-mono text-[10px] font-bold text-emerald-400">{(c.consent_qty || 0).toLocaleString()} seedlings</span>
                       </div>
                       {/* Sticker photo */}
                       {c.photo_url && (
                         <div className="mb-2">
-                          <div className="font-mono text-[8px] text-slate-500 uppercase tracking-widest mb-1">📷 Sticker Photo</div>
+                          <div className="font-mono text-[8px] text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1"><Icon name="camera" className="w-2.5 h-2.5" /> Sticker Photo</div>
                           <a
                             href={c.photo_url}
                             target="_blank"
@@ -1352,7 +1669,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
                       {/* Signature */}
                       {c.signature_data && (
                         <div>
-                          <div className="font-mono text-[8px] text-slate-500 uppercase tracking-widest mb-1">✍️ Customer Signature</div>
+                          <div className="font-mono text-[8px] text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-1"><Icon name="pen" className="w-2.5 h-2.5" /> Customer Signature</div>
                           <div className="bg-white rounded-xl p-2">
                             <img
                               src={c.signature_data}
@@ -1372,4 +1689,23 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, onScan, onBack, onIssu
       )}
     </div>
   );
+}
+
+/* A card's allocation rows written the way the DO prints seal runs. */
+function sealRangesText(rows) {
+  return formatSealRanges((rows || [])
+    .slice()
+    .sort((a, b) => Number(a.start_no) - Number(b.start_no))
+    .map((r) => ({ start: r.start_code, end: r.end_code, qty: rangeQty(r.start_no, r.end_no) })));
+}
+
+/* ALs with a DO still waiting on this phone to be sent. Until it is, the
+   server figure for that AL is short by it, so it must not pull a card's
+   collected quantity DOWN (applyIssuedShares). */
+function queuedDOALs() {
+  try {
+    return new Set((readDOQueue() || []).map((j) => j && j.payload && j.payload.al_number).filter(Boolean));
+  } catch (_) {
+    return new Set();
+  }
 }
