@@ -11,7 +11,7 @@ import { todayStr } from './data.js';
 import { agoText } from '../../lib/ago.js';
 import { listJobs } from '../../lib/outbox.js';
 import { openCasePlots } from '../../lib/nelos.js';
-import { clearRefused, refusedCases, retryRefused, submitCase, submitSelection } from './cullingOffline.js';
+import { clearRefused, refusedCases, retryRefused, submitCase } from './cullingOffline.js';
 
 /**
  * The Culling Calculator.
@@ -348,15 +348,7 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
      takes a count, because that is the only thing that can change the answer.
      rateAfter equals rateNow while nothing has been counted, so one call
      covers both. */
-  /* HOW MANY SELECTIONS THIS BLOCK HAS ALREADY HAD, which is the third
-     thing the button is decided from: over the line again after another
-     selection is HQ rather than the auditor a second time. It rides on the
-     block out of cullingSource, so the figure the rule sees is the one the
-     server holds and not one this phone has been keeping. */
-  const rounds = Number.isFinite(Number(row?.attempts)) ? Number(row.attempts) : undefined;
-  const action = known && (counted || rateNow <= CULL_LIMIT)
-    ? actionFor(rateAfter, { attempts: rounds })
-    : null;
+  const action = known && (counted || rateNow <= CULL_LIMIT) ? actionFor(rateAfter) : null;
 
   const press = (k) => {
     if (k === 'AC') { setTerms([]); setTyping(''); return; }
@@ -430,15 +422,11 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
     // The case's own sentence, not the button's label: see caseTitle in
     // cullingActions.js for why it does not follow the language picker.
     const title = action.caseTitle(row.plot);
-    /* Which round this count makes it. A block offered the drone button with
-       nothing keyed has had no selection, so it is not a round and the row
-       is not written — there is nothing to write down. */
-    const round = counted ? (rounds || 0) + 1 : 0;
     const { data: c, error, deduped, queued } = await submitCase({
       title,
       description: caseBody({
         t, plot: row.plot, nursery: row.nursery, balance: row.balance,
-        inang, rate: rateAfter, terms, by: staffName, date: todayStr(), round,
+        inang, rate: rateAfter, terms, by: staffName, date: todayStr(),
         /* Which block of the plot was walked. Without it the auditor is sent
            to a plot and left to work out which part of it was counted. It is
            always one batch now, so there is one name to give. */
@@ -468,36 +456,13 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
        cleared either way, because it HAS been recorded — leaving it on screen
        would invite it being sent a second time when the signal returns. */
     if (queued) {
-      /* Recorded as a round even though the case has not gone yet: the
-         queue sends it, and a round the phone forgot while it was out of
-         signal is a round the next person cannot see. */
-      await recordRound(round);
       flash(t('cull.queued'));
       setTerms([]); setTyping('');
       return;
     }
-    /* A ROUND IS A CASE. A press the server deduped raised nothing, so it
-       counted nothing — otherwise two taps on one button would spend the
-       block's second round and send the next real count to HQ. */
-    if (!deduped) await recordRound(round);
     reloadRaised();
     flash(deduped ? t('cull.alreadyOpen', { n: c.case_no || '' }) : t('cull.raised', { n: c.case_no || '' }));
     setTerms([]); setTyping('');
-  }
-
-  /* Write the selection down, and show the new count straight away.
-     The screen is updated from what was just sent rather than by re-reading
-     the list: a Field Conductor who has just raised the auditor should see
-     the block standing at one round without waiting for the plots to load
-     again, which on a nursery signal is most of a minute. */
-  async function recordRound(round) {
-    if (!round || !row) return;
-    await submitSelection({
-      plot: row.plot, batch: row.batch, nursery: row.nursery,
-      qty: inang, terms, balance: row.balance, transplant: row.transplant,
-      attempt: round, by: staffName, byId: userId,
-    });
-    setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, attempts: round } : r)));
   }
 
   if (!plots.length) {
@@ -703,21 +668,6 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
           </div>
         </div>
 
-        {/* WHY THE BUTTON SAYS HQ.
-            The block has been selected before and is still over the line, so
-            this one goes to HQ instead of asking the auditor the same
-            question a second time. Without the line the only sign is the
-            button changing colour and wording, which reads as the app
-            deciding something on its own. It says which round it is, because
-            the round is the whole of the reason. */}
-        {action && action.tone === 'esc' && (
-          <div data-hqnote
-               className="mx-1 rounded-lg bg-[#2a1116] border border-rose-900 px-2.5 py-1
-                          text-[10px] font-bold text-rose-300/90 text-center leading-snug">
-            {t('cull.hqNote', { n: (rounds || 0) + 1 })}
-          </div>
-        )}
-
         {/* The one button that acts on it. The wording comes from the rule
             that matched, so a new band added to cullingActions.js appears
             here with nothing changed. */}
@@ -729,8 +679,6 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
               ? 'bg-[#1c1c1e] text-slate-600 cursor-default'
               : action.tone === 'ok'
               ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
-              : action.tone === 'esc'
-              ? 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
               : 'bg-amber-500 hover:bg-amber-400 text-black cursor-pointer'
           }`}
         >

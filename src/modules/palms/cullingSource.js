@@ -1,6 +1,5 @@
 import { fetchAllRows, supabase } from '../../lib/supabase.js';
 import { cacheBlocks, cachedBlocks } from './cullingOffline.js';
-import { loadInangSelections, sweepInangSelections } from './cullingInang.js';
 import { isOnline } from '../../lib/outbox.js';
 import { batchKey, plotKey } from '../maintenance/plotBatches.js';
 import { nurseryOfPlot, todayStr } from './data.js';
@@ -343,14 +342,8 @@ export async function loadPlots() {
     return (cachedBlocks() || { rows: [] }).rows;
   }
 
-  /* The selections are read BESIDE the four gates and are not one of them:
-     a block is on this screen whether or not anybody has counted in it, so
-     a read that fails must not empty the list. It costs the round count for
-     this load, which the rule reads as no rounds — the safe direction, see
-     priorRounds in cullingActions.js. */
-  const [atPengambilan, planted, finished, dos, saved] = await Promise.all([
+  const [atPengambilan, planted, finished, dos] = await Promise.all([
     pengambilanPlots(), loadTransplanting(), loadFinished(), loadDeliveryOrders(),
-    loadInangSelections(),
   ]);
   if (!atPengambilan || !planted || !finished || !dos) {
     _lastFromCache = true;
@@ -403,19 +396,11 @@ export async function loadPlots() {
        invite a second count of stock that is no longer standing. */
     if (finished.has(key)) return;
     const c = collected.get(key);
-    const sel = saved ? saved.get(key) : null;
     rows.push({
       key,
       plot,
       batch,
       nursery: nurseryOfPlot(plot) || '',
-      /* How many pokok inang selections this block has already had, which is
-         what decides whether a block still over the limit goes to the
-         auditor again or to HQ. undefined where it could not be read: the
-         rule turns that into no rounds rather than guessing. */
-      attempts: sel ? sel.attempt : (saved ? 0 : undefined),
-      lastSelected: sel ? sel.at : '',
-      lastSelectedBy: sel ? sel.by : '',
       collected: c ? c.collected : 0,
       firstDate: c ? c.firstDate : '',
       lastDate: c ? c.lastDate : '',
@@ -433,11 +418,6 @@ export async function loadPlots() {
     e.daysCollecting = daysSince(e.firstDate, today);
   });
   const out = byPlotThenBatch(rows);
-  /* The blocks were just read from the server, so this is the one moment a
-     selection against a block that has LEFT can be told from one against a
-     block this phone has not heard of yet. Not awaited: the list on screen
-     does not depend on it. */
-  sweepInangSelections(saved, new Set(out.map((r) => r.key)));
   cacheBlocks(out);
   return out;
 }
