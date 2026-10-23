@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { compressImage, dataUrlBytes } from '../../lib/image.js';
+import { numText } from '../../lib/numberText.js';
 
 /**
  * Numbered photo slots — the same control the plot audit uses, so a photo is
@@ -121,7 +122,7 @@ export default function PhotoSlots({ value, onChange, max = 3, busyLabel }) {
         {err
           ? <span className="text-amber-700">{err}</span>
           : taken.length
-            ? t('mt.photoSize', { kb: Math.round(bytes / 1024).toLocaleString() })
+            ? t('mt.photoSize', { kb: numText(Math.round(bytes / 1024)) })
             : t('mt.photoOptional')}
       </p>
 

@@ -13,8 +13,9 @@ import {
   loadTransplantRecords,
   saveTransplantRecord,
 } from './transplantData.js';
+import { numText } from '../../lib/numberText.js';
 
-const num = (n) => Number(n || 0).toLocaleString();
+const num = (n) => numText(Number(n || 0));
 
 /* When a record was saved, as a person reads a date. Falls back through the
    columns a row might have: created_at is the first save, work_date is the

@@ -63,6 +63,7 @@ import {
   weekDates,
   weekOfDate,
 } from './schedule.js';
+import { numText } from '../../lib/numberText.js';
 
 /** Matches the work sheet: three photos is enough to show a job was done. */
 const MAX_PHOTOS = 3;
@@ -1118,7 +1119,7 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
                 <span className="font-black text-slate-800 text-[14px] flex-1 min-w-0">{b.batch}</span>
                 <span className={`text-[12px] font-bold shrink-0 tabular-nums ${
                   b.qty < 0 ? 'text-amber-600' : 'text-slate-400'}`}>
-                  {b.qty.toLocaleString()}
+                  {numText(b.qty)}
                 </span>
               </label>
             ))}
@@ -1138,7 +1139,7 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
           {t('mt.qty')} <span className="text-slate-400 normal-case">· {t('mt.qtyFromBatches')}</span>
         </label>
         <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-3 text-sm font-black text-slate-700 mb-3">
-          {qty ? qty.toLocaleString() : '—'}
+          {qty ? numText(qty) : '—'}
         </div>
         </>}
 

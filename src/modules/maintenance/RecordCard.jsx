@@ -7,6 +7,7 @@ import { formatDistance, mapsUrl } from './track/track.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
 import Icon from '../../components/Icon.jsx';
+import { numText } from '../../lib/numberText.js';
 
 /* Leaflet is most of a megabyte. A list of records that nobody opens a track
    from never downloads a byte of it — same lazy import GpsTrack and the
@@ -129,7 +130,7 @@ export default function RecordCard({
           <div className="text-[11.5px] font-bold text-slate-400 mt-1">
             {[
               relativeDay(r.work_date, today, t),
-              r.qty != null ? Number(r.qty).toLocaleString() : null,
+              r.qty != null ? numText(Number(r.qty)) : null,
             ].filter(Boolean).join(' · ')}
           </div>
 
@@ -204,7 +205,7 @@ export default function RecordCard({
               <span aria-hidden="true"><Icon name="map" className="w-3.5 h-3.5 inline-block" /></span>
               {r.gps_distance_m != null && formatDistance(r.gps_distance_m)}
               {r.gps_points != null && (
-                <span className="text-slate-400">· {t('mt.trkPointsN', { n: Number(r.gps_points).toLocaleString() })}</span>
+                <span className="text-slate-400">· {t('mt.trkPointsN', { n: numText(Number(r.gps_points)) })}</span>
               )}
               {/* Says it is a button. The distance beside it looked like the
                   same dead text it used to be, and a link nobody knows is a

@@ -7,6 +7,7 @@ import { generateDONumber, offlineDONumber, loadPlotBreeds, loosePlot } from './
 import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
 import { rowQty, lineCount, totalQty as sumQty, scanTally, applyScannedQty } from './qty.js';
 import Icon from '../../components/Icon.jsx';
+import { numText } from '../../lib/numberText.js';
 
 /* picks is the batches chosen on this row, each with its OWN quantity:
    [{ batch, breed, qty }]. One delivery order line per batch, because
@@ -402,7 +403,7 @@ const MAX_LINES = 5;
                   <div className={`rounded-2xl border px-4 py-2.5 mb-2 ${scan.tallies ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">{t('do.scannedLabel')}</span>
-                      <span className="text-lg font-black tabular-nums text-slate-800">{scan.scanned.toLocaleString()}</span>
+                      <span className="text-lg font-black tabular-nums text-slate-800">{numText(scan.scanned)}</span>
                     </div>
                     <div className={`text-[10px] font-bold leading-tight mt-0.5 ${scan.tallies ? 'text-emerald-700' : 'text-amber-700'}`}>
                       {scan.auto
@@ -484,7 +485,7 @@ const MAX_LINES = 5;
                                   >
                                     <div className="text-[12px] font-black leading-tight">{b.batch}</div>
                                     <div className={`text-[11px] font-bold tabular-nums leading-tight ${on ? 'opacity-80' : 'text-slate-500'}`}>
-                                      {Number(b.qty || 0).toLocaleString()}
+                                      {numText(Number(b.qty || 0))}
                                     </div>
                                     {/* A batch nobody has recorded a breed for
                                         shows no line, rather than an empty one
@@ -562,8 +563,8 @@ const MAX_LINES = 5;
                   })}
                 </div>
                 <div className="text-[10px] font-bold text-slate-400 mt-2 text-right">
-                  {t('do.totalQtyLabel')} <span className="font-black text-slate-700">{totalQty.toLocaleString()}</span>
-                  &nbsp;·&nbsp; {t('do.balanceLabel')} <span className={`font-black ${remain < 0 ? 'text-red-600' : 'text-blue-700'}`}>{remain.toLocaleString()}</span>
+                  {t('do.totalQtyLabel')} <span className="font-black text-slate-700">{numText(totalQty)}</span>
+                  &nbsp;·&nbsp; {t('do.balanceLabel')} <span className={`font-black ${remain < 0 ? 'text-red-600' : 'text-blue-700'}`}>{numText(remain)}</span>
                 </div>
               </div>
 

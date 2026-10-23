@@ -30,6 +30,7 @@ import { makeCapacity, makeCoverage, weekUsage } from '../modules/maintenance/us
 import ProgressDial from '../modules/maintenance/ProgressDial.jsx';
 import WorkIcon from '../modules/maintenance/WorkIcons.jsx';
 import Icon from './Icon.jsx';
+import { numText } from '../lib/numberText.js';
 
 /* v3: the cached shape gained usageByWeek. An older cache would simply have
    no figures, which is survivable — but a new key means the first load after
@@ -323,9 +324,9 @@ export default function MaintenanceBoard() {
                   {total ? (
                     <>
                       <span className={clear ? 'text-emerald-600' : 'text-slate-700'}>
-                        {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : doneN.toLocaleString()}
+                        {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : numText(doneN)}
                       </span>
-                      {!clear && `/${total.toLocaleString()}`}
+                      {!clear && `/${numText(total)}`}
                     </>
                   ) : (
                     t('mtb.none')
@@ -433,7 +434,7 @@ function SchedulePopover({ t, lang, month, week, usage, totals, onClose }) {
                       {workTypeLabel(wt, lang)}
                     </span>
                     <span className="ml-auto text-[10px] font-black tabular-nums text-slate-400 shrink-0">
-                      {t('mtb.plotsN', { n: due.toLocaleString() })}
+                      {t('mtb.plotsN', { n: numText(due) })}
                     </span>
                   </div>
                   <div className="divide-y divide-slate-100">

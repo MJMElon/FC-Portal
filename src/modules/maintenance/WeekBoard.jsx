@@ -5,6 +5,7 @@ import { weekDates } from './schedule.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
 import Icon from '../../components/Icon.jsx';
+import { numText } from '../../lib/numberText.js';
 
 /** One week-stepper arrow, the same control the front page's board uses. */
 function NavArrow({ dir, onClick, label }) {
@@ -135,9 +136,9 @@ export default function WeekBoard({
                 {total ? (
                   <>
                     <span className={clear ? 'text-emerald-600' : 'text-slate-700'}>
-                      {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : doneN.toLocaleString()}
+                      {clear ? <Icon name="check" className="w-3 h-3 inline-block" /> : numText(doneN)}
                     </span>
-                    {!clear && `/${total.toLocaleString()}`}
+                    {!clear && `/${numText(total)}`}
                   </>
                 ) : (
                   t('mtb.none')
@@ -174,7 +175,7 @@ export default function WeekBoard({
                      : t('mt.weekClear')}
         </span>
         {totalDue > 0 && (
-          <span className="shrink-0 tabular-nums">{t('mt.weekTally', { done: totalDone.toLocaleString(), n: totalDue.toLocaleString() })}</span>
+          <span className="shrink-0 tabular-nums">{t('mt.weekTally', { done: numText(totalDone), n: numText(totalDue) })}</span>
         )}
       </div>
     </div>

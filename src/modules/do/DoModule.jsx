@@ -22,6 +22,7 @@ import ManageModal from './ManageModal.jsx';
 import EntryModal from './EntryModal.jsx';
 import WorkerTickModal from './WorkerTickModal.jsx';
 import Icon from '../../components/Icon.jsx';
+import { numText } from '../../lib/numberText.js';
 
 export default function DoModule() {
   const { staffName } = useAuth();
@@ -282,8 +283,8 @@ export default function DoModule() {
                             <div className="text-sm font-bold text-slate-600 mt-0.5 break-words">{r.customer_name || '—'}</div>
                             <div className="text-[11px] font-bold text-slate-400 mt-2 leading-relaxed">
                               <Icon name="clipboard" className="w-3 h-3 inline-block align-[-1px]" /> {t('do.colOrder')}: <span className="text-slate-600">{r.order_number || '—'}</span><br />
-                              {t('do.colQtyOrdered')}: <span className="text-slate-600">{r.quantity_ordered != null ? r.quantity_ordered.toLocaleString() : '—'}</span> &nbsp;·&nbsp;
-                              {t('do.colBalance')}: <span className={`font-black ${tm.bal}`}>{r.balance_quantity != null ? r.balance_quantity.toLocaleString() : '—'}</span>
+                              {t('do.colQtyOrdered')}: <span className="text-slate-600">{r.quantity_ordered != null ? numText(r.quantity_ordered) : '—'}</span> &nbsp;·&nbsp;
+                              {t('do.colBalance')}: <span className={`font-black ${tm.bal}`}>{r.balance_quantity != null ? numText(r.balance_quantity) : '—'}</span>
                             </div>
                             <div className="flex gap-2 mt-3">
                               <button onClick={() => setManageAL(r)} title={t('do.manageDOs')} aria-label={t('do.manageDOs')} className="btn-open flex-1 flex items-center justify-center">
@@ -392,8 +393,8 @@ function FragmentRows({ icon, label, headClass, balClass, rows, manageLabel, onM
           <td><span className="font-black text-slate-800">{r.al_number || '—'}</span></td>
           <td>{r.order_number || '—'}</td>
           <td>{r.customer_name || '—'}</td>
-          <td>{r.quantity_ordered != null ? r.quantity_ordered.toLocaleString() : '—'}</td>
-          <td><span className={`font-black ${balClass}`}>{r.balance_quantity != null ? r.balance_quantity.toLocaleString() : '—'}</span></td>
+          <td>{r.quantity_ordered != null ? numText(r.quantity_ordered) : '—'}</td>
+          <td><span className={`font-black ${balClass}`}>{r.balance_quantity != null ? numText(r.balance_quantity) : '—'}</span></td>
           <td className="whitespace-nowrap">
             <button
               onClick={() => onManage(r)}

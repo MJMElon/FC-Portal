@@ -10,6 +10,7 @@ import { batchesIn } from './plotBatches.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
 import Icon from '../../components/Icon.jsx';
+import { numText } from '../../lib/numberText.js';
 
 /* Leaflet is most of a megabyte, and a conductor who never opens a track
    never downloads a byte of it. Same lazy import GpsTrack uses. */
@@ -297,7 +298,7 @@ export default function VerifyHub({
           <Icon name="check" className="w-3.5 h-3.5 shrink-0" /> {t('mt.verifyHub')}
         </span>
         <span className="text-[10px] font-black text-emerald-700 shrink-0 tabular-nums">
-          {setupNeeded ? '—' : t('mt.verifyLeft', { n: queue.length.toLocaleString() })}
+          {setupNeeded ? '—' : t('mt.verifyLeft', { n: numText(queue.length) })}
         </span>
       </div>
 
@@ -311,7 +312,7 @@ export default function VerifyHub({
           <div className="text-[13px] font-black text-emerald-700">{t('mt.verifyAllDone')}</div>
           {(done.ok || done.back) > 0 && (
             <div className="text-[11px] font-bold text-slate-400 mt-1">
-              {t('mt.verifyTally', { ok: done.ok.toLocaleString(), back: done.back.toLocaleString() })}
+              {t('mt.verifyTally', { ok: numText(done.ok), back: numText(done.back) })}
             </div>
           )}
         </div>
@@ -620,8 +621,8 @@ function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatc
                 </span>
                 <span className="block text-[11px] font-bold text-slate-400">
                   {[
-                    r.gps_distance_m != null ? t('mt.walked', { m: Math.round(r.gps_distance_m).toLocaleString() }) : null,
-                    r.gps_points != null ? t('mt.fixes', { n: Number(r.gps_points).toLocaleString() }) : null,
+                    r.gps_distance_m != null ? t('mt.walked', { m: numText(Math.round(r.gps_distance_m)) }) : null,
+                    r.gps_points != null ? t('mt.fixes', { n: numText(Number(r.gps_points)) }) : null,
                   ].filter(Boolean).join(' · ') || t('mt.openMap')}
                 </span>
               </span>
@@ -658,7 +659,7 @@ function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatc
                     </span>
                     <span className={`text-[11.5px] font-bold shrink-0 tabular-nums
                                       ${b.qty < 0 ? 'text-amber-600' : 'text-slate-400'}`}>
-                      {b.qty.toLocaleString()}
+                      {numText(b.qty)}
                     </span>
                   </label>
                 );

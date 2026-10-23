@@ -1,3 +1,4 @@
+import { numText } from '../../lib/numberText.js';
 /**
  * How much to draw from the store for one job in one week.
  *
@@ -100,7 +101,7 @@ function ceilStep(value, step) {
    litre the rule did not ask for. */
 function show(total, unit) {
   const shown = Math.round((total / 1000) * 100) / 100;
-  return `${shown.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${unit === 'gm' ? 'kg' : 'L'}`;
+  return `${numText(shown, { maximumFractionDigits: 2 })} ${unit === 'gm' ? 'kg' : 'L'}`;
 }
 
 /* A dose is a number or it is nothing. One keyed with a comma or a unit in

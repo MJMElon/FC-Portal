@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { loadDOsForAL, loadConsentsForAL, itemsFromRecord } from './data.js';
 import Icon from '../../components/Icon.jsx';
+import { numText } from '../../lib/numberText.js';
 
 // Manage DOs for one AL: shows AL details, issued DO records, signed consent
 // records, and an entry point to add a new DO.
@@ -85,7 +86,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
                           <td><span className={`font-black ${cancelled ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{d.do_number || '—'}</span></td>
                           <td className="text-slate-600 text-xs">{lines.length ? lines.map((l, i) => <div key={i}>{l.nursery}</div>) : '—'}</td>
                           <td className="text-slate-600 text-xs">{lines.length ? lines.map((l, i) => <div key={i}>{l.breed}</div>) : '—'}</td>
-                          <td>{lines.length ? lines.map((l, i) => <div key={i} className="font-black text-emerald-700">{Number(l.qty || 0).toLocaleString()}</div>) : <span className="font-black text-emerald-700">{d.total_qty != null ? Number(d.total_qty).toLocaleString() : '—'}</span>}</td>
+                          <td>{lines.length ? lines.map((l, i) => <div key={i} className="font-black text-emerald-700">{numText(Number(l.qty || 0))}</div>) : <span className="font-black text-emerald-700">{d.total_qty != null ? numText(Number(d.total_qty)) : '—'}</span>}</td>
                           <td>
                             <div className="flex items-center gap-1.5">
                               {d.image_url ? (
@@ -127,7 +128,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
             </div>
             {dos && dos.length > 0 && (
               <div className="text-[10px] font-bold text-slate-400 mt-2 text-right">
-                {t('do.totalIssued', { issued: Number(totalIssued || 0).toLocaleString(), bal: al.balance_quantity != null ? al.balance_quantity.toLocaleString() : '—' })}
+                {t('do.totalIssued', { issued: numText(Number(totalIssued || 0)), bal: al.balance_quantity != null ? numText(al.balance_quantity) : '—' })}
               </div>
             )}
           </div>
@@ -146,7 +147,7 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
                 <div className="flex justify-between items-center mb-3">
                   <span className="text-[10px] font-bold text-slate-400">{t('do.consentCount', { n: consents.length })}</span>
                   <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200">
-                    {t('do.totalConsented', { n: consents.reduce((s, c) => s + (c.consent_qty || 0), 0).toLocaleString() })}
+                    {t('do.totalConsented', { n: numText(consents.reduce((s, c) => s + (c.consent_qty || 0), 0)) })}
                   </span>
                 </div>
                 {consents.map((c, i) => (
@@ -158,12 +159,12 @@ export default function ManageModal({ al, plots, onAddDO, onPrint, onManageWorke
                           {c.created_at ? new Date(c.created_at).toLocaleString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                         </div>
                       </div>
-                      <span className="text-sm font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200">{t('do.seedlings', { n: (c.consent_qty || 0).toLocaleString() })}</span>
+                      <span className="text-sm font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200">{t('do.seedlings', { n: numText((c.consent_qty || 0)) })}</span>
                     </div>
                     {c.ai_sticker_count != null && (
                       <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 inline-flex items-center gap-2 mt-2">
                         <span className="text-[9px] font-black text-blue-700 uppercase tracking-widest flex items-center gap-1"><Icon name="sparkles" className="w-3 h-3" /> {t('do.aiCount')}</span>
-                        <span className="font-black text-blue-700">{c.ai_sticker_count.toLocaleString()}</span>
+                        <span className="font-black text-blue-700">{numText(c.ai_sticker_count)}</span>
                       </div>
                     )}
                     {c.photo_url && (
