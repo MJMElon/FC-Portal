@@ -148,7 +148,7 @@ export function Train({ steaming }) {
 }
 
 export default function PalmsDock() {
-  const { session, allowed, permissions } = useAuth();
+  const { mayEnter, permissions } = useAuth();
   const { t } = useLang();
   const location = useLocation();
 
@@ -245,7 +245,7 @@ export default function PalmsDock() {
   // between the app and the login, so the two cannot disagree: this also
   // keeps the train off the "no operations access yet" screen, which is
   // still outside the door.
-  if (!session || allowed === false) return null;
+  if (!mayEnter) return null;
   // Not for someone without PALMS, and not on top of PALMS itself.
   if (!canPalms(permissions, 'view')) return null;
   if (location.pathname.startsWith('/palms')) return null;

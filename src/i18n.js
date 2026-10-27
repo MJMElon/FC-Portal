@@ -17,6 +17,10 @@ const en = {
   // auth
   'auth.portal': 'FC Portal',
   'auth.noAccess': 'Your account does not yet have operations access. Please contact an admin.',
+  'auth.customerRefused': 'This is the MJM Nursery staff system. Customer accounts cannot sign in here. Please use the MJM Nursery shop at https://www.mjmnursery.com',
+  'auth.uncheckedAccount': 'We could not check your account just now. Please check your connection and try again.',
+  'auth.tryAgain': 'Try again',
+  'auth.backToSignIn': 'Back to sign in',
   'auth.fullName': 'Full Name',
   'auth.email': 'Email Address',
   'auth.password': 'Password',
@@ -910,6 +914,10 @@ const ms = {
   // auth
   'auth.portal': 'Portal FC',
   'auth.noAccess': 'Akaun anda belum mempunyai akses operasi. Sila hubungi admin.',
+  'auth.customerRefused': 'Ini ialah sistem kakitangan MJM Nursery. Akaun pelanggan tidak boleh log masuk di sini. Sila gunakan kedai MJM Nursery di https://www.mjmnursery.com',
+  'auth.uncheckedAccount': 'Kami tidak dapat menyemak akaun anda sekarang. Sila semak sambungan anda dan cuba lagi.',
+  'auth.tryAgain': 'Cuba lagi',
+  'auth.backToSignIn': 'Kembali ke log masuk',
   'auth.fullName': 'Nama Penuh',
   'auth.email': 'Alamat E-mel',
   'auth.password': 'Kata Laluan',

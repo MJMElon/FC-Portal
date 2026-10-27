@@ -115,7 +115,7 @@ function CullingMark() {
    from index.css with it rather than being left behind unused. */
 
 export default function FloatingDock() {
-  const { session, allowed, permissions } = useAuth();
+  const { mayEnter, permissions } = useAuth();
   const { t } = useLang();
   const location = useLocation();
 
@@ -258,7 +258,7 @@ export default function FloatingDock() {
      this the dock floats over the 555 cover before anybody has said who they
      are. The same test App uses to decide between the app and the login, so
      the two cannot disagree. */
-  if (!session || allowed === false) return null;
+  if (!mayEnter) return null;
   if (!pos) return null;
 
   const mayPalms = canPalms(permissions, 'view') && !location.pathname.startsWith('/palms');

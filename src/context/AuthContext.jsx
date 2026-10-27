@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { applyCompanySwitches } from '../lib/portalSettings.js';
+import { forgetOffline } from '../lib/offlineVault.js';
 
 /**
  * The company's master switches for THIS portal — Worker Portal Manage →
@@ -46,22 +47,48 @@ const AuthContext = createContext(null);
    strictly better than that. */
 const PERMS_KEY = 'mjm_fc_permissions_v1';
 
-function cachedPermissions(userId) {
+function readCache() {
   try {
     const raw = JSON.parse(localStorage.getItem(PERMS_KEY));
-    if (!raw || !raw.permissions) return null;
-    // Another person on the same device must not inherit them.
-    if (userId && raw.userId && raw.userId !== userId) return null;
-    return raw.permissions;
+    return raw && raw.permissions ? raw : null;
   } catch (e) {
     return null;
   }
 }
 
-function keepPermissions(userId, permissions) {
+/* What an offline start (or a profile read that failed) may draw the portal
+   from. Three refusals, each of which used to be a way in:
+     · a different person's copy — the next person on this phone;
+     · a copy that names no person at all — nothing says whose it is;
+     · a copy that is not STAFF access. Before the customer rule existed this
+       cache was written for EVERYBODY who signed in, a Sales Web customer
+       included, so an old copy can hold a customer's permissions. Only a copy
+       that would have passed the ops gate on its own is good enough to stand
+       in for the gate. */
+function cachedPermissions(userId) {
+  const raw = readCache();
+  if (!raw || !userId || raw.userId !== userId) return null;
+  if (isCustomer(raw)) return null;
+  if (!hasOpsAccess({ permissions: raw.permissions })) return null;
+  return raw.permissions;
+}
+
+function keepPermissions(userId, permissions, userType) {
   try {
-    localStorage.setItem(PERMS_KEY, JSON.stringify({ userId, permissions }));
+    localStorage.setItem(PERMS_KEY, JSON.stringify({ userId, permissions, userType: userType || null }));
   } catch (e) { /* a full or refused storage is not worth failing over */ }
+}
+
+function dropPermissions() {
+  try { localStorage.removeItem(PERMS_KEY); } catch (e) { /* nothing to do */ }
+}
+
+/* "all staff system. customer only can see sales web and customer portal."
+   A Sales Web customer signs in with an ordinary Supabase account, so the
+   account itself is no answer — the PROFILE is. user_type is the one column
+   that says so, and it is the same word the Sales Web writes. */
+function isCustomer(profile) {
+  return !!profile && String(profile.user_type || profile.userType || '').trim().toLowerCase() === 'customer';
 }
 
 // Staff-grade module access levels — same predicate as the hub / audit / mobile.
@@ -114,7 +141,22 @@ function cachedSession() {
 export const AUTH_WAIT_MS = 8000;
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(cachedSession);
+  const [session, setSessionState] = useState(cachedSession);
+  /* Whose session the app is drawn for right now, read synchronously. A
+     profile read is a round trip, and one started for somebody who has since
+     signed out (or been signed out by it) must not land on the next person. */
+  const sessionUser = useRef(((cachedSession() || {}).user || {}).id || null);
+  function setSession(s) {
+    sessionUser.current = (s && s.user && s.user.id) || null;
+    setSessionState(s);
+  }
+  /* Why the door is shut, when it is shut for a reason the sign-in screen
+     cannot say: 'customer' (a Sales Web account — signed out, and told where
+     its shop is) or 'unchecked' (the profile could not be read and this phone
+     has nothing of this person's to go on — the session is kept, and the
+     check can be asked again). Survives the SIGNED_OUT a customer refusal
+     causes, which is the whole point of it being separate from `allowed`. */
+  const [refusal, setRefusal] = useState(null);
   // Already signed in ⇒ nothing to wait for before drawing the app.
   const [loading, setLoading] = useState(() => !cachedSession());
   // null = not yet checked, true / false = ops-gate result
@@ -129,42 +171,102 @@ export function AuthProvider({ children }) {
     typeof window !== 'undefined' && window.location.hash.includes('type=recovery')
   );
 
-  // Ops-access gate. Fail-open on read errors so a brief Supabase hiccup does
-  // not lock real admins out. Runs deferred (outside onAuthStateChange) to
-  // avoid the supabase-js auth-lock deadlock.
+  /* The ops-access gate.
+
+     It used to fail OPEN on anything: `ok` started true and only a read that
+     came back clean could make it false — so a read that RETURNED an error
+     (supabase-js does not throw; it hands back { error }) let anybody in, a
+     Sales Web customer included. A returned error is now exactly a thrown
+     one, and either is answered from this phone's own copy of THIS person's
+     staff access when it has one — a Field Conductor loses signal for hours
+     and must still open the portal — and otherwise not answered at all: the
+     session stays, the screen says the account could not be checked, and the
+     check can be asked again. Not knowing is not a yes.
+
+     Runs deferred (outside onAuthStateChange) to avoid the supabase-js
+     auth-lock deadlock. */
   async function runOpsGate(sess) {
-    let ok = true;
+    const uid = sess && sess.user && sess.user.id;
+    if (!uid) return;
+    let resp = null;
+    let company = null;
+    let failed = false;
     try {
       /* Both at once. The company's switches are a second round trip that
          every page waits behind, and asking for them after the profile would
          put one on top of the other for no reason. */
-      const [resp, company] = await Promise.all([
+      [resp, company] = await Promise.all([
         supabase
           .from('shared_profiles')
           .select('role, user_type, permissions')
-          .eq('id', sess.user.id)
+          .eq('id', uid)
           .maybeSingle(),
         loadCompanySwitches(),
       ]);
-      if (resp && !resp.error) {
-        ok = hasOpsAccess(resp.data);
-        /* The person's own access, with the company's vetoes taken out of it.
-           Applied HERE, at the one place permissions enter the app, rather
-           than in each module: every screen then reads one answer and none of
-           them has to remember there are two layers. Off beats on. */
-        const own = (resp.data && resp.data.permissions) || {};
-        setPermissions(applyCompanySwitches(own, company));
-        /* Kept BEFORE the company's switches are applied: the switches are
-           read fresh each time and are the company's to change, while this is
-           the person's own access, which is what the next offline start needs
-           to get past the gate. */
-        keepPermissions(sess.user.id, own);
+      if (!resp || resp.error) {
+        failed = true;
+        console.warn('[ops-gate] profile read returned an error:', resp && resp.error);
       }
     } catch (e) {
-      console.warn('[ops-gate] profile read failed (allowing through):', e);
+      failed = true;
+      console.warn('[ops-gate] profile read failed:', e);
     }
+
+    // Somebody else's (or nobody's) by the time it answered — not ours to apply.
+    if (sessionUser.current !== uid) return;
+
+    if (failed) {
+      const cached = cachedPermissions(uid);
+      if (cached) {
+        setPermissions(applyCompanySwitches(cached, company));
+        setRefusal(null);
+        setAllowed(true);
+      } else {
+        setPermissions(null);
+        setAllowed(null);
+        setRefusal('unchecked');
+      }
+      setLoading(false);
+      return;
+    }
+
+    const profile = resp.data;
+    if (isCustomer(profile)) {
+      /* A customer account. Signed out here and now, with nothing of theirs
+         left behind on this phone, and told where they CAN go. */
+      setRefusal('customer');
+      setAllowed(false);
+      setLoading(false);
+      try { forgetOffline(sess.user.email); } catch (e) { /* best effort */ }
+      await signOut();
+      return;
+    }
+
+    const ok = hasOpsAccess(profile);
+    /* The person's own access, with the company's vetoes taken out of it.
+       Applied HERE, at the one place permissions enter the app, rather
+       than in each module: every screen then reads one answer and none of
+       them has to remember there are two layers. Off beats on. */
+    const own = (profile && profile.permissions) || {};
+    setPermissions(applyCompanySwitches(own, company));
+    /* Kept BEFORE the company's switches are applied: the switches are read
+       fresh each time and are the company's to change, while this is the
+       person's own access, which is what the next offline start needs to get
+       past the gate. Only STAFF access is kept — a copy that would not pass
+       the gate is not something the next offline start should be drawn from,
+       and a person whose access was taken away loses the offline copy too. */
+    if (ok) keepPermissions(uid, own, profile && profile.user_type);
+    else dropPermissions();
+    setRefusal(null);
     setAllowed(ok);
     setLoading(false);
+  }
+
+  /* The "try again" on the could-not-check screen. */
+  function retryOpsGate() {
+    if (!session) return;
+    setRefusal(null);
+    runOpsGate(session);
   }
 
   useEffect(() => {
@@ -180,10 +282,10 @@ export function AuthProvider({ children }) {
            is standing here, expired clock or not. A refresh token the server
            actually REFUSED raises SIGNED_OUT below, and that still signs out. */
         const useSess = sess || cachedSession();
-        // Knowing there IS a session is enough to render the app. The ops gate
-        // is a network round-trip; waiting for it put a loading screen in front
-        // of every entry. It now resolves behind the app and only bounces
-        // somebody out if it comes back denied.
+        // Knowing there IS a session is enough to stop waiting on THIS. The
+        // ops gate is a network round-trip and resolves behind the app — but
+        // the app is only drawn behind it for somebody this phone already
+        // holds staff access for (see mayEnter). Anybody else waits for it.
         setSession(useSess);
         setLoading(false);
         if (useSess) runOpsGate(useSess);
@@ -234,6 +336,7 @@ export function AuthProvider({ children }) {
       const useSess = sess || (event !== 'SIGNED_OUT' ? cachedSession() : null);
       setSession(useSess);
       setLoading(false);
+      if (event === 'SIGNED_IN') setRefusal(null);
       if (event === 'SIGNED_OUT' || !useSess) {
         setAllowed(null);
         setPermissions(null);
@@ -275,13 +378,21 @@ export function AuthProvider({ children }) {
     setPermissions(null);
   }
 
+  /* May the portal be DRAWN for this person right now? Yes once the gate has
+     said yes; and, while it has not answered yet, only for somebody this
+     phone already holds staff access for (permissions are seeded from that
+     copy at start-up). Everybody else waits on the loading screen — nothing
+     behind the door is drawn for an account nobody has checked. */
+  const mayEnter = !!session && !refusal &&
+    (allowed === true || (allowed === null && permissions != null));
+
   const staffName = session
     ? session.user.user_metadata?.full_name || session.user.email
     : '';
 
   return (
     <AuthContext.Provider
-      value={{ session, loading, allowed, permissions, recovering, setRecovering, signOut, staffName }}
+      value={{ session, loading, allowed, permissions, refusal, mayEnter, retryOpsGate, setRefusal, recovering, setRecovering, signOut, staffName }}
     >
       {children}
     </AuthContext.Provider>
