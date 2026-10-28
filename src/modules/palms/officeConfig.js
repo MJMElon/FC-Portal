@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase.js';
-import { ACTIVITIES, NURSERIES, applyOfficeConfig, nurseryOfPlot } from './data.js';
+import { ACTIVITIES, NURSERIES, applyOfficeConfig, isReplantPlot, nurseryOfPlot } from './data.js';
 
 /**
  * Where PALMS gets its plots and its statuses: the office, not this file.
@@ -65,6 +65,8 @@ function plotsFromShared(rows) {
     const plot = String(r.plot_name || '').trim().toUpperCase();
     const nk = nurseryKeyOf(plot);
     if (!plot || !nk || !out[nk]) return;
+    // A -R plot is not a PALMS plot — see isReplantPlot in data.js.
+    if (isReplantPlot(plot)) return;
     if (out[nk].indexOf(plot) === -1) out[nk].push(plot);
   });
   // B2 before B10, the way the nursery says them.
