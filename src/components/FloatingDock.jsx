@@ -174,9 +174,15 @@ export default function FloatingDock() {
      would say "5 left" on a nursery that has 40 plots. */
   useEffect(() => {
     let live = true;
-    const cached = applyCachedOfficeConfig();
+    applyCachedOfficeConfig();
     refreshPalms();
-    if (!cached) refreshOfficeConfig().then((ok) => { if (live && ok) refreshPalms(); });
+    /* EVERY time, not only when nothing is cached. The cache is drawn first
+       so the screen is immediate; the read behind it is what takes a stage
+       the office has REMOVED off this phone. Asked only when there was no
+       cache, a phone that had ever opened PALMS kept its old list for good —
+       which is how entries went on being keyed as "Stage 12" (Up-keep) weeks
+       after the office took it off the list. */
+    refreshOfficeConfig().then((ok) => { if (live && ok) refreshPalms(); });
     return () => { live = false; };
   }, [refreshPalms]);
 
