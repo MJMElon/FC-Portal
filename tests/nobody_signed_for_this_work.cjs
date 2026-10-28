@@ -94,7 +94,7 @@ const ctx = { console, Date, JSON, Math, Object, Set, Array, String, Number, Boo
 vm.createContext(ctx);
 vm.runInContext(cancelled + '\n' + doPlots + '\n' + nkey + '\n' + jobs + '\n'
   + strip('src/components/verify/pending.js')
-  + '\n;globalThis.__p = { doNeedsWorkers, missingJobs, plotsOwingJobs, clampIndex, LOADING_WORKERS_FROM, doIsMine: (typeof doIsMine === \'function\' ? doIsMine : null) };',
+  + '\n;globalThis.__p = { doNeedsWorkers, missingJobs, plotsOwingJobs, clampIndex, LOADING_WORKERS_FROM, TJ: TRANSPLANT_JOBS, doIsMine: (typeof doIsMine === \'function\' ? doIsMine : null), owedBatches: (typeof owedBatches === \'function\' ? owedBatches : null) };',
   ctx);
 const P = vm.runInContext('__p', ctx);
 
@@ -216,6 +216,80 @@ const ALL = ['blanket_spray', 'lining', 'polybag_fill', 'transplanting'];
 /* A record for ANOTHER plot must not tick this one off. */
 is(P.missingJobs('B04', [rec('B07', 'lining')]).length, 4,
    'a record against a different plot ticks nothing off this one');
+
+
+/* ── 2b. A NEW DELIVERY IS A NEW SET OF FOUR JOBS ────────────────────
+   The office counted their own board and B11 was not on it, over a plot
+   that had taken 135 more seedlings on 24 Oct after its four jobs were
+   recorded on 29 Sep. The old rule asked only whether the PLOT had each
+   job recorded, in any month ever, so a second delivery into a finished
+   plot was invisible -- four more crews owed their pay, on no screen.
+
+   IT CANNOT BE DONE BY DATE: filling and lining are sometimes done
+   before the seedlings arrive and sometimes after, 两种都有, so a record
+   older than an arrival proves nothing. The BATCH is what both sides
+   carry, and the office own rows are what these fixtures are.
+
+   The five plots below are theirs, letter for letter. */
+const TJ = P.TJ;
+/* ON THE PREVIOUS RULE THERE IS NO owedBatches AND missingJobs TAKES TWO
+   ARGUMENTS, so a test that just calls them reports a stack instead of
+   naming what is missing. */
+if (typeof P.owedBatches !== 'function') {
+  fail('verify/pending.js exports no owedBatches -- a second delivery into a finished plot is invisible');
+} else {
+const jrec = (plot, key, batch) => ({ plot_name: plot, work_type: key, batch_name: batch });
+const four = (plot, batch) => TJ.map((j) => jrec(plot, j.key, batch));
+
+/* B11: ledger 269, 271 -- record 269. The 271 delivery is owed. */
+is(P.missingJobs('B11', four('B11', '269'), ['269', '271']).length, 4,
+   'B11 owes all four again: batch 271 arrived and no record mentions it');
+is(P.owedBatches('B11', four('B11', '269'), ['269', '271']), ['271'],
+   '…and the card can say WHICH delivery, so the plot does not read as a mistake');
+
+/* THE THREE THAT MUST NOT MOVE. Their record lists are the same batches
+   as the ledger in a DIFFERENT ORDER -- "260, 267, 259" against "259,
+   260, 267" -- which a string comparison calls different and a set does
+   not. Getting this wrong puts three correct plots back on the board for
+   ever, which is the wall this list is careful not to become. */
+is(P.missingJobs('U4', four('U4', '260, 267, 259'), ['259', '260', '267']).length, 0,
+   'U4 is NOT owed: same batches, written in another order');
+is(P.missingJobs('N15', four('N15', '271, 270'), ['270', '271']).length, 0,
+   'N15 is NOT owed, for the same reason');
+is(P.missingJobs('N3', four('N3', '263, 270, 269'), ['263', '269', '270']).length, 0,
+   'N3 is NOT owed either');
+is(P.owedBatches('U4', four('U4', '260, 267, 259'), ['259', '260', '267']), [],
+   '…and nothing is named as owed on a plot that owes nothing');
+
+/* B4 and U17 matched already, and go on matching. */
+is(P.missingJobs('B4', four('B4', '264, 270'), ['264', '270']).length, 0,
+   'B4 is NOT owed: its record names both batches');
+
+/* Never recorded is still never recorded, and needs no batch to say so. */
+is(P.missingJobs('B2', [], ['271']).length, 4,
+   'B2 owes all four -- nothing has ever been recorded for it');
+is(P.owedBatches('B2', [], ['271']), [],
+   '…and names no batch, because the whole plot is owed and a note would be noise');
+
+/* A RECORD WITH NO BATCH ON IT COVERS EVERYTHING. saveTransplantRecord
+   writes `batch_name: rec.batch || null`, so a blank is possible, and
+   raising a plot for ever over a record nobody can tie to a delivery
+   would be worse than the fault. */
+is(P.missingJobs('B9', four('B9', null), ['269', '271']).length, 0,
+   'a record with no batch on it keeps the old behaviour rather than stranding the plot');
+is(P.missingJobs('B9', four('B9', ''), ['269', '271']).length, 0,
+   '…and so does an empty one');
+
+/* And a caller that passes no batches at all -- every caller before this
+   rule existed -- gets exactly the old answer. */
+is(P.missingJobs('B11', four('B11', '269')).length, 0,
+   'asked without the ledger batches, it is the question it always was');
+
+/* The batch is matched on letters and digits, like every other key in
+   this system: a stray space must not owe somebody four jobs. */
+is(P.missingJobs('B11', four('B11', ' 269 , 271 '), ['269', '271']).length, 0,
+   'spacing round a batch number is not a different batch');
+}
 
 /* ── 3. The stepper ──────────────────────────────────────────────────── */
 is(P.clampIndex(0, 5), 0, 'the stepper starts at the first card');

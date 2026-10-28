@@ -277,6 +277,60 @@ name every arrival this was happening to, and its *"Seedling Stock says"*
 rows print what each nursery's list actually holds. The board now raises
 the plot; that check says why it was unplaceable.
 
+### A SECOND delivery into a finished plot is four more crews, and it was invisible
+
+The office counted their own cards and B11 was not among them. It had taken
+**135 more seedlings on 24 Oct, after its four jobs were recorded on 29
+Sep** — a new filling, a new lining, a new planting and a new spray, four
+crews owed their pay, and no screen in the system mentioned it.
+
+`missingJobs` asked whether the PLOT had a record of each job, in any month,
+ever since `TRANSPLANT_FLOW_FROM`. So a plot that took another delivery
+after its four were recorded counted as finished and dropped off the board
+for good. The office settled what it should do in one line: the new
+seedlings **要再做一次**.
+
+**IT CANNOT BE DONE BY DATE, and that was the whole of the decision.** The
+obvious rule — an arrival newer than the newest record — looks right and is
+wrong here, because the office answered the question it turns on: filling
+and lining are sometimes done BEFORE the seedlings arrive and sometimes
+after, **两种都有**. A record older than an arrival therefore proves
+nothing, and a date test would leave exactly those plots on the board for
+ever.
+
+**So it is the BATCH, which both sides already carry** — the ledger row
+names the batches that have arrived, the record names the batches it was
+recorded for. A job is owed again when the ledger names a batch that no
+record of that job mentions. B11: ledger `269, 271`, record `269`.
+
+Three things in it, and the second is the one that would have broken it:
+
+- **The records DO carry batches**, which was checked before the rule was
+  written rather than assumed — `saveTransplantRecord` writes `batch_name:
+  rec.batch || null`, so a blank is possible.
+  `shared/CHECK_why_a_plot_is_not_on_the_board.sql` in the office repo is
+  what answered it, printing both sides job by job.
+- **They are compared as SETS, never as strings.** U4's record reads `260,
+  267, 259` against a ledger of `259, 260, 267`; N15's reads `271, 270`
+  against `270, 271`. A string comparison calls all three different and
+  puts three correct plots back on the board for ever, which is the wall
+  this list exists not to be. Matched on letters and digits, like every
+  other key in this system.
+- **A record with NO batch on it covers everything.** Raising a plot for
+  ever over a record nobody can tie to a delivery is worse than the fault,
+  so that case keeps the old behaviour — and so does a caller that passes
+  no batches at all, which is every caller before this rule existed.
+
+**And the card NAMES the batch** (`owedBatches`, `vrf.owedBatch`). A plot
+coming back with its four jobs already recorded reads as a mistake
+otherwise: the sheet one tap away shows all four filled in. It is drawn
+only where it is the answer — a plot that never recorded anything owes all
+four and needs no note.
+
+Section 2b of `tests/nobody_signed_for_this_work.cjs` is the office's own
+six plots, letter for letter, including the three whose batch lists are the
+same set in a different order.
+
 ### Transplanting left the Maintenance module, and what that costs
 
 The four transplanting jobs were never planned by the month's schedule —

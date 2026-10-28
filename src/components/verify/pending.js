@@ -112,18 +112,83 @@ export function doIsMine(d, plotMap, allowed) {
 
    `rows` is what loadTransplantingSince gives: [{ plot, qty, batches, ... }].
    `records` is what loadTransplantRecords gives: rows of the saved table. */
-export function missingJobs(plot, records) {
-  const have = new Set(
-    (records || [])
-      .filter((r) => r && r.plot_name === plot)
-      .map((r) => r.work_type)
-  );
-  return TRANSPLANT_JOBS.filter((j) => !have.has(j.key));
+/* A BATCH IS THE UNIT OF THE WORK, NOT THE PLOT.
+   `missingJobs` used to ask only whether the plot had a record of each
+   job, in any month, ever since TRANSPLANT_FLOW_FROM. So a plot that took
+   another delivery AFTER its four jobs were recorded counted as finished
+   and dropped off the board -- and that delivery is a new filling, a new
+   lining, a new planting and a new spray, four more crews owed their pay,
+   on no screen anywhere. The office settled it in one line: the new
+   seedlings 要再做一次.
+
+   IT CANNOT BE DONE BY DATE. Filling and lining are sometimes done before
+   the seedlings arrive and sometimes after -- 两种都有 -- so a record
+   older than an arrival proves nothing, and a date test would leave those
+   plots on the board for ever.
+
+   So it is the BATCH, which both sides carry: the ledger row names the
+   batches that have arrived, and the record names the batches it was
+   recorded for. A job is owed again when the ledger names a batch that no
+   record of that job mentions. B11 is the case it was found on: the
+   ledger says 269, 271 and the record says 269. */
+const batchKey = (v) => String(v == null ? '' : v).replace(/[^a-z0-9]/gi, '').toUpperCase();
+const batchList = (v) => String(v == null ? '' : v).split(',').map(batchKey).filter(Boolean);
+
+export function missingJobs(plot, records, batches) {
+  const mine = (records || []).filter((r) => r && r.plot_name === plot);
+  /* The batches the ledger says have arrived. Not given any -- every
+     caller before this rule existed -- the question is the old one. */
+  const want = (batches || []).map(batchKey).filter(Boolean);
+
+  return TRANSPLANT_JOBS.filter((j) => {
+    const recs = mine.filter((r) => r.work_type === j.key);
+    if (!recs.length) return true;      // never recorded at all
+    if (!want.length) return false;     // nothing to match it against
+
+    /* A RECORD WITH NO BATCH ON IT COVERS EVERYTHING, which keeps the old
+       behaviour wherever the data cannot answer. saveTransplantRecord
+       writes `batch_name: rec.batch || null`, so a blank is possible --
+       and raising a plot for ever over a record nobody can tie to a
+       delivery would be the wall this board is careful not to become. */
+    const covered = new Set();
+    let blank = false;
+    recs.forEach((r) => {
+      const list = batchList(r.batch_name);
+      if (!list.length) blank = true;
+      list.forEach((b) => covered.add(b));
+    });
+    if (blank) return false;
+
+    return want.some((b) => !covered.has(b));
+  });
+}
+
+/* WHICH DELIVERY IS OWED, for the card to name. A plot coming back with
+   its four jobs already recorded for an earlier batch reads as a mistake
+   unless the screen says which batch it is about. */
+export function owedBatches(plot, records, batches) {
+  const want = (batches || []).filter((b) => b != null && String(b).trim() !== '');
+  if (!want.length) return [];
+  const mine = (records || []).filter((r) => r && r.plot_name === plot);
+  if (!mine.length) return [];
+  const covered = new Set();
+  let blank = false;
+  mine.forEach((r) => {
+    const list = batchList(r.batch_name);
+    if (!list.length) blank = true;
+    list.forEach((b) => covered.add(b));
+  });
+  if (blank) return [];
+  return want.filter((b) => !covered.has(batchKey(b)));
 }
 
 export function plotsOwingJobs(rows, records) {
   return (rows || [])
-    .map((r) => ({ ...r, missing: missingJobs(r.plot, records) }))
+    .map((r) => ({
+      ...r,
+      missing: missingJobs(r.plot, records, r.batches),
+      owed: owedBatches(r.plot, records, r.batches),
+    }))
     .filter((r) => r.missing.length > 0);
 }
 
