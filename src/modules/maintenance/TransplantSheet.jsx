@@ -7,6 +7,8 @@ import {
   asksDate,
   TRANSPLANT_JOBS,
   TRANSPLANT_SETUP_NEEDED,
+  TRANSPLANT_NOT_DONE_SETUP_NEEDED,
+  isNotDone,
   jobByKey,
   jobLabel,
   loadTransplantingSince,
@@ -226,6 +228,13 @@ function PlotList({ rows, recordOf, onPick, t }) {
      still waiting on a job would sink under every plot already done as the
      months went by — which is the one thing this screen exists to surface. */
   const doneOf = (r) => TRANSPLANT_JOBS.filter((j) => recordOf.has(`${r.plot}|${j.key}`)).length;
+  /* A PLOT WITH A JOB NOBODY DID IS ANSWERED, NOT FINISHED. All four
+     questions have been answered, which is what takes it off the
+     Verification board and puts it under "finished" here -- but a green
+     ALL DONE over a blanket spray that never happened is the list claiming
+     work that was not carried out. So it sorts as finished and says
+     ANSWERED, in slate, and the job list one tap away says which. */
+  const skipOf = (r) => TRANSPLANT_JOBS.some((j) => isNotDone(recordOf.get(`${r.plot}|${j.key}`)));
   const ordered = [...rows].sort((a, b) => {
     const fa = doneOf(a) === TRANSPLANT_JOBS.length, fb = doneOf(b) === TRANSPLANT_JOBS.length;
     if (fa !== fb) return fa ? 1 : -1;
@@ -272,10 +281,14 @@ function PlotList({ rows, recordOf, onPick, t }) {
                   the list is scanned for. */}
               <span className={`shrink-0 text-[10px] font-black uppercase tracking-widest rounded-full px-2.5 py-1 ${
                 n === TRANSPLANT_JOBS.length
-                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  ? (skipOf(r) ? 'bg-slate-200 text-slate-600 border border-slate-300'
+                               : 'bg-emerald-50 text-emerald-700 border border-emerald-200')
                   : n ? 'bg-amber-50 text-amber-700 border border-amber-200'
                       : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                {n === TRANSPLANT_JOBS.length ? (<><Icon name="check" className="w-3 h-3 inline-block align-[-2px]" /> {t('tp.allDone')}</>) : `${n}/${TRANSPLANT_JOBS.length}`}
+                {n === TRANSPLANT_JOBS.length
+                  ? (skipOf(r) ? t('tp.allAnswered')
+                               : (<><Icon name="check" className="w-3 h-3 inline-block align-[-2px]" /> {t('tp.allDone')}</>))
+                  : `${n}/${TRANSPLANT_JOBS.length}`}
               </span>
               <span className="text-slate-300 text-[18px] shrink-0">›</span>
             </div>
@@ -294,6 +307,13 @@ function JobList({ row, recordOf, onPick, t, lang }) {
       {TRANSPLANT_JOBS.map((j) => {
         const rec = recordOf.get(`${row.plot}|${j.key}`);
         const who = rec ? (rec.workers || []).map((w) => w.name) : [];
+        /* ANSWERED WITH "NOBODY DID IT" IS NOT THE SAME AS ANSWERED, and it
+           must not wear the same tick: a green ✓ against a blanket spray
+           that never happened is the screen saying the work was done. It is
+           not a TO DO either -- somebody has answered the question, which is
+           the whole reason the plot is off the board. So it is its own
+           state, in slate, saying what it says. */
+        const skipped = isNotDone(rec);
         return (
           <button key={j.key} type="button" onClick={() => onPick(j.key)}
             className="w-full bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)]
@@ -306,8 +326,10 @@ function JobList({ row, recordOf, onPick, t, lang }) {
                 <div className="font-black text-slate-800 text-[14px] leading-tight">
                   {jobLabel(j, lang)}
                 </div>
-                <div className="text-[11.5px] font-bold text-slate-400 mt-0.5 break-words">
-                  {who.length ? who.join(', ') : t('tp.notRecorded')}
+                <div className={`text-[11.5px] font-bold mt-0.5 break-words ${
+                  skipped ? 'text-slate-500' : 'text-slate-400'}`}>
+                  {skipped ? t('tp.notDoneWho')
+                    : who.length ? who.join(', ') : t('tp.notRecorded')}
                 </div>
                 {/* WHEN it was saved, on the list. A record's date is the
                     first thing asked about it and the last thing anybody
@@ -331,17 +353,20 @@ function JobList({ row, recordOf, onPick, t, lang }) {
                   </div>
                 )}
                 {/* The split, where there is one. Seeing it on the list is
-                    what stops somebody opening all four to find it. */}
-                {rec && j.split && (
+                    what stops somebody opening all four to find it. A job
+                    nobody did has no split to show. */}
+                {rec && j.split && !skipped && (
                   <div className="text-[11px] font-black text-slate-600 mt-1 tabular-nums">
                     {(rec.workers || []).map((w) => `${w.name} ${num(w.qty)}`).join('  ·  ')}
                   </div>
                 )}
               </div>
               <span className={`shrink-0 text-[9px] font-black uppercase tracking-widest rounded-full px-2 py-1 ${
-                rec ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                skipped ? 'bg-slate-200 text-slate-600 border border-slate-300'
+                : rec ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                     : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                {rec ? <Icon name="check" className="w-3 h-3 inline-block" /> : t('tp.todo')}
+                {skipped ? t('tp.notDoneTag')
+                  : rec ? <Icon name="check" className="w-3 h-3 inline-block" /> : t('tp.todo')}
               </span>
             </div>
           </button>
@@ -374,6 +399,11 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
   /* Saved, and this person may not reopen it. Not the same as "no existing
      record": the form still shows everything, it just cannot be changed. */
   const locked = !!existing && !mayEdit;
+  /* Already answered with "nobody did it". The form then shows the ticks
+     again where this person may correct it, because the one thing a
+     not-done record has to be is reversible: the grass came after all, the
+     crew went out, and the work has to be payable. */
+  const skipped = isNotDone(existing);
   const [picked, setPicked] = useState(() => {
     const m = {};
     (existing ? existing.workers || [] : []).forEach((w) => { m[w.name] = w.qty == null ? '' : String(w.qty); });
@@ -388,6 +418,15 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
     String((existing && existing.work_date) || today || '').slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  /* THE SECOND STEP OF SAYING NOBODY DID IT. One tap writes a record
+     against somebody's plot, and the button sits under the Save it is the
+     opposite of, so it is confirmed -- and confirmed in a panel of this
+     screen's own rather than a `confirm()`, because what has to be read is
+     three lines: which plot, which job, and that it can be undone. No
+     prompt asks for a reason: a prompt somebody dismisses out of habit is a
+     cancel that looks like a save, and the remark box above is already
+     where a reason goes. */
+  const [confirmSkip, setConfirmSkip] = useState(false);
 
   const names = Object.keys(picked);
   const total = names.reduce((n, k) => n + (Number(picked[k]) || 0), 0);
@@ -418,6 +457,42 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
            leave the old month's row standing and pay the job twice —
            see saveTransplantRecord. */
         id: existing && existing.id,
+        /* CLEARED EXPLICITLY, and only where it was set. A crew saved over a
+           not-done record is the work having happened after all, and a row
+           left flagged would show the names and pay nobody. Left undefined
+           on an ordinary save so the column is not named at all — see
+           saveTransplantRecord. */
+        notDone: skipped ? false : undefined,
+      });
+    } catch (e) {
+      setErr((e && e.message) || String(e));
+      setSaving(false);
+    }
+  }
+
+  /* NOBODY DID THIS JOB, and that is an answer rather than a gap.
+     A blanket spray is not always needed — the grass does not always come —
+     so a plot can genuinely never have one. With no way to say so the plot
+     owed four jobs for ever: it sat on the Verification board, no card could
+     ever be cleared, and now that a new delivery owes its jobs again it
+     would come back every time. The office asked for it in one line: 要有
+     option是没有做.
+     It is a RECORD and never a deletion, the same choice the admin-closed
+     plot and the rejected signup made — it goes through the one door
+     everything else goes through, it carries who said so and when, and it
+     can be reversed. The crew is EMPTY, which is what keeps it off every
+     claim line by construction rather than by a rule somebody has to
+     remember. */
+  async function submitNotDone() {
+    setSaving(true); setErr(null);
+    try {
+      await onSave({
+        workTypeKey: job.key,
+        workers: [],
+        remark: remark.trim(),
+        date,
+        id: existing && existing.id,
+        notDone: true,
       });
     } catch (e) {
       setErr((e && e.message) || String(e));
@@ -473,6 +548,12 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
       </div>
       )}
 
+      {/* WHO. Left off a CLOSED not-done record altogether: "who was
+          credited" over an empty list reads as a crew somebody forgot to
+          fill in, which is the one thing this record must not look like.
+          The panel at the foot says what it is instead. Where this person
+          MAY correct it the ticks are shown, because that is the way back. */}
+      {!(locked && skipped) && (
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
           {locked ? t('tp.whoWasCredited') : split ? t('tp.whoAndHowMany') : t('tp.whoDidIt')}
@@ -559,6 +640,7 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
           </div>
         )}
       </div>
+      )}
 
       {(!locked || remark) && (
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
@@ -584,16 +666,25 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
       {existing && mayEdit && (
         /* Reopening a closed record is a deliberate act, so it says what it
            is. Without this the form looks exactly like a blank one and a
-           correction looks exactly like a first record. */
+           correction looks exactly like a first record.
+           A not-done record says something else again: what ticking a crew
+           here MEANS, which is that the work happened after all and is going
+           back onto a claim. */
         <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3
                         text-[11.5px] font-bold leading-snug">
-          {t('tp.correcting', { d: savedOn(existing) || '—' })}
+          {skipped ? t('tp.undoNotDone', { d: savedOn(existing) || '—' })
+                   : t('tp.correcting', { d: savedOn(existing) || '—' })}
         </div>
       )}
 
       {err && (
         <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-3 text-[12.5px] font-bold">
-          {t('mt.saveErr', { msg: err })}
+          {/* The one refusal that is not a database fault but a file nobody
+              has run. Said as what to do about it, because "could not find
+              the not_done column" means nothing to a conductor. */}
+          {err === TRANSPLANT_NOT_DONE_SETUP_NEEDED
+            ? t('tp.notDoneSetup')
+            : t('mt.saveErr', { msg: err })}
         </div>
       )}
 
@@ -604,7 +695,8 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
            it cannot be pressed. */
         <div className="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3.5">
           <div className="text-[12px] font-black text-slate-600 uppercase tracking-widest">
-            <Icon name="lock" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('tp.lockedTitle')}
+            <Icon name="lock" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {
+              skipped ? t('tp.notDoneTitle') : t('tp.lockedTitle')}
           </div>
           <div className="text-[11.5px] font-semibold text-slate-500 mt-1 leading-snug">
             {t('tp.savedOn', { d: savedOn(existing) || '—' })}
@@ -612,15 +704,59 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
             {existing.reported_by ? ` · ${existing.reported_by}` : ''}
           </div>
           <div className="text-[11.5px] font-semibold text-slate-400 mt-1.5 leading-snug">
-            {t('tp.lockedHint')}
+            {skipped ? t('tp.notDoneLockedHint') : t('tp.lockedHint')}
+          </div>
+        </div>
+      ) : confirmSkip ? (
+        /* THE CONFIRM NAMES WHAT IT IS ABOUT TO DO — the plot, the job, and
+           that nobody is paid for it. The same rule the admin-closed plot
+           follows, and for the same reason: a row of similar-looking
+           buttons on a phone is not necessarily pressed where it was
+           aimed. Cancel writes nothing. */
+        <div className="bg-slate-100 border border-slate-300 rounded-xl px-4 py-3.5 space-y-3">
+          <div className="text-[12px] font-black text-slate-700 uppercase tracking-widest">
+            {t('tp.notDoneConfirmTitle')}
+          </div>
+          <div className="text-[12px] font-bold text-slate-600 leading-snug">
+            {t('tp.notDoneConfirm', { p: row.plot, j: jobLabel(job, lang) })}
+          </div>
+          <div className="text-[11.5px] font-semibold text-slate-500 leading-snug">
+            {t('tp.notDoneConfirmHint')}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmSkip(false)} disabled={saving}
+              className="flex-1 bg-white border border-slate-300 text-slate-600 font-black text-[12px]
+                         uppercase tracking-widest rounded-xl py-3 disabled:opacity-40">
+              {t('common.cancel')}
+            </button>
+            <button onClick={submitNotDone} disabled={saving || !date}
+              className="flex-1 bg-slate-700 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-default
+                         text-white font-black text-[12px] uppercase tracking-widest rounded-xl py-3 transition-colors">
+              {saving ? t('auth.processing') : t('tp.notDoneGo')}
+            </button>
           </div>
         </div>
       ) : (
-        <button onClick={submit} disabled={saving || !balanced}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-default
-                     text-white font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors">
-          {saving ? t('auth.processing') : existing ? t('mt.saveCorrection') : t('mt.save')}
-        </button>
+        <div className="space-y-2">
+          <button onClick={submit} disabled={saving || !balanced}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-default
+                       text-white font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors">
+            {saving ? t('auth.processing') : existing ? t('mt.saveCorrection') : t('mt.save')}
+          </button>
+          {/* NOBODY DID IT. Offered only where there is nothing recorded yet:
+              a job already recorded with a crew is corrected by changing the
+              crew, and one already answered this way is already answered.
+              Quiet and underneath, because it is the rarer answer of the two
+              and the destructive-looking one — the same shape as Resume
+              sitting above Start again on the parked walk. */}
+          {!existing && (
+            <button onClick={() => setConfirmSkip(true)} disabled={saving}
+              className="w-full bg-white border border-slate-300 text-slate-500 hover:text-slate-700
+                         font-black text-[11px] uppercase tracking-widest rounded-xl py-3 disabled:opacity-40">
+              {t('tp.notDoneBtn')}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

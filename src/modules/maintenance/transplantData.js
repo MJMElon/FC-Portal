@@ -27,6 +27,18 @@ import { fetchAllRows, supabase } from '../../lib/supabase.js';
 /** Raised when the table has not been created yet. */
 export const TRANSPLANT_SETUP_NEEDED = 'TRANSPLANT_SETUP_NEEDED';
 
+/* Raised when the table is there and the NOT DONE column is not. Kept apart
+   from the one above because the answer is a different file to run, and
+   because the two errors read alike: PostgREST says "could not find the
+   'not_done' column ... in the schema cache" for a missing column and
+   "could not find the table ... in the schema cache" for a missing table,
+   and `missingTable` below matches "schema cache". A missing column tested
+   second would be reported as a missing table. */
+export const TRANSPLANT_NOT_DONE_SETUP_NEEDED = 'TRANSPLANT_NOT_DONE_SETUP_NEEDED';
+
+/** Was this job answered with "nobody did it"? */
+export const isNotDone = (rec) => !!(rec && rec.not_done);
+
 const TABLE = 'nops_transplant_field_records';
 
 /* ONE type, because this screen answers to the Transplanting Report and that
@@ -243,6 +255,12 @@ function missingTable(error) {
   return /relation .* does not exist|Could not find the table|schema cache/i.test(m);
 }
 
+/* The NOT DONE column is not on this database. Asked BEFORE missingTable,
+   which matches "schema cache" and would answer yes to this as well. */
+function missingNotDoneColumn(error) {
+  return /not_done/i.test(String((error && error.message) || ''));
+}
+
 /** Every transplanting job already recorded for this nursery and month. */
 /**
  * Every transplanting record for this nursery's plots, WHATEVER MONTH it was
@@ -313,16 +331,39 @@ export async function saveTransplantRecord(rec) {
     schedule_month: rec.month,
     source_qty:     rec.sourceQty == null ? null : Number(rec.sourceQty),
     workers,
-    total_qty:      job && job.split ? total : null,
+    total_qty:      job && job.split && !rec.notDone ? total : null,
     remark:         rec.remark || null,
     reported_by:    rec.reportedBy || null,
     updated_at:     new Date().toISOString(),
   };
 
+  /* THE DECISION IS A COLUMN, NEVER THE REMARK.
+     A job that is genuinely never going to be done -- a blanket spray on a
+     plot where the grass never came -- is answered with "nobody did it", and
+     that answer has to be a record: without one the plot owes four jobs for
+     ever and sits on the Pending Verification board with nothing anybody can
+     do about it. The remark is free text the office edits, and a decision
+     that can be undone by somebody tidying a sentence is not a record of
+     anything -- the same reason a rejected signup is two columns and not a
+     remark.
+     THE FLAG IS SENT ONLY BY CODE THAT KNOWS ABOUT IT. `notDone` left
+     undefined omits the key, so every caller from before this existed writes
+     exactly the row it always wrote and goes on working on a database that
+     has not had RUN_ME_transplant_not_done.sql run. Passing it FALSE is how
+     a not-done record is turned back into a real one, so that has to be
+     sent as well. */
+  if (rec.notDone !== undefined) row.not_done = !!rec.notDone;
+
   const { error } = rec.id
     ? await supabase.from(TABLE).update(row).eq('id', rec.id)
     : await supabase.from(TABLE).upsert(row, { onConflict: 'plot_name,work_type,schedule_month' });
   if (error) {
+    /* IT REFUSES RATHER THAN WRITING THE ROW WITHOUT THE FLAG. Dropping it
+       would store a record naming nobody, which every office screen reads as
+       a crew somebody forgot to fill in -- "names nobody, go and add who did
+       the work" about a job nobody is ever going to do. The job staying
+       unrecorded is the truth, and the message says which file to run. */
+    if (missingNotDoneColumn(error)) throw new Error(TRANSPLANT_NOT_DONE_SETUP_NEEDED);
     if (missingTable(error)) throw new Error(TRANSPLANT_SETUP_NEEDED);
     throw error;
   }

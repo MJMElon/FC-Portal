@@ -331,6 +331,65 @@ Section 2b of `tests/nobody_signed_for_this_work.cjs` is the office's own
 six plots, letter for letter, including the three whose batch lists are the
 same set in a different order.
 
+### A job NOBODY DID is an answer, and the batch rule is what made it urgent
+
+A blanket spray is not always needed — the grass does not always come — so
+a plot can genuinely never have one, and there was no way to say so. The
+plot therefore owed four jobs for ever: its card could never be cleared and
+sat under every plot with work actually owing. The rule above is what made
+it pressing rather than untidy: **once a second delivery owes the four jobs
+again, a job that is never done comes back on every arrival.** The office
+asked for it in one line: *"要有option是没有做"*.
+
+**It is a RECORD and never a deletion**, the same choice the admin-closed
+plot and the rejected signup made: an ordinary
+`nops_transplant_field_records` row carrying the day, the plot, the job, the
+batches it is about and who said so, with an **EMPTY CREW** — which is what
+keeps it off every claim line BY CONSTRUCTION rather than by a rule
+somebody has to remember, since `transplantFieldLines` has always dropped a
+row with no crew. It goes through the one door everything else goes
+through, and it can be reversed.
+
+**THE ANSWER IS ABOUT THE BATCHES, NOT THE PLOT FOR EVER.** That falls out
+of `missingJobs` and was not a second decision: the record carries the
+ledger's batches like any other, so the job is answered for those and a new
+delivery asks again — the grass may well come for the next lot. Nobody had
+to choose a level; the batch rule above had already chosen it.
+
+**The decision is a COLUMN** (`not_done`,
+`shared/RUN_ME_transplant_not_done.sql`). The remark is free text the
+office edits, and a decision that can be undone by somebody tidying a
+sentence is not a record of anything — the rejected signup's reasoning
+exactly. And every office screen reads a crew of nobody as a crew somebody
+FORGOT, so without the column the sheet would say *"names nobody, go and
+add who did the work"* about a job nobody is ever going to do.
+
+Four things in it:
+
+- **The flag is sent only by code that knows about it.** `rec.notDone` left
+  undefined omits the key, so every caller from before this writes exactly
+  the row it always wrote and a database without the column goes on
+  working. Passing it FALSE is how a not-done record becomes a real one, so
+  that has to be sent as well — a row left flagged would show the names and
+  pay nobody.
+- **A missing column REFUSES rather than failing open.** Dropping the flag
+  and writing anyway would store a record naming nobody, which is the one
+  shape this must not have; the job staying unrecorded is the truth, and
+  the message names the file to run. Asked BEFORE `missingTable`, which
+  matches "schema cache" and would otherwise swallow it — PostgREST words
+  both refusals that way.
+- **It does not wear the tick.** A green ✓ against a spray that never
+  happened is the screen saying the work was done, and TO DO is wrong too
+  because somebody has answered. It is its own state, in slate, and a plot
+  carrying one reads **ANSWERED** rather than ALL DONE.
+- **It is a dialog, never `confirm()`.** What has to be read is three
+  lines — which plot, which job, that it can be undone — and no prompt asks
+  for a reason: the remark box above is where one goes, and a prompt
+  dismissed out of habit is a cancel that looks like a save.
+
+`tests/a_job_that_was_not_done_is_an_answer.cjs` drives the real writer and
+the real board rule, the schema-cache trap included.
+
 ### Transplanting left the Maintenance module, and what that costs
 
 The four transplanting jobs were never planned by the month's schedule —
