@@ -313,17 +313,20 @@ export default function VerificationBoard({ onCount }) {
                   ? ' · ' + tpCard.owed.join(', ')
                   : (tpCard.batch ? ' · ' + tpCard.batch : '')}
               </div>
-              {/* WHICH DELIVERY IS OWED. A plot whose four jobs were
-                  recorded for an earlier batch comes back here when a new
-                  one arrives, and without this line it reads as a mistake:
-                  the sheet one tap away shows all four already filled in.
-                  Only drawn where it is the answer -- a plot that never
-                  recorded anything owes all of them and needs no note. */}
-              {(tpCard.owed || []).length > 0 && (
-                <div className="text-[12px] font-bold text-amber-700 truncate">
-                  {t('vrf.owedBatch')}: {tpCard.owed.join(', ')}
-                </div>
-              )}
+              {/* THERE IS NO LINE SAYING "new batch not recorded", and the
+                  office took it off in one sentence: *"干嘛要有那一行小字 …
+                  他就和 B3 一样啊 同样 plot 不一样日期种"*. A second
+                  delivery IS the ordinary case — the same plot, planted on
+                  another day — and a card that explains itself reads as an
+                  exception somebody has to think about.
+
+                  It was put there for a reason that no longer exists: the
+                  sheet used to open with all four jobs ticked green for the
+                  earlier batch, so the card had to say why it was raising a
+                  plot that looked finished. The sheet now says it where it
+                  belongs — the ticks go back to TO DO and each job names
+                  the batch it owes — so this line was the same answer
+                  twice, in the place with the least room for it. */}
               {/* The job NAMES were here and the office asked for them out.
                   Four of them spelt in full -- "Lining & Arranging Polybag
                   15" x 18"" among them -- wrapped to three lines and made

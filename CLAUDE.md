@@ -321,11 +321,16 @@ Three things in it, and the second is the one that would have broken it:
   so that case keeps the old behaviour — and so does a caller that passes
   no batches at all, which is every caller before this rule existed.
 
-**And the card NAMES the batch** (`owedBatches`, `vrf.owedBatch`). A plot
-coming back with its four jobs already recorded reads as a mistake
-otherwise: the sheet one tap away shows all four filled in. It is drawn
-only where it is the answer — a plot that never recorded anything owes all
-four and needs no note.
+**The card names the batch in its ordinary line** (`135 · 271`) and says
+NOTHING ELSE. It carried a second line — *"New batch not recorded: 271"* —
+and the office took it off in one sentence: *"干嘛要有那一行小字 … 他就和
+B3 一样啊 同样 plot 不一样日期种"*. They are right, and the reason that line
+existed had already gone: it was there because the sheet opened with all
+four jobs ticked green for the earlier batch, so the card had to explain
+why it was raising a plot that looked finished. **The sheet says it where
+it belongs now** — the ticks go back to TO DO and each job names the batch
+it owes — so the card was giving the same answer twice, in the place with
+the least room for it, and dressing the ordinary case as an exception.
 
 Section 2b of `tests/nobody_signed_for_this_work.cjs` is the office's own
 six plots, letter for letter, including the three whose batch lists are the

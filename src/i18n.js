@@ -476,7 +476,6 @@ const en = {
   'vrf.noNursery': 'On no nursery list',
   /* The batch that has arrived and has no record of these four jobs
      against it -- the plot own earlier batches are recorded. */
-  'vrf.owedBatch': 'New batch not recorded',
   'vrf.addPlotFirst': 'Add this plot in Seedling Stock',
   'vrf.allDone': 'Nothing to verify',
   'vrf.prev': 'Previous',
@@ -1350,7 +1349,6 @@ const ms = {
   'vrf.pickWorkers': 'Pilih pekerja',
   'vrf.openSheet': 'Rekod kerja',
   'vrf.noNursery': 'Tiada dalam senarai nurseri',
-  'vrf.owedBatch': 'Batch baharu belum direkod',
   'vrf.addPlotFirst': 'Tambah plot ini di Seedling Stock',
   'vrf.allDone': 'Tiada untuk disahkan',
   'vrf.prev': 'Sebelum',

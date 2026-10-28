@@ -183,6 +183,14 @@ const SEPT = JOBS.map((j) => rec('B11', j.key, '269', 3168, '2026-09-29', 'Sep 2
   const B = bare(BOARD);
   yes(/tpCard\.owedQty == null \? tpCard\.qty : tpCard\.owedQty/.test(B),
       'the card prints the owed figure, falling back to the total');
+  /* AND IT EXPLAINS NOTHING. A second delivery is the ordinary case — the
+     same plot on another day — so the card is the same card B3 gets: plot,
+     nursery, figure and batch. The line saying "new batch not recorded"
+     came off at the office's word, and the sheet says it where it belongs.
+     Asked of the bare markup, because the comment where it stood names it. */
+  no(/vrf\.owedBatch/.test(B), 'no line on the card explaining why the plot is here');
+  no(/vrf\.owedBatch/.test(R('src/i18n.js')),
+     'and the string went with it — a word nothing says is one somebody looks for a use of');
 
   console.log('\n-- 8 - EVERY NEW STRING IS IN BOTH LANGUAGES --');
   const I18N = R('src/i18n.js');
