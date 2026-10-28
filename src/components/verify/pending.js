@@ -6,7 +6,8 @@
  * one gap the payroll cannot close by itself.
  */
 
-import { isCancelledDO } from '../../modules/do/data.js';
+import { isCancelledDO, plotsOfDO } from '../../modules/do/data.js';
+import { nurseryKey } from '../../lib/access.js';
 import { TRANSPLANT_JOBS } from '../../modules/maintenance/transplantData.js';
 
 /* ── 1. A DELIVERY ORDER WHOSE LOADERS WERE NEVER NAMED ───────────────
@@ -47,6 +48,56 @@ export function doNeedsWorkers(d) {
    to meet somewhere, and the 1st of a month is that somewhere. Move this
    date to move the floor; there is no second rule to keep in step. */
 export const LOADING_WORKERS_FROM = '2026-10-01';
+
+/* ── 1b. AND IT HAS TO BE ONE OF MY NURSERIES ─────────────────────────
+   The office asked for it in one line: *"BNN acc 只看到 BNN 的 plot, UNN1
+   只看到 UNN1 的 plot"*. The transplanting half has been scoped since it
+   was written; this half never was, so a BNN conductor opened the board
+   and found a DO for N12 sitting beside his own B2.
+
+   THE TEST IS "ANY OF ITS PLOTS IS MINE", and it has to be, because a DO
+   can span nurseries -- it carries plot_1..plot_5 and one load can be
+   drawn from more than one. Asking that EVERY plot is mine would drop a
+   DO half of which is my work, and nobody would ever name the gang for it.
+
+   A DO WHOSE PLOTS CANNOT BE PLACED GOES ON SHOWING. A plot missing from
+   Seedling Stock has no nursery to compare, and a card that vanishes off
+   every board with nothing saying where it went is the exact fault this
+   board exists to stop -- it would be the Who Loaded step being skipped
+   again, only now invisible to the system as well as to the person. Same
+   direction as access failing open: show too much rather than too little.
+
+   Matched through nurseryKey, like every nursery comparison in either
+   repository: the tick list is typed by hand and says "UNN1" where
+   shared_plots says "UNN 1".
+
+   WHAT IT COSTS, and it is the thing another_nursery_can_load_the_do.cjs
+   is entirely about: WHERE THE SEEDLINGS WERE IS NOT WHO CARRIED THEM. A
+   BNN DO is regularly loaded by a UNN 1 gang, and after this the UNN 1
+   conductor no longer sees it. There is no better rule available -- this
+   board lists exactly the DOs whose `worked_by_by_nursery` is still
+   empty, so the one thing that would say who loaded it is the answer
+   nobody has given yet, and the plots are all there is. The work is not
+   lost: it sits on the BNN board, and that popup opens every other
+   nursery by hand underneath its own, which is what it was built for.
+
+   `allowed` empty or absent is NOBODY HAS BEEN ASKED, so every DO shows --
+   which is what the whole portal did before this existed. */
+export function doIsMine(d, plotMap, allowed) {
+  const list = (allowed || []).filter(Boolean);
+  if (!list.length) return true;
+  const mine = new Set(list.map(nurseryKey));
+  /* plotsOfDO is the DO module's own reader of plot_1..plot_5 -- the same
+     one the card prints -- so the scope cannot come to disagree with what
+     is on screen. */
+  const placed = plotsOfDO(d || {})
+    .map((p) => (plotMap || {})[p])
+    .filter(Boolean);
+  /* No plots on the DO at all, or not one of them is in Seedling Stock:
+     there is nothing to place it by, so it stays. */
+  if (!placed.length) return true;
+  return placed.some((n) => mine.has(nurseryKey(n)));
+}
 
 /* ── 2. A TRANSPLANTED PLOT WHOSE JOBS ARE NOT ALL RECORDED ───────────
    The ledger says seedlings went into the plot; the four jobs that go with

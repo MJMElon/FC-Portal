@@ -172,19 +172,56 @@ source, so `` `border-${tone}-200` `` is a class that is never generated and
 a border that never appears. `TONE` is the explicit map; the test forbids
 the interpolated form.
 
-**The two halves are scoped DIFFERENTLY, and that is inherited rather than
-chosen.** Transplanting reads only the conductor own nurseries
-(`allowedNurseries(permissions, 'maintenance')`, matched through
+**BOTH HALVES ARE SCOPED NOW, and the day it was asked for is the day the
+note above predicted.** Transplanting reads only the conductor own
+nurseries (`allowedNurseries(permissions, 'maintenance')`, matched through
 `nurseryKey`), the same scoping the Maintenance module uses — and open to
 everything for a login nobody has configured, because access fails open.
-The loading half is NOT scoped: it shows every DO missing its gang,
+The loading half was NOT scoped: it showed every DO missing its gang,
 whatever nursery, which is what the DO module beside it has always done —
-nothing under `src/modules/do/` calls `allowedNurseries`. Scope one and not
-the other and the split reads as a bug later; the day somebody wants the
-DO half narrowed, a DO can span nurseries (`plot_1`..`plot_5`) so the test
-is *any of its plots is mine*, and a DO whose plots cannot be placed has to
-go on SHOWING — a card that vanishes off every board with nothing saying
-where it went is the fault this board exists to stop.
+nothing under `src/modules/do/` calls `allowedNurseries`. This file said
+that scoping one and not the other would read as a bug later, and it did:
+the office opened the board as BNN, found a DO for **N12** sitting beside
+their own B2, and asked for it in one line — *"BNN acc 只看到 BNN 的 plot,
+UNN1 只看到 UNN1 的 plot"*.
+
+`doIsMine` in `verify/pending.js` is the rule, written exactly as the note
+above said it would have to be:
+
+- **The test is ANY of its plots is mine, never EVERY.** A DO carries
+  `plot_1`..`plot_5` and one load really can be drawn from two nurseries;
+  asking that all of them are mine drops a DO half of which is my own work,
+  and nobody would ever name the gang for it. Both nurseries keep it.
+- **A DO whose plots cannot be PLACED goes on showing** — no plots on it,
+  or not one of them in Seedling Stock. A card that vanishes off every
+  board with nothing saying where it went is the fault this board exists to
+  stop, and it would be the Who Loaded step being skipped again, invisible
+  to the system this time as well as to the person.
+- **It is the DO page's own list** (`allowedNurseries(permissions, 'do')`),
+  not maintenance's — two doors, and the office may narrow one and not the
+  other. Empty or absent is every nursery.
+- **It is applied in `loadPendingDOs`, not in the card**, because that one
+  read feeds the dock badge as well. Narrowing the cards alone would badge
+  the icon with a number nobody could find anything behind.
+
+**WHAT IT COSTS, and it is what `another_nursery_can_load_the_do.cjs` is
+entirely about: where the seedlings were is not who carried them.** A BNN
+DO is regularly loaded by a UNN 1 gang, and the UNN 1 conductor no longer
+sees it. There is no better rule available — this board lists exactly the
+DOs whose `worked_by_by_nursery` is still EMPTY, so the one field that
+would say who loaded it is the answer nobody has given yet, and the plots
+are all there is. The work is not lost: it sits on the BNN board, and that
+popup opens every other nursery by hand underneath its own, which is what
+it was built for.
+
+Section 1b of `tests/nobody_signed_for_this_work.cjs` holds it, and lifts
+the REAL `plotsOfDO` (through `itemsFromRecord`) and the real `nurseryKey`
+rather than restating either — a second reader of those five plot columns
+is how the scope comes to disagree with what the card prints. **The
+harness brace-scanner had to learn one thing to do it:** a body opens
+after the PARAMETER LIST, not at the first `{` on the line, because
+`itemsFromRecord(d, plotMap = {})` has a default that matches first and
+hands back half a signature.
 
 ### Transplanting left the Maintenance module, and what that costs
 

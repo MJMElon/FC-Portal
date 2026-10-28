@@ -15,11 +15,20 @@ import {
   loadTransplantingSince,
   TRANSPLANT_SETUP_NEEDED,
 } from '../modules/maintenance/transplantData.js';
-import { doNeedsWorkers, LOADING_WORKERS_FROM, plotsOwingJobs } from '../components/verify/pending.js';
+import { doIsMine, doNeedsWorkers, LOADING_WORKERS_FROM, plotsOwingJobs } from '../components/verify/pending.js';
 
-/* A delivery order whose loading gang was never named. Fails soft to an
-   empty list: this exists to RAISE work, and raising none is better than
-   raising a wrong one over a read that failed. */
+/* A delivery order whose loading gang was never named, SCOPED to the
+   conductor own nurseries the way the transplanting half beside it always
+   has been -- the office asked for the two halves to agree: *"BNN acc 只看
+   到 BNN 的 plot, UNN1 只看到 UNN1 的 plot"*. The rule itself is
+   `doIsMine` in verify/pending.js, where a test can drive it.
+
+   SCOPED HERE AND NOT IN THE CARD, because this one read feeds both the
+   dock badge and the board. Narrowing the cards alone would badge the icon
+   with a number nobody could find anything behind.
+
+   Fails soft to an empty list: this exists to RAISE work, and raising none
+   is better than raising a wrong one over a read that failed. */
 export async function loadPendingDOs(permissions) {
   if (!canDo(permissions, 'view')) return { dos: [], plotMap: {}, workers: [] };
   try {
@@ -30,7 +39,17 @@ export async function loadPendingDOs(permissions) {
     ]);
     const plotMap = {};
     (plots || []).forEach((p) => { plotMap[p.plot_name] = p.nursery_name; });
-    return { dos: (rows || []).filter(doNeedsWorkers), plotMap, workers: ws || [] };
+    /* The DO page's OWN nursery list, not maintenance's -- they are two
+       doors and the office may well narrow one and not the other. Absent
+       is every nursery, because access fails open. */
+    const allowed = allowedNurseries(permissions, 'do');
+    return {
+      dos: (rows || [])
+        .filter(doNeedsWorkers)
+        .filter((d) => doIsMine(d, plotMap, allowed)),
+      plotMap,
+      workers: ws || [],
+    };
   } catch (e) {
     return { dos: [], plotMap: {}, workers: [] };
   }

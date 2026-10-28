@@ -49,6 +49,40 @@ const cancelled = (() => {
   throw new Error('isCancelledDO not found');
 })();
 
+/* plotsOfDO reads plot_1..plot_5 through itemsFromRecord, so both are
+   lifted -- doIsMine places a DO by the plots that function returns, and a
+   restatement of it here would be a second reader of those five columns. */
+const doPlots = (() => {
+  const src = R('src/modules/do/data.js');
+  const grab = (name) => {
+    const at = src.indexOf('export function ' + name);
+    if (at < 0) throw new Error(name + ' not found');
+    /* The body opens after the PARAMETER LIST, not at the first brace in
+       the line: itemsFromRecord is declared `(d, plotMap = {})`, and a
+       scan from the first `{` matches that default and hands back half a
+       signature. */
+    let depth = 0;
+    for (let j = src.indexOf('{', src.indexOf(')', at)); j < src.length; j++) {
+      if (src[j] === '{') depth++;
+      else if (src[j] === '}' && --depth === 0) return src.slice(at, j + 1).replace(/^export /, '');
+    }
+    throw new Error(name + ' not closed');
+  };
+  return grab('itemsFromRecord') + '\n' + grab('plotsOfDO');
+})();
+
+/* And the one nursery-matching rule this whole system compares names by. */
+const nkey = (() => {
+  const src = R('src/lib/access.js');
+  const at = src.indexOf('export function nurseryKey');
+  let depth = 0;
+  for (let j = src.indexOf('{', at); j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}' && --depth === 0) return src.slice(at, j + 1).replace(/^export /, '');
+  }
+  throw new Error('nurseryKey not found');
+})();
+
 const jobs = (() => {
   const src = R('src/modules/maintenance/transplantData.js');
   const at = src.indexOf('export const TRANSPLANT_JOBS = [');
@@ -58,8 +92,9 @@ const jobs = (() => {
 
 const ctx = { console, Date, JSON, Math, Object, Set, Array, String, Number, Boolean };
 vm.createContext(ctx);
-vm.runInContext(cancelled + '\n' + jobs + '\n' + strip('src/components/verify/pending.js')
-  + '\n;globalThis.__p = { doNeedsWorkers, missingJobs, plotsOwingJobs, clampIndex, LOADING_WORKERS_FROM };',
+vm.runInContext(cancelled + '\n' + doPlots + '\n' + nkey + '\n' + jobs + '\n'
+  + strip('src/components/verify/pending.js')
+  + '\n;globalThis.__p = { doNeedsWorkers, missingJobs, plotsOwingJobs, clampIndex, LOADING_WORKERS_FROM, doIsMine: (typeof doIsMine === \'function\' ? doIsMine : null) };',
   ctx);
 const P = vm.runInContext('__p', ctx);
 
@@ -95,6 +130,61 @@ is(P.doNeedsWorkers(DO({ status: 'cancelled' })), true,
 is(P.doNeedsWorkers(null), false, 'nothing at all is not a DO');
 is(P.doNeedsWorkers({ do_number: 'x' }), false,
    'a row with no id cannot be answered, so it is not raised');
+
+
+/* ── 1b. AND IT HAS TO BE ONE OF MY NURSERIES ────────────────────────
+   The office: *"BNN acc 只看到 BNN 的 plot, UNN1 只看到 UNN1 的 plot"*.
+   The transplanting half has been scoped since it was written and this
+   one never was, so a BNN conductor was shown a DO for N12.
+
+   The plots come off the real plotsOfDO, so these fixtures are keyed the
+   way a DO actually is -- plot_1..plot_5 and nothing else. */
+const MAP = { B2: 'BNN', B3: 'BNN', N12: 'UNN 2', U18: 'UNN 1' };
+const ONE = (over) => DO(Object.assign({ plot_1: 'B2', qty_1: 10 }, over));
+
+/* ON THE PREVIOUS CODE THERE IS NO RULE AT ALL, and a test that then
+   throws on a null reports a stack instead of naming what is missing. */
+if (typeof P.doIsMine !== 'function') {
+  fail('verify/pending.js exports no doIsMine -- the loading half is unscoped');
+} else {
+
+is(P.doIsMine(ONE({}), MAP, ['BNN']), true,
+   'a BNN conductor keeps a BNN DO');
+is(P.doIsMine(ONE({}), MAP, ['UNN1']), false,
+   'and does not see it from the UNN1 circle');
+is(P.doIsMine(DO({ plot_1: 'N12', qty_1: 10 }), MAP, ['BNN']), false,
+   'the N12 DO the office was shown on a BNN board is off it');
+
+/* THE TEST IS ANY, NOT EVERY, because a DO carries five plot columns and
+   one load really can be drawn from two nurseries. Asking that all of
+   them are mine would drop a DO half of which is my own work, and nobody
+   would ever name the gang for it. */
+is(P.doIsMine(DO({ plot_1: 'B2', qty_1: 5, plot_2: 'N12', qty_2: 5 }), MAP, ['BNN']), true,
+   'a DO spanning two nurseries is mine if ANY plot is');
+is(P.doIsMine(DO({ plot_1: 'B2', qty_1: 5, plot_2: 'N12', qty_2: 5 }), MAP, ['UNN2']), true,
+   '…and the other nursery keeps it too, on the same rule');
+
+/* The access tick list is typed by hand and says UNN1 where Seedling
+   Stock says "UNN 1". Every nursery comparison in either repository goes
+   through nurseryKey for exactly this. */
+is(P.doIsMine(DO({ plot_1: 'U18', qty_1: 1 }), MAP, ['UNN1']), true,
+   'UNN1 and "UNN 1" are one nursery');
+
+/* A DO THAT CANNOT BE PLACED GOES ON SHOWING. A card that vanishes off
+   every board with nothing saying where it went is the exact fault this
+   board exists to stop. */
+is(P.doIsMine(DO({ plot_1: 'ZZ9', qty_1: 1 }), MAP, ['BNN']), true,
+   'a plot missing from Seedling Stock keeps its DO on the board');
+is(P.doIsMine(DO({}), MAP, ['BNN']), true,
+   'and so does a DO naming no plot at all');
+
+/* Nobody configured is nobody asked -- the portal showed every DO before
+   this existed and must go on doing so. */
+is(P.doIsMine(DO({ plot_1: 'N12', qty_1: 1 }), MAP, []), true,
+   'an empty nursery list is every nursery, not none');
+is(P.doIsMine(DO({ plot_1: 'N12', qty_1: 1 }), MAP, null), true,
+   '…and so is no list at all');
+}
 
 /* ── 2. The transplanted plot whose jobs are not recorded ────────────── */
 const rows = [
