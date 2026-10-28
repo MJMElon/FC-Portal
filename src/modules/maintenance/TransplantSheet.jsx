@@ -16,8 +16,13 @@ import {
   saveTransplantRecord,
 } from './transplantData.js';
 import { numText } from '../../lib/numberText.js';
+import { missingJobs, owedForJob, owedQty } from '../../components/verify/pending.js';
 
 const num = (n) => numText(Number(n || 0));
+
+/* The batches ONE RECORD was made for, as the ledger spells them. */
+const recBatches = (rec) => String((rec && rec.batch_name) || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
 
 /* When a record was saved, as a person reads a date. Falls back through the
    columns a row might have: created_at is the first save, work_date is the
@@ -34,10 +39,16 @@ const plantedOn = (raw) => {
 /* Was this record priced on a figure the report has since moved?
    Compared on the number the record STORED, because that is the number the
    payroll divides among the crew — not the one on screen. */
+/* COMPARED AGAINST THE BATCHES THIS RECORD IS FOR, not against the plot's
+   whole total. A plot that took a second delivery carries one record for
+   the first batch and one for the second, and each is priced on its own
+   batch — measuring either against the sum would report every one of them
+   as a figure the report has moved. A record with no batch on it falls
+   back to the plot total, which is what it always compared against. */
 const staleQty = (rec, row) => {
   if (!rec || !row) return false;
   const was = Number(rec.source_qty);
-  const now = Number(row.qty);
+  const now = Number(owedQty(row, recBatches(rec)));
   if (!Number.isFinite(was) || !Number.isFinite(now)) return false;
   return Math.round(was) !== Math.round(now);
 };
@@ -121,6 +132,33 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
 
   const row = plot ? rows.find((r) => r.plot === plot) : null;
 
+  /* WHICH JOBS THIS PLOT STILL OWES, by the board's own rule — a job is
+     owed again when a batch has arrived that no record of it mentions.
+     Asked here rather than "has it any record at all", so the sheet and
+     the card that opened it cannot disagree about what is left. */
+  const owedJobs = useMemo(
+    () => new Set(missingJobs(row ? row.plot : '', done, row ? row.batches : []).map((j) => j.key)),
+    [row, done]
+  );
+  /* And what ONE job is owed FOR: the batches outstanding on it and what
+     they came to. This is the figure that reaches `source_qty` and is
+     divided among the crew, so it is the 135 and never the 3,303. */
+  const jobRow = (key) => {
+    if (!row) return row;
+    const ow = owedForJob(row, done, key);
+    if (ow.batches.length) {
+      return { ...row, batches: ow.batches, batch: ow.batches.join(', '), qty: ow.qty };
+    }
+    /* Nothing owed: the form is a VIEW of the record that answered it, so
+       it shows the batch and the figure THAT record was made for — not the
+       plot's lifetime total, which on a two-delivery plot is a number that
+       record was never about. */
+    const rb = recBatches(recordOf.get(`${row.plot}|${key}`));
+    return rb.length
+      ? { ...row, batches: rb, batch: rb.join(', '), qty: owedQty(row, rb) }
+      : row;
+  };
+
   /* THE MONTH FOLLOWS THE DATE THE WORK WAS DONE, not the board.
      It used to be the board's month with `today` as the date, which is right
      only while a conductor records a job the same month he does it. He does
@@ -136,10 +174,31 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
   async function save(payload) {
     const asking = asksDate(today);
     const when = (asking && payload.date) || today;
+    /* THE BATCHES AND THE FIGURE ARE THE JOB'S OWN, not the plot's. A
+       second delivery is a second crew and a second record: what goes in
+       is 135 against batch 271, and September's 3,168 against 269 is left
+       exactly as it was. */
+    const jr = jobRow(payload.workTypeKey);
+    /* ONE RECORD PER PLOT PER JOB PER MONTH is the unique key, so a second
+       delivery recorded in the SAME month as the first would REPLACE it —
+       a crew's pay overwritten by the next crew's, silently. It cannot be
+       merged either: they are two crews. So it is refused, naming the
+       record that is in the way; dating the work in the month it was
+       actually done is the answer, and that is what the date box is for. */
+    const clash = (done || []).find((r) => r
+      && r.plot_name === row.plot && r.work_type === payload.workTypeKey
+      && r.schedule_month === (asking ? monthLabelOf(when) : month)
+      && String(r.id) !== String(payload.id || ''));
+    if (clash) {
+      throw new Error(t('tp.monthTaken', {
+        b: clash.batch_name || '—', d: String(clash.work_date || '').slice(0, 10),
+        m: asking ? monthLabelOf(when) : month,
+      }));
+    }
     await saveTransplantRecord({
       ...payload,
       nursery, month: asking ? monthLabelOf(when) : month, date: when,
-      plot: row.plot, batch: row.batch, sourceQty: row.qty,
+      plot: row.plot, batch: jr.batch, sourceQty: jr.qty,
       reportedBy: staffName,
     });
     setJob(null);
@@ -195,15 +254,23 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
             <Notice text={t('mt.loadErr', { msg: error })} />
           ) : job && row ? (
             <JobForm
-              job={jobByKey(job)} row={row} workers={workers}
-              existing={recordOf.get(`${row.plot}|${job}`)}
+              job={jobByKey(job)} row={jobRow(job)} workers={workers}
+              /* A JOB THAT OWES A NEW BATCH OPENS BLANK. The record on the
+                 plot is September's crew for batch 269; opening the form
+                 on it would make October's 135 a CORRECTION of it, and
+                 saving would overwrite somebody's pay. It is shown as the
+                 line above the ticks instead, which is what it is: what
+                 was recorded before, for another delivery. */
+              existing={owedJobs.has(job) ? null : recordOf.get(`${row.plot}|${job}`)}
+              prior={owedJobs.has(job) ? recordOf.get(`${row.plot}|${job}`) : null}
               mayEdit={mayEdit} today={today}
               onSave={save} t={t} lang={lang}
             />
           ) : row ? (
-            <JobList row={row} recordOf={recordOf} onPick={setJob} t={t} lang={lang} />
+            <JobList row={row} records={done} recordOf={recordOf} owedJobs={owedJobs}
+              onPick={setJob} t={t} lang={lang} />
           ) : (
-            <PlotList rows={rows} recordOf={recordOf} onPick={setPlot} t={t} />
+            <PlotList rows={rows} records={done} recordOf={recordOf} onPick={setPlot} t={t} />
           )}
         </div>
       </div>
@@ -219,7 +286,7 @@ function Notice({ text }) {
 }
 
 /** Every plot the report says was transplanted this month. */
-function PlotList({ rows, recordOf, onPick, t }) {
+function PlotList({ rows, records, recordOf, onPick, t }) {
   if (!rows.length) {
     return <Notice text={t('tp.nothingSince', { d: plantedOn(TRANSPLANT_FLOW_FROM) })} />;
   }
@@ -227,7 +294,11 @@ function PlotList({ rows, recordOf, onPick, t }) {
      The list no longer empties at the end of a month, so without this a plot
      still waiting on a job would sink under every plot already done as the
      months went by — which is the one thing this screen exists to surface. */
-  const doneOf = (r) => TRANSPLANT_JOBS.filter((j) => recordOf.has(`${r.plot}|${j.key}`)).length;
+  /* COUNTED BY WHAT IS STILL OWED, not by what has any record at all. A
+     plot whose four jobs were recorded for September's delivery and that
+     took another in October owes all four again — it read 4/4 ALL DONE
+     while the board beside it was raising it. */
+  const doneOf = (r) => TRANSPLANT_JOBS.length - missingJobs(r.plot, records, r.batches).length;
   /* A PLOT WITH A JOB NOBODY DID IS ANSWERED, NOT FINISHED. All four
      questions have been answered, which is what takes it off the
      Verification board and puts it under "finished" here -- but a green
@@ -301,12 +372,18 @@ function PlotList({ rows, recordOf, onPick, t }) {
 }
 
 /** The four jobs for one plot. */
-function JobList({ row, recordOf, onPick, t, lang }) {
+function JobList({ row, records, recordOf, owedJobs, onPick, t, lang }) {
   return (
     <div className="space-y-2.5">
       {TRANSPLANT_JOBS.map((j) => {
         const rec = recordOf.get(`${row.plot}|${j.key}`);
         const who = rec ? (rec.workers || []).map((w) => w.name) : [];
+        /* OWED AGAIN IS NOT DONE. A job recorded for an earlier delivery
+           still has a record, so the tick used to go green over a batch
+           nobody has been paid for. The crew that DID do it stays on the
+           row — it is their work — with the outstanding batch under it. */
+        const owes = owedJobs ? owedJobs.has(j.key) : !rec;
+        const ow = owes && records ? owedForJob(row, records, j.key) : null;
         /* ANSWERED WITH "NOBODY DID IT" IS NOT THE SAME AS ANSWERED, and it
            must not wear the same tick: a green ✓ against a blanket spray
            that never happened is the screen saying the work was done. It is
@@ -331,6 +408,16 @@ function JobList({ row, recordOf, onPick, t, lang }) {
                   {skipped ? t('tp.notDoneWho')
                     : who.length ? who.join(', ') : t('tp.notRecorded')}
                 </div>
+                {/* WHICH DELIVERY IS STILL OWED, and what it came to. On a
+                    job with a crew already on it this is the whole reason
+                    the row is not finished, and the figure is what the next
+                    crew will be paid — so it is the one that has to be on
+                    screen, not the plot's lifetime total. */}
+                {ow && rec && ow.batches.length > 0 && (
+                  <div className="text-[11.5px] font-black text-amber-700 mt-1 leading-snug">
+                    {t('tp.owesBatch', { b: ow.batches.join(', '), n: num(ow.qty) })}
+                  </div>
+                )}
                 {/* WHEN it was saved, on the list. A record's date is the
                     first thing asked about it and the last thing anybody
                     wants to open four forms to find. */}
@@ -362,11 +449,13 @@ function JobList({ row, recordOf, onPick, t, lang }) {
                 )}
               </div>
               <span className={`shrink-0 text-[9px] font-black uppercase tracking-widest rounded-full px-2 py-1 ${
-                skipped ? 'bg-slate-200 text-slate-600 border border-slate-300'
-                : rec ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                {skipped ? t('tp.notDoneTag')
-                  : rec ? <Icon name="check" className="w-3 h-3 inline-block" /> : t('tp.todo')}
+                owes ? (rec ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : 'bg-slate-100 text-slate-500 border border-slate-200')
+                : skipped ? 'bg-slate-200 text-slate-600 border border-slate-300'
+                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                {owes ? t('tp.todo')
+                  : skipped ? t('tp.notDoneTag')
+                  : <Icon name="check" className="w-3 h-3 inline-block" />}
               </span>
             </div>
           </button>
@@ -394,7 +483,7 @@ function JobList({ row, recordOf, onPick, t, lang }) {
  * Setting → a person → Maintenance → Edit transplanting record. The tick
  * fails closed, like the other two corrections — see canMaintCorrect.
  */
-function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang }) {
+function JobForm({ job, row, workers, existing, prior, mayEdit, today, onSave, t, lang }) {
   const split = !!job.split;
   /* Saved, and this person may not reopen it. Not the same as "no existing
      record": the form still shows everything, it just cannot be changed. */
@@ -502,7 +591,10 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
 
   return (
     <div className="space-y-3">
-      {/* The report's figures, as read. */}
+      {/* The report's figures, as read. The BATCH and the quantity are the
+          ones this job still owes — on a plot that took a second delivery
+          that is the new batch and what it brought, never the two added
+          together, because this figure is what the crew is paid on. */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
           {t('tp.fromReport')}
@@ -511,6 +603,23 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
         {row.batch && <Row label={t('tp.batch')} value={row.batch} />}
         <Row label={t('tp.planted')} value={num(row.qty)} />
       </div>
+
+      {/* WHAT WAS RECORDED FOR THE EARLIER DELIVERY. Without it the form
+          looks like a plot nobody has ever worked, and the conductor has
+          no way of knowing he is keying the SECOND crew rather than
+          correcting the first. It is not editable here — that record
+          belongs to its own batch and is reached by its own month. */}
+      {prior && (
+        <div className="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3
+                        text-[11.5px] font-bold text-slate-600 leading-snug">
+          {t('tp.priorBatch', {
+            b: recBatches(prior).join(', ') || '—',
+            n: num(prior.source_qty),
+            d: savedOn(prior) || '—',
+            w: (prior.workers || []).map((x) => x.name).join(', ') || '—',
+          })}
+        </div>
+      )}
 
       {/* WHEN. The one field on this form that is not the report's and not a
           name, and the one that decides which month's claim pays it. It sits

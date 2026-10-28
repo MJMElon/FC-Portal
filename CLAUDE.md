@@ -331,6 +331,59 @@ Section 2b of `tests/nobody_signed_for_this_work.cjs` is the office's own
 six plots, letter for letter, including the three whose batch lists are the
 same set in a different order.
 
+#### And the second delivery is NOT ADDED TO THE FIRST
+
+The rule above raised B11 correctly and then offered the wrong figure: the
+card read **`3303 · 269, 271`**, which is September's 3,168 and October's
+135 added together. That number is not a label — `saveTransplantRecord`
+writes it into `source_qty`, and the salary claim divides `source_qty`
+among the crew. **Four crews would have been paid for moving 3,303
+seedlings when 135 arrived**, and September's 3,168 would have been paid a
+second time. The office: *"之前3168记录了就记录了 这次的135 不要combine
+起来"*.
+
+**`loadTransplantingSince` keeps each delivery apart** (`byBatch`), and the
+figure shown wherever a job is OWED is the figure of the batches
+outstanding **on that job** (`owedQty`, `owedForJob`). `qty` is untouched
+and is still every arrival since the floor — which is exactly right for the
+ordinary plot, where nothing is recorded and every batch is owed, so
+nothing moves for it.
+
+Five things, and three of them are a crew's pay:
+
+- **IT IS ASKED PER JOB, never per plot.** The four are not recorded
+  together: the lining can be done for the new delivery while the spray
+  still owes both. `owedForJob(row, records, key)` filters the records to
+  that job and answers with the batches and the figure.
+- **`owedBatches` answers `[]` for two OPPOSITE things** — nothing recorded
+  at all, and everything already covered — and the first version read them
+  as one, so a finished job offered every batch again. The record list is
+  what tells them apart (`fresh`).
+- **A JOB THAT OWES A NEW BATCH OPENS A BLANK FORM.** It opened on the
+  September record, which made October's 135 a CORRECTION of it: the save
+  passes `id` and would have overwritten September's crew. The prior record
+  is shown as a line above the ticks instead (`tp.priorBatch`), which is
+  what it is — what was recorded before, for another delivery.
+- **TWO DELIVERIES CANNOT SHARE ONE MONTH ON ONE JOB**, because the unique
+  key is `(plot, work_type, schedule_month)` and an upsert would replace the
+  first crew with the second, silently. It is REFUSED, naming the record in
+  the way (`tp.monthTaken`); dating the work in the month it was done is the
+  answer, and the date box is there for it. **Widening that key is owed**
+  the day a second delivery's jobs are genuinely done in the same month as
+  the first — it is a schema change and the app's conflict target, so both
+  move together.
+- **The tick and the count follow the same rule.** A job owed again wears
+  TO DO rather than the green ✓ it had for the old batch, and the plot list
+  counts `missingJobs` rather than "has any record at all" — it read 4/4
+  ALL DONE while the board beside it was raising the plot.
+
+`staleQty` compares a record against **the batches that record is for**, not
+against the plot's total, or every record on a two-delivery plot reads as a
+figure the report has moved.
+
+`tests/a_second_delivery_is_not_added_to_the_first.cjs` drives B11's own
+3,168 and 135 through the shipped reader and the shipped rules.
+
 ### A job NOBODY DID is an answer, and the batch rule is what made it urgent
 
 A blanket spray is not always needed — the grass does not always come — so

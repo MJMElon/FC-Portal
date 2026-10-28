@@ -300,8 +300,18 @@ export default function VerificationBoard({ onCount }) {
               <div className="text-[14px] font-bold text-slate-700 truncate">
                 {tpCard.unplaced ? t('vrf.noNursery') : (tpCard.nursery || '—')}
               </div>
+              {/* THE FIGURE IS WHAT IS OWED, not what the plot has ever
+                  taken. B11 took 3,168 in September and 135 more in
+                  October, and this line read 3,303 — the number the next
+                  crew would have been paid for having moved 135. The
+                  office: *"之前3168记录了就记录了 这次的135 不要combine起
+                  来"*. A plot nobody has recorded anything for owes every
+                  batch, so nothing moves for the ordinary case. */}
               <div className="text-[12px] text-slate-400 truncate">
-                {(tpCard.qty || 0)}{tpCard.batch ? ' · ' + tpCard.batch : ''}
+                {(tpCard.owedQty == null ? tpCard.qty : tpCard.owedQty) || 0}
+                {(tpCard.owed || []).length
+                  ? ' · ' + tpCard.owed.join(', ')
+                  : (tpCard.batch ? ' · ' + tpCard.batch : '')}
               </div>
               {/* WHICH DELIVERY IS OWED. A plot whose four jobs were
                   recorded for an earlier batch comes back here when a new

@@ -182,13 +182,52 @@ export function owedBatches(plot, records, batches) {
   return want.filter((b) => !covered.has(batchKey(b)));
 }
 
+/* WHAT THOSE BATCHES CAME TO, which is not what the plot came to.
+   `row.qty` is every arrival since the floor. On a plot coming back for a
+   SECOND delivery that figure is the two deliveries added together, and it
+   is the number the next crew would be paid on: B11 read 3,303 where 135
+   had arrived. The office: *"之前3168记录了就记录了 这次的135 不要combine
+   起来"*.
+
+   It falls back to the whole figure wherever the batches cannot answer —
+   nothing owed yet (so everything is), a reader that carries no `byBatch`,
+   or a batch the ledger quantity cannot be placed under. A plot nobody has
+   recorded anything for is the ordinary case and is untouched. */
+export function owedQty(row, owed) {
+  if (!row) return 0;
+  const want = (owed || []).filter(Boolean);
+  const by = row.byBatch;
+  if (!want.length || !by) return row.qty;
+  let n = 0, seen = false;
+  want.forEach((b) => { if (by[b] != null) { n += by[b]; seen = true; } });
+  return seen ? n : row.qty;
+}
+
+/* ONE JOB'S OWN ANSWER. The four jobs are not recorded together — the
+   lining can be done for the new delivery while the spray still owes both
+   — so which batches are outstanding, and what they came to, is asked per
+   job and not per plot. `records` is every saved record; the job is
+   filtered here so no caller has to remember to. */
+export function owedForJob(row, records, jobKey) {
+  const mine = (records || []).filter((r) => r && r.work_type === jobKey
+    && r.plot_name === row.plot);
+  const owed = owedBatches(row.plot, mine, row.batches);
+  /* owedBatches answers [] for TWO different things, and they are opposite
+     ends of this screen: nothing recorded at all (so every batch is owed),
+     and every batch already covered (so none is). The record list is what
+     tells them apart — a job with no record is the ordinary first entry,
+     and the figure for it is the plot's own total. */
+  const fresh = !mine.length;
+  const batches = owed.length ? owed : (fresh ? (row.batches || []) : []);
+  return { batches, qty: owedQty(row, batches), fresh };
+}
+
 export function plotsOwingJobs(rows, records) {
   return (rows || [])
-    .map((r) => ({
-      ...r,
-      missing: missingJobs(r.plot, records, r.batches),
-      owed: owedBatches(r.plot, records, r.batches),
-    }))
+    .map((r) => {
+      const owed = owedBatches(r.plot, records, r.batches);
+      return { ...r, missing: missingJobs(r.plot, records, r.batches), owed, owedQty: owedQty(r, owed) };
+    })
     .filter((r) => r.missing.length > 0);
 }
 

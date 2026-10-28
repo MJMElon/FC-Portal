@@ -233,10 +233,22 @@ export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_F
     const qty = Math.abs(Number(r.quantity_change || 0));
     if (!qty) return;
     const cur = byPlot.get(k)
-      || { plot: String(r.plot_name || '').trim(), batches: [], qty: 0, last: '', unplaced };
+      || { plot: String(r.plot_name || '').trim(), batches: [], qty: 0, last: '',
+           unplaced, byBatch: {} };
     cur.qty += qty;
     const b = String(r.batch_name || '').trim();
     if (b && !cur.batches.includes(b)) cur.batches.push(b);
+    /* WHAT EACH DELIVERY BROUGHT, kept apart as well as summed.
+       `qty` is every arrival since the floor, which is the right figure
+       for a plot nobody has recorded anything for. It is the WRONG figure
+       for a plot coming back because a second delivery arrived: B11 took
+       3,168 in September and 135 more in October, and the card offered
+       3,303 — which is what the next crew would have been PAID for having
+       moved 135 seedlings. The office said it in one line: *"之前3168记录
+       了就记录了 这次的135 不要combine起来"*.
+       Keyed on the batch name as the ledger spells it, which is what
+       `batches` carries and what a record is matched by. */
+    cur.byBatch[b] = (cur.byBatch[b] || 0) + qty;
     if (!cur.last || when > cur.last) cur.last = when;
     byPlot.set(k, cur);
   });

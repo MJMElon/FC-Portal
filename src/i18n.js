@@ -343,6 +343,12 @@ const en = {
   'tp.notDoneLockedHint': 'Nobody did this job and nobody is paid for it. To put that right, ask for Edit transplanting record on your access.',
   'tp.undoNotDone': 'This job is recorded as not done ({d}). Ticking a crew here says it was done after all, and it goes back onto the salary claim.',
   'tp.notDoneSetup': 'This database cannot record “not done” yet. Ask the office to run shared/RUN_ME_transplant_not_done.sql in Supabase. Nothing has been saved.',
+  /* A SECOND DELIVERY IS A SECOND CREW. The figure on screen is what the
+     outstanding batch brought, never the plot lifetime total -- that is
+     what the people ticked here are paid on. */
+  'tp.owesBatch': 'Batch {b} not recorded yet \u2014 {n} seedlings',
+  'tp.priorBatch': 'Batch {b} ({n}) was recorded {d} \u2014 {w}. This is a NEW record for the delivery above, and does not change theirs.',
+  'tp.monthTaken': 'This job already has a record in {m} \u2014 batch {b}, {d}. Two deliveries cannot share one month on one job. Key the day the work was really done, so it is paid in its own month.',
   'mt.tapToRecord': 'Tap a job to record it',
   'mt.weekTally': '{done} of {n} done',
   'mt.verifyHub': 'Verify Work Done',
@@ -1220,6 +1226,9 @@ const ms = {
   'tp.notDoneLockedHint': 'Tiada sesiapa buat kerja ini dan tiada sesiapa dibayar. Untuk membetulkannya, minta akses Edit rekod menanam.',
   'tp.undoNotDone': 'Kerja ini direkod sebagai tidak dibuat ({d}). Menanda pekerja di sini bermakna kerja itu ada dibuat, dan ia kembali ke tuntutan gaji.',
   'tp.notDoneSetup': 'Pangkalan data ini belum boleh merekod “tidak dibuat”. Minta pejabat jalankan shared/RUN_ME_transplant_not_done.sql di Supabase. Tiada apa-apa disimpan.',
+  'tp.owesBatch': 'Batch {b} belum direkod \u2014 {n} anak benih',
+  'tp.priorBatch': 'Batch {b} ({n}) telah direkod {d} \u2014 {w}. Ini rekod BAHARU untuk penghantaran di atas, dan tidak mengubah rekod mereka.',
+  'tp.monthTaken': 'Kerja ini sudah ada rekod dalam {m} \u2014 batch {b}, {d}. Dua penghantaran tidak boleh berkongsi satu bulan bagi satu kerja. Masukkan tarikh kerja itu benar-benar dibuat, supaya ia dibayar dalam bulannya sendiri.',
   'mt.tapToRecord': 'Tekan kerja untuk merekod',
   'mt.weekTally': '{done} daripada {n} siap',
   'mt.verifyHub': 'Sahkan Kerja Selesai',
