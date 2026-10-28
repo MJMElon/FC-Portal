@@ -71,8 +71,13 @@ export async function loadPendingTransplants(permissions) {
     if (!names.length) return [];
 
     const nurseries = [...new Set(mine.map((p) => p.nursery_name).filter(Boolean))];
+    /* EVERY plot Seedling Stock lists, not only this conductor own, so the
+       read can tell "another nursery plot" from "a plot on NO list". The
+       first is correctly not his; the second is on nobody board at all,
+       with its four jobs owed and nobody ever asked to record them. */
+    const everyPlot = (plots || []).map((p) => p.plot_name).filter(Boolean);
     const [rows, ...recsPer] = await Promise.all([
-      loadTransplantingSince(names),
+      loadTransplantingSince(names, undefined, everyPlot),
       ...nurseries.map((n) => loadTransplantRecords(n).catch((e) => {
         if (e && e.message === TRANSPLANT_SETUP_NEEDED) return [];
         throw e;
@@ -84,7 +89,10 @@ export async function loadPendingTransplants(permissions) {
     return plotsOwingJobs(rows, recs).map((r) => ({
       ...r,
       nursery: nurseryOf[r.plot] || '',
-      plotNames: mine
+      /* A plot on no nursery list has no sheet to open: TransplantSheet
+         loads and saves BY NURSERY, so opening one would file the crew
+         under no nursery at all. The card says what to do instead. */
+      plotNames: r.unplaced ? [] : mine
         .filter((p) => nurseryKey(p.nursery_name) === nurseryKey(nurseryOf[r.plot] || ''))
         .map((p) => p.plot_name),
     }));

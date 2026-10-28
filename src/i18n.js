@@ -448,6 +448,12 @@ const en = {
   'vrf.transplanting': 'Transplanting',
   'vrf.pickWorkers': 'Pick workers',
   'vrf.openSheet': 'Record jobs',
+  /* A plot the ledger transplanted into that is on no nursery list.
+     It is raised rather than dropped -- it owes four jobs and they
+     are somebody pay -- and the card says the one thing that fixes
+     it, because the sheet cannot be filled without a nursery. */
+  'vrf.noNursery': 'On no nursery list',
+  'vrf.addPlotFirst': 'Add this plot in Seedling Stock',
   'vrf.allDone': 'Nothing to verify',
   'vrf.prev': 'Previous',
   'vrf.next': 'Next',
@@ -1304,6 +1310,8 @@ const ms = {
   'vrf.transplanting': 'Pemindahan Bibit',
   'vrf.pickWorkers': 'Pilih pekerja',
   'vrf.openSheet': 'Rekod kerja',
+  'vrf.noNursery': 'Tiada dalam senarai nurseri',
+  'vrf.addPlotFirst': 'Tambah plot ini di Seedling Stock',
   'vrf.allDone': 'Tiada untuk disahkan',
   'vrf.prev': 'Sebelum',
   'vrf.next': 'Seterusnya',

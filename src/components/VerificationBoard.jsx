@@ -281,16 +281,24 @@ export default function VerificationBoard({ onCount }) {
           emptyText={t('vrf.allDone')} prevLabel={t('vrf.prev')} nextLabel={t('vrf.next')}
         >
           {tpCard && (
+            /* A PLOT ON NO NURSERY LIST OPENS NOTHING. TransplantSheet
+               loads and saves BY NURSERY, so a sheet opened with none would
+               file the crew -- which is somebody pay -- under no nursery at
+               all. The card still RAISES the plot, which is the whole point
+               of it, and says the one thing that fixes it. */
             <button
               type="button"
-              onClick={() => setSheetFor({ nursery: tpCard.nursery, plotNames: tpCard.plotNames })}
+              onClick={() => {
+                if (tpCard.unplaced) return;
+                setSheetFor({ nursery: tpCard.nursery, plotNames: tpCard.plotNames });
+              }}
               className="w-full text-left"
             >
               <div className="font-mono font-black text-[16px] text-emerald-800 truncate">
                 {tpCard.plot}
               </div>
               <div className="text-[14px] font-bold text-slate-700 truncate">
-                {tpCard.nursery || '—'}
+                {tpCard.unplaced ? t('vrf.noNursery') : (tpCard.nursery || '—')}
               </div>
               <div className="text-[12px] text-slate-400 truncate">
                 {(tpCard.qty || 0)}{tpCard.batch ? ' · ' + tpCard.batch : ''}
@@ -302,8 +310,9 @@ export default function VerificationBoard({ onCount }) {
                   looking for, had the least weight on it. Which jobs are
                   missing is the first thing the sheet says anyway, one tap
                   away. */}
-              <div className="mt-2 text-[11px] font-black uppercase tracking-wider text-emerald-700">
-                {t('vrf.openSheet')} ›
+              <div className={'mt-2 text-[11px] font-black uppercase tracking-wider '
+                + (tpCard.unplaced ? 'text-amber-700' : 'text-emerald-700')}>
+                {tpCard.unplaced ? t('vrf.addPlotFirst') : t('vrf.openSheet') + ' \u203a'}
               </div>
             </button>
           )}

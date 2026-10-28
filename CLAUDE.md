@@ -223,6 +223,60 @@ after the PARAMETER LIST, not at the first `{` on the line, because
 `itemsFromRecord(d, plotMap = {})` has a default that matches first and
 hands back half a signature.
 
+### A plot SEEDLING STOCK cannot place was on nobody's board at all
+
+The office counted their own cards and said it: *"我的 pending verification
+还是只有 B2 B3 没有 B11"*. The ledger had put seedlings into that plot and
+none of its four jobs was recorded, so the board owed it a card.
+
+**It could never have drawn one.** `loadPendingTransplants` builds `names`
+from `shared_plots` filtered to the conductor's own nurseries, and
+`loadTransplantingSince` then drops every ledger row whose plot is not in
+that list — one line, `if (!allowed.has(k)) return;`. For ANOTHER
+nursery's plot that is exactly right. For a plot on **no nursery list at
+all** it is catastrophic, because then there is no conductor anywhere
+whose list it is in: it is raised on no board, nobody is ever asked to
+record its lining, its polybag filling, its blanket spray or its
+transplanting, and **that is four crews' pay that no screen in the system
+mentions.** Same shape as "A plot the salary claim does not know pays
+nobody", one door along — and this board had already decided the question
+for its OTHER half and written the answer down: *a card that vanishes off
+every board with nothing saying where it went is the fault this board
+exists to stop.*
+
+So `loadTransplantingSince` takes a third argument, `knownPlots` — every
+plot Seedling Stock lists ANYWHERE — and that is the only thing that can
+tell the two cases apart. Four things in it:
+
+- **Without it the function is exactly what it was.** Nothing else calls
+  it with three arguments, and section 1 of the test asserts the old
+  behaviour is untouched.
+- **Another nursery's plot is still not mine.** It is on the list, just
+  not on this conductor's — raising it here would undo the scoping the
+  office asked for in the same week. Section 3 holds that half.
+- **The unplaceable plot is MARKED, not quietly folded in.** The card
+  reads *"On no nursery list"* where the nursery goes, rather than a blank
+  that looks like a plot nobody got round to naming.
+- **It opens no sheet.** `TransplantSheet` loads and saves BY NURSERY, so
+  a sheet opened with none would file the crew — somebody's pay — under no
+  nursery at all. The card raises the plot, which is the whole point of
+  it, and says the one thing that fixes it: add the plot in Seedling
+  Stock. The moment somebody does, it becomes an ordinary card on that
+  nursery's board.
+- **The date floor still applies.** It is a plot the board forgot, not a
+  plot the board exempts.
+
+`tests/a_plot_on_no_list_is_not_invisible.cjs` lifts the REAL reader out of
+the shipped file — the whole fault was one line of filtering inside it, so
+a restatement would have proved nothing — and stubs only the ledger read.
+Two of its checks fail on the previous code.
+
+**And `shared/CHECK_no_transplanting_recorded.sql` in the office repo is
+the other half of this**: its *"ledger, plot not in Seedling Stock"* rows
+name every arrival this was happening to, and its *"Seedling Stock says"*
+rows print what each nursery's list actually holds. The board now raises
+the plot; that check says why it was unplaceable.
+
 ### Transplanting left the Maintenance module, and what that costs
 
 The four transplanting jobs were never planned by the month's schedule —

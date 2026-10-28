@@ -182,9 +182,21 @@ export function asksDate(today) {
  *
  * @returns {Promise<Array<{plot, batches:string[], batch:string, qty:number, last:string}>>}
  */
-export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_FROM) {
+export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_FROM, knownPlots) {
   const allowed = new Set((plotNames || []).map(plotKey));
   if (!allowed.size) return [];
+  /* A PLOT SEEDLING STOCK CANNOT PLACE MUST NOT VANISH.
+     `allowed` is the plots of THIS conductor nurseries, so a ledger plot
+     outside it is one of two completely different things: another
+     nursery plot, which is correctly not his, or a plot that is on NO
+     nursery list at all -- which is nobody plot, on nobody board, with
+     four jobs owed and nobody ever asked to record them. That is
+     somebody pay dropped on the floor, and it is the exact fault the DO
+     half of this board already has a rule about.
+     `knownPlots` is every plot Seedling Stock lists ANYWHERE. Given it,
+     the two can be told apart and the unplaceable one is kept, marked.
+     Not given it, this behaves exactly as it always did. */
+  const known = knownPlots ? new Set(knownPlots.map(plotKey)) : null;
 
   /* A row with no transaction_date is kept and dated below, by the report's
      own rule. Narrowing in the query alone would drop exactly those rows —
@@ -201,13 +213,15 @@ export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_F
   const byPlot = new Map();
   (res.data || []).forEach((r) => {
     const k = plotKey(r.plot_name);
-    if (!allowed.has(k)) return;
+    const unplaced = !!known && !allowed.has(k) && !known.has(k);
+    if (!allowed.has(k) && !unplaced) return;
     const when = logDate(r);
     // Undated by every rule: it cannot be placed, so it is not placed.
     if (!when || when < from) return;
     const qty = Math.abs(Number(r.quantity_change || 0));
     if (!qty) return;
-    const cur = byPlot.get(k) || { plot: String(r.plot_name || '').trim(), batches: [], qty: 0, last: '' };
+    const cur = byPlot.get(k)
+      || { plot: String(r.plot_name || '').trim(), batches: [], qty: 0, last: '', unplaced };
     cur.qty += qty;
     const b = String(r.batch_name || '').trim();
     if (b && !cur.batches.includes(b)) cur.batches.push(b);
