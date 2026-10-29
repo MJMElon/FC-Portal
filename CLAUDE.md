@@ -227,3 +227,19 @@ the answer is to put a door back — a module tile is the cheap one.
 `tests/nobody_signed_for_this_work.cjs` holds all of it, and checks the
 button, the sheet and the state behind them are all gone from Maintenance —
 a half-removal that leaves the import is the kind that comes back.
+
+## `ROLES` in `maintenance/helpers.js` is the office list, copied
+
+It is what `isKnownRole` asks, and `isGeneralWorker` reads that to decide
+whether somebody lands on the Work Maintenance tick sheets: a known role
+that is not General Worker is NOT on them, and an unknown one falls through
+to the free-text test. So a role known in the office and unknown here is a
+worker who is on the sheets on one side of the system and off them on the
+other — the shape of nearly every fault in this file.
+
+The original is `ROLES` in `mjm-ai-system/scan/scan_workers.html`, which
+says the same of this copy. **Estate Manager and Admin** joined both the day
+the Team Board grew a row for each, along with Gardener and Driver, which
+were roles with no row and whose people sat in **Other** — the row that
+means *a role nobody recognises*, over roles the list names perfectly well.
+Change one, change the other.
