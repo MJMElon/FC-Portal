@@ -2,7 +2,7 @@ import { fetchAllRows, supabase } from '../../lib/supabase.js';
 import { cacheBlocks, cachedBlocks } from './cullingOffline.js';
 import { isOnline } from '../../lib/outbox.js';
 import { batchKey, plotKey } from '../maintenance/plotBatches.js';
-import { nurseryOfPlot, todayStr } from './data.js';
+import { isReplantPlot, nurseryOfPlot, todayStr } from './data.js';
 
 /**
  * Where the Culling Calculator's numbers come from.
@@ -766,19 +766,13 @@ export function collectionLines(d) {
   return out;
 }
 
-/**
- * The -R plots, which do not belong on this screen.
- *
- * B4 and B4-R are different ground, and only the first is counted here. The
- * suffix is kept by plotKey rather than trimmed, which is what makes them
- * possible to tell apart at all — so the two never share a row, and the -R one
- * simply never opens one.
- *
- * A trailing number is allowed for, so B4-R and B4-R2 are both left out.
- */
-export function isReplantPlot(plot) {
-  return /-R\d*$/.test(String(plot || ''));
-}
+/* The -R plots, which do not belong on this screen — nor on any PALMS
+ * screen. B4 and B4-R are different ground, and only the first is counted
+ * here. The suffix is kept by plotKey rather than trimmed, which is what makes
+ * them possible to tell apart at all — so the two never share a row, and the
+ * -R one simply never opens one. The rule lives in data.js now, beside the
+ * plot list it also keeps -R plots out of. */
+export { isReplantPlot };
 
 /**
  * The oldest batch this screen carries.

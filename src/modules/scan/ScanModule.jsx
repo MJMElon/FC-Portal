@@ -44,6 +44,7 @@ import {
 } from './store.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
 import Icon from '../../components/Icon.jsx';
+import { numText } from '../../lib/numberText.js';
 
 const DEDUPE_DEBOUNCE_MS = 800;
 const OVER_REPEAT_MS = 1200;
@@ -469,7 +470,7 @@ export default function ScanModule() {
           lastOverRef.current = now;
         }
         vibrate([120, 60, 120, 60, 200]);
-        flash(t('scan.overQuota', { u: unique.toLocaleString(), q: a.qty.toLocaleString() }), 'danger');
+        flash(t('scan.overQuota', { u: numText(unique), q: numText(a.qty) }), 'danger');
         next.overFired = true;
       } else {
         setLastInfo({ key: 'scan.latest', vars: { code } });
@@ -481,7 +482,7 @@ export default function ScanModule() {
         next.completedAt = Date.now();
         beepComplete();
         vibrate([80, 60, 80, 60, 200]);
-        flash(t('scan.targetReached', { q: a.qty.toLocaleString() }), 'done');
+        flash(t('scan.targetReached', { q: numText(a.qty) }), 'done');
       }
 
       setProgress((prev) => {
@@ -892,8 +893,8 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
                     {c.unique > collected ? t('scan.pendingIssueDO') : t('scan.pendingToScan')}
                   </span>
                   {collected > 0 && balance > 0
-                    ? <>{t('scan.qty')} {c.qty.toLocaleString()} · Collected <b className="text-emerald-300">{collected.toLocaleString()}</b> · Balance <b className="text-amber-300">{balance.toLocaleString()}</b></>
-                    : <>{t('scan.qty')} <b className="text-slate-200">{c.qty.toLocaleString()}</b> · {t('scan.scanned')} <b className="text-slate-200">{c.unique.toLocaleString()}</b></>
+                    ? <>{t('scan.qty')} {numText(c.qty)} · Collected <b className="text-emerald-300">{numText(collected)}</b> · Balance <b className="text-amber-300">{numText(balance)}</b></>
+                    : <>{t('scan.qty')} <b className="text-slate-200">{numText(c.qty)}</b> · {t('scan.scanned')} <b className="text-slate-200">{numText(c.unique)}</b></>
                   }
                   {c.over ? (
                     <>
@@ -1289,14 +1290,14 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
           <h2 className="text-lg font-bold leading-tight break-words">{consent.customer}</h2>
           <div className="font-mono text-[11px] text-slate-400">
             {issuedQty > 0
-              ? `${t('scan.qty')} ${consent.qty.toLocaleString()} · Collected ${issuedQty.toLocaleString()} · Balance ${(consent.qty - issuedQty).toLocaleString()}`
-              : `${t('scan.qty')} ${consent.qty.toLocaleString()}`}
+              ? `${t('scan.qty')} ${numText(consent.qty)} · Collected ${numText(issuedQty)} · Balance ${numText((consent.qty - issuedQty))}`
+              : `${t('scan.qty')} ${numText(consent.qty)}`}
             {consent.al_number && !/^MANUAL-/i.test(consent.al_number) ? ` · ${consent.al_number}` : ''}
           </div>
           {ownSeals.length > 0 && (
             <div className="font-mono text-[11px] text-sky-300 mt-0.5 break-words">
-              {t('scan.sealRangesLine', { ranges: sealRangesText(ownSeals), n: ownSealQty.toLocaleString() })}
-              {' · '}{t('scan.sealInRange', { x: inRangeCount.toLocaleString(), y: ownSealQty.toLocaleString() })}
+              {t('scan.sealRangesLine', { ranges: sealRangesText(ownSeals), n: numText(ownSealQty) })}
+              {' · '}{t('scan.sealInRange', { x: numText(inRangeCount), y: numText(ownSealQty) })}
             </div>
           )}
         </div>
@@ -1373,21 +1374,21 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       <div className={`bg-[#0f1620] border rounded-2xl px-5 py-4 text-center mb-3 ${st === 'over' ? 'border-red-500' : 'border-[#1f2a38]'}`}>
         <div className="font-mono text-[10px] tracking-[0.3em] text-slate-400 uppercase mb-1.5">{t('scan.sealsScanned')}</div>
         <div className={`font-mono text-[56px] font-extrabold leading-none ${st === 'over' ? 'text-red-500' : st === 'done' ? 'text-amber-400' : 'text-emerald-400'}`}>
-          {sessionUnique.toLocaleString()}
-          <span className="text-[22px] text-slate-500 ml-1">/{sessionQty.toLocaleString()}</span>
+          {numText(sessionUnique)}
+          <span className="text-[22px] text-slate-500 ml-1">/{numText(sessionQty)}</span>
         </div>
         <div className="h-1.5 bg-[#0a0f14] rounded-full overflow-hidden mt-2.5 border border-[#1f2a38]">
           <div className={`h-full ${st === 'over' ? 'bg-red-500' : st === 'done' ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: pct + '%' }} />
         </div>
         {st === 'over' && (
           <div className="mt-3 bg-red-500/10 border border-red-500 text-red-400 rounded-lg p-3 font-mono text-xs">
-            {t('scan.overBanner', { u: sessionUnique.toLocaleString(), q: sessionQty.toLocaleString(), e: (sessionUnique - sessionQty).toLocaleString() })}
+            {t('scan.overBanner', { u: numText(sessionUnique), q: numText(sessionQty), e: numText((sessionUnique - sessionQty)) })}
           </div>
         )}
         <div className="grid mt-2.5">
           <div className="bg-[#0a0f14] border border-[#1f2a38] rounded-lg px-3 py-2 flex justify-between items-center">
             <span className="font-mono text-[10px] tracking-widest text-slate-400 uppercase">{t('scan.remaining')}</span>
-            <span className={`font-mono text-lg font-bold ${sessionUnique > sessionQty ? 'text-red-400' : 'text-slate-100'}`}>{remain.toLocaleString()}</span>
+            <span className={`font-mono text-lg font-bold ${sessionUnique > sessionQty ? 'text-red-400' : 'text-slate-100'}`}>{numText(remain)}</span>
           </div>
         </div>
         <div className={`mt-2 font-mono text-xs break-all ${st === 'over' ? 'text-red-400' : 'text-slate-400'}`}>{t(lastInfo.key, lastInfo.vars)}</div>
@@ -1397,7 +1398,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
         <div className="flex justify-between items-center mb-3">
           <div className="font-mono text-[11px] tracking-[0.3em] text-slate-400 uppercase">{t('scan.scanLog')}</div>
           <div className="flex items-center gap-3">
-            <div className="font-mono text-[11px] text-emerald-400">{t('scan.entries', { n: consent.scans.length.toLocaleString() })}</div>
+            <div className="font-mono text-[11px] text-emerald-400">{t('scan.entries', { n: numText(consent.scans.length) })}</div>
             {/* Off on a card with nothing left to collect, the same as the
                 camera -- there is no seal to key against a finished order. */}
             <button
@@ -1645,7 +1646,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                             ? new Date(c.created_at).toLocaleString('en-MY', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                             : '—'}
                         </div>
-                        <span className="font-mono text-[10px] font-bold text-emerald-400">{(c.consent_qty || 0).toLocaleString()} seedlings</span>
+                        <span className="font-mono text-[10px] font-bold text-emerald-400">{numText((c.consent_qty || 0))} seedlings</span>
                       </div>
                       {/* Sticker photo */}
                       {c.photo_url && (

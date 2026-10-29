@@ -96,3 +96,15 @@ export async function openOffline(email, password) {
 export function hasOffline(email) {
   return !!loadAll()[norm(email)];
 }
+
+/** Throw away this phone's sealed copy for one email. Used when the account
+    turns out to be one that may not use this portal at all (a Sales Web
+    customer) — keeping a way to re-enter offline for an account the portal
+    has just refused would be keeping the door it just shut. */
+export function forgetOffline(email) {
+  const all = loadAll();
+  if (!all[norm(email)]) return false;
+  delete all[norm(email)];
+  saveAll(all);
+  return true;
+}

@@ -5,11 +5,14 @@ import { loadPlotBatches } from '../maintenance/data.js';
 import { batchKey, batchesIn, plotKey } from '../maintenance/plotBatches.js';
 
 // ── Active Approval Letters (AL) ──────────────────────────────
+// Closed is excluded the same way Cancelled is — the office decided this
+// order's business is done, so no new DO should be issued against it. See
+// Close AL in mjm-ai-system/operation/operation_booking.html.
 export async function loadActiveALs() {
   const { data, error } = await supabase
     .from('shared_al_orders')
     .select('*')
-    .not('status', 'in', '("Cancelled","Collected")')
+    .not('status', 'in', '("Cancelled","Closed","Collected")')
     .gt('balance_quantity', 0)
     .order('created_at', { ascending: false });
   if (error) throw error;

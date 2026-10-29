@@ -49,6 +49,40 @@ const cancelled = (() => {
   throw new Error('isCancelledDO not found');
 })();
 
+/* plotsOfDO reads plot_1..plot_5 through itemsFromRecord, so both are
+   lifted -- doIsMine places a DO by the plots that function returns, and a
+   restatement of it here would be a second reader of those five columns. */
+const doPlots = (() => {
+  const src = R('src/modules/do/data.js');
+  const grab = (name) => {
+    const at = src.indexOf('export function ' + name);
+    if (at < 0) throw new Error(name + ' not found');
+    /* The body opens after the PARAMETER LIST, not at the first brace in
+       the line: itemsFromRecord is declared `(d, plotMap = {})`, and a
+       scan from the first `{` matches that default and hands back half a
+       signature. */
+    let depth = 0;
+    for (let j = src.indexOf('{', src.indexOf(')', at)); j < src.length; j++) {
+      if (src[j] === '{') depth++;
+      else if (src[j] === '}' && --depth === 0) return src.slice(at, j + 1).replace(/^export /, '');
+    }
+    throw new Error(name + ' not closed');
+  };
+  return grab('itemsFromRecord') + '\n' + grab('plotsOfDO');
+})();
+
+/* And the one nursery-matching rule this whole system compares names by. */
+const nkey = (() => {
+  const src = R('src/lib/access.js');
+  const at = src.indexOf('export function nurseryKey');
+  let depth = 0;
+  for (let j = src.indexOf('{', at); j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}' && --depth === 0) return src.slice(at, j + 1).replace(/^export /, '');
+  }
+  throw new Error('nurseryKey not found');
+})();
+
 const jobs = (() => {
   const src = R('src/modules/maintenance/transplantData.js');
   const at = src.indexOf('export const TRANSPLANT_JOBS = [');
@@ -58,8 +92,9 @@ const jobs = (() => {
 
 const ctx = { console, Date, JSON, Math, Object, Set, Array, String, Number, Boolean };
 vm.createContext(ctx);
-vm.runInContext(cancelled + '\n' + jobs + '\n' + strip('src/components/verify/pending.js')
-  + '\n;globalThis.__p = { doNeedsWorkers, missingJobs, plotsOwingJobs, clampIndex, LOADING_WORKERS_FROM };',
+vm.runInContext(cancelled + '\n' + doPlots + '\n' + nkey + '\n' + jobs + '\n'
+  + strip('src/components/verify/pending.js')
+  + '\n;globalThis.__p = { doNeedsWorkers, missingJobs, plotsOwingJobs, clampIndex, LOADING_WORKERS_FROM, TJ: TRANSPLANT_JOBS, doIsMine: (typeof doIsMine === \'function\' ? doIsMine : null), owedBatches: (typeof owedBatches === \'function\' ? owedBatches : null) };',
   ctx);
 const P = vm.runInContext('__p', ctx);
 
@@ -96,6 +131,61 @@ is(P.doNeedsWorkers(null), false, 'nothing at all is not a DO');
 is(P.doNeedsWorkers({ do_number: 'x' }), false,
    'a row with no id cannot be answered, so it is not raised');
 
+
+/* ── 1b. AND IT HAS TO BE ONE OF MY NURSERIES ────────────────────────
+   The office: *"BNN acc 只看到 BNN 的 plot, UNN1 只看到 UNN1 的 plot"*.
+   The transplanting half has been scoped since it was written and this
+   one never was, so a BNN conductor was shown a DO for N12.
+
+   The plots come off the real plotsOfDO, so these fixtures are keyed the
+   way a DO actually is -- plot_1..plot_5 and nothing else. */
+const MAP = { B2: 'BNN', B3: 'BNN', N12: 'UNN 2', U18: 'UNN 1' };
+const ONE = (over) => DO(Object.assign({ plot_1: 'B2', qty_1: 10 }, over));
+
+/* ON THE PREVIOUS CODE THERE IS NO RULE AT ALL, and a test that then
+   throws on a null reports a stack instead of naming what is missing. */
+if (typeof P.doIsMine !== 'function') {
+  fail('verify/pending.js exports no doIsMine -- the loading half is unscoped');
+} else {
+
+is(P.doIsMine(ONE({}), MAP, ['BNN']), true,
+   'a BNN conductor keeps a BNN DO');
+is(P.doIsMine(ONE({}), MAP, ['UNN1']), false,
+   'and does not see it from the UNN1 circle');
+is(P.doIsMine(DO({ plot_1: 'N12', qty_1: 10 }), MAP, ['BNN']), false,
+   'the N12 DO the office was shown on a BNN board is off it');
+
+/* THE TEST IS ANY, NOT EVERY, because a DO carries five plot columns and
+   one load really can be drawn from two nurseries. Asking that all of
+   them are mine would drop a DO half of which is my own work, and nobody
+   would ever name the gang for it. */
+is(P.doIsMine(DO({ plot_1: 'B2', qty_1: 5, plot_2: 'N12', qty_2: 5 }), MAP, ['BNN']), true,
+   'a DO spanning two nurseries is mine if ANY plot is');
+is(P.doIsMine(DO({ plot_1: 'B2', qty_1: 5, plot_2: 'N12', qty_2: 5 }), MAP, ['UNN2']), true,
+   '…and the other nursery keeps it too, on the same rule');
+
+/* The access tick list is typed by hand and says UNN1 where Seedling
+   Stock says "UNN 1". Every nursery comparison in either repository goes
+   through nurseryKey for exactly this. */
+is(P.doIsMine(DO({ plot_1: 'U18', qty_1: 1 }), MAP, ['UNN1']), true,
+   'UNN1 and "UNN 1" are one nursery');
+
+/* A DO THAT CANNOT BE PLACED GOES ON SHOWING. A card that vanishes off
+   every board with nothing saying where it went is the exact fault this
+   board exists to stop. */
+is(P.doIsMine(DO({ plot_1: 'ZZ9', qty_1: 1 }), MAP, ['BNN']), true,
+   'a plot missing from Seedling Stock keeps its DO on the board');
+is(P.doIsMine(DO({}), MAP, ['BNN']), true,
+   'and so does a DO naming no plot at all');
+
+/* Nobody configured is nobody asked -- the portal showed every DO before
+   this existed and must go on doing so. */
+is(P.doIsMine(DO({ plot_1: 'N12', qty_1: 1 }), MAP, []), true,
+   'an empty nursery list is every nursery, not none');
+is(P.doIsMine(DO({ plot_1: 'N12', qty_1: 1 }), MAP, null), true,
+   '…and so is no list at all');
+}
+
 /* ── 2. The transplanted plot whose jobs are not recorded ────────────── */
 const rows = [
   { plot: 'B04', qty: 2300, batch: '256' },
@@ -127,6 +217,80 @@ const ALL = ['blanket_spray', 'lining', 'polybag_fill', 'transplanting'];
 is(P.missingJobs('B04', [rec('B07', 'lining')]).length, 4,
    'a record against a different plot ticks nothing off this one');
 
+
+/* ── 2b. A NEW DELIVERY IS A NEW SET OF FOUR JOBS ────────────────────
+   The office counted their own board and B11 was not on it, over a plot
+   that had taken 135 more seedlings on 24 Oct after its four jobs were
+   recorded on 29 Sep. The old rule asked only whether the PLOT had each
+   job recorded, in any month ever, so a second delivery into a finished
+   plot was invisible -- four more crews owed their pay, on no screen.
+
+   IT CANNOT BE DONE BY DATE: filling and lining are sometimes done
+   before the seedlings arrive and sometimes after, 两种都有, so a record
+   older than an arrival proves nothing. The BATCH is what both sides
+   carry, and the office own rows are what these fixtures are.
+
+   The five plots below are theirs, letter for letter. */
+const TJ = P.TJ;
+/* ON THE PREVIOUS RULE THERE IS NO owedBatches AND missingJobs TAKES TWO
+   ARGUMENTS, so a test that just calls them reports a stack instead of
+   naming what is missing. */
+if (typeof P.owedBatches !== 'function') {
+  fail('verify/pending.js exports no owedBatches -- a second delivery into a finished plot is invisible');
+} else {
+const jrec = (plot, key, batch) => ({ plot_name: plot, work_type: key, batch_name: batch });
+const four = (plot, batch) => TJ.map((j) => jrec(plot, j.key, batch));
+
+/* B11: ledger 269, 271 -- record 269. The 271 delivery is owed. */
+is(P.missingJobs('B11', four('B11', '269'), ['269', '271']).length, 4,
+   'B11 owes all four again: batch 271 arrived and no record mentions it');
+is(P.owedBatches('B11', four('B11', '269'), ['269', '271']), ['271'],
+   '…and the card can say WHICH delivery, so the plot does not read as a mistake');
+
+/* THE THREE THAT MUST NOT MOVE. Their record lists are the same batches
+   as the ledger in a DIFFERENT ORDER -- "260, 267, 259" against "259,
+   260, 267" -- which a string comparison calls different and a set does
+   not. Getting this wrong puts three correct plots back on the board for
+   ever, which is the wall this list is careful not to become. */
+is(P.missingJobs('U4', four('U4', '260, 267, 259'), ['259', '260', '267']).length, 0,
+   'U4 is NOT owed: same batches, written in another order');
+is(P.missingJobs('N15', four('N15', '271, 270'), ['270', '271']).length, 0,
+   'N15 is NOT owed, for the same reason');
+is(P.missingJobs('N3', four('N3', '263, 270, 269'), ['263', '269', '270']).length, 0,
+   'N3 is NOT owed either');
+is(P.owedBatches('U4', four('U4', '260, 267, 259'), ['259', '260', '267']), [],
+   '…and nothing is named as owed on a plot that owes nothing');
+
+/* B4 and U17 matched already, and go on matching. */
+is(P.missingJobs('B4', four('B4', '264, 270'), ['264', '270']).length, 0,
+   'B4 is NOT owed: its record names both batches');
+
+/* Never recorded is still never recorded, and needs no batch to say so. */
+is(P.missingJobs('B2', [], ['271']).length, 4,
+   'B2 owes all four -- nothing has ever been recorded for it');
+is(P.owedBatches('B2', [], ['271']), [],
+   '…and names no batch, because the whole plot is owed and a note would be noise');
+
+/* A RECORD WITH NO BATCH ON IT COVERS EVERYTHING. saveTransplantRecord
+   writes `batch_name: rec.batch || null`, so a blank is possible, and
+   raising a plot for ever over a record nobody can tie to a delivery
+   would be worse than the fault. */
+is(P.missingJobs('B9', four('B9', null), ['269', '271']).length, 0,
+   'a record with no batch on it keeps the old behaviour rather than stranding the plot');
+is(P.missingJobs('B9', four('B9', ''), ['269', '271']).length, 0,
+   '…and so does an empty one');
+
+/* And a caller that passes no batches at all -- every caller before this
+   rule existed -- gets exactly the old answer. */
+is(P.missingJobs('B11', four('B11', '269')).length, 0,
+   'asked without the ledger batches, it is the question it always was');
+
+/* The batch is matched on letters and digits, like every other key in
+   this system: a stray space must not owe somebody four jobs. */
+is(P.missingJobs('B11', four('B11', ' 269 , 271 '), ['269', '271']).length, 0,
+   'spacing round a batch number is not a different batch');
+}
+
 /* ── 3. The stepper ──────────────────────────────────────────────────── */
 is(P.clampIndex(0, 5), 0, 'the stepper starts at the first card');
 is(P.clampIndex(9, 5), 4, 'it CLAMPS rather than wrapping — the last card does not roll round');
@@ -147,17 +311,31 @@ is(P.LOADING_WORKERS_FROM, '2026-10-01',
 yes(!/VERIFY_WINDOW_DAYS|sinceISO/.test(R('src/components/VerificationBoard.jsx')),
    'and the rolling window is gone, so there is only one rule for where it starts');
 
-/* ── 5. The wiring on the page ───────────────────────────────────────── */
+/* ── 5. The wiring: a floating icon, not a card pushed onto the dashboard ──
+   It used to sit last on the dashboard and disappear when there was
+   nothing to verify -- the right default for something nobody asked to
+   see. It is the floating dock's own window now, opened on purpose the
+   same way PALMS and Nelos already are, so it no longer hides itself when
+   it is opened and finds nothing: see VerificationBoard.jsx and
+   VerifyWindow.jsx for why. */
 const board = R('src/components/VerificationBoard.jsx');
 const dash  = R('src/components/Dashboard.jsx');
+const dock  = R('src/components/FloatingDock.jsx');
+const win   = R('src/components/VerifyWindow.jsx');
 const maint = R('src/modules/maintenance/MaintenanceModule.jsx');
 
-yes(/<VerificationBoard \/>/.test(dash), 'the board is on the dashboard');
-yes(dash.indexOf('<VerificationBoard />') > dash.indexOf('<CollectionBoard />')
- && dash.indexOf('<VerificationBoard />') < dash.indexOf('<MaintenanceBoard />'),
-    'between the collections and the maintenance status, which is the order of the morning');
-yes(/if \(!ready \|\| total === 0\) return null;/.test(board),
-    'and it disappears when there is nothing to verify');
+yes(!/<VerificationBoard\b/.test(dash) && !/VerificationBoard\.jsx/.test(dash),
+    'the board is OFF the dashboard -- no import, no element');
+yes(/actions\.push\('verify'\)/.test(dock) && /VerifyWindow/.test(dock),
+    'the dock offers it as a third fan action, opening VerifyWindow');
+yes(/pendingVerifyCount/.test(dock),
+    "and the dock's own badge reads the shared count, not a copy of the board's query");
+yes(/<VerificationBoard onCount=\{onCount\} \/>/.test(win),
+    'the window renders the real board as its body, lazily, and hands its count back up');
+yes(!/if \(!ready \|\| total === 0\) return null;/.test(board),
+    'it no longer disappears when there is nothing to verify');
+yes(/total === 0/.test(board) && /vrf\.allDone/.test(board),
+    "-- it says so instead, now that opening it was somebody's choice");
 yes(/grid grid-cols-2/.test(board), 'the two halves sit side by side at every width');
 yes(!/jobLabel/.test(board),
     'the job names are off the transplanting card -- four spelt in full made it a paragraph');

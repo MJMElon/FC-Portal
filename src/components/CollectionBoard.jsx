@@ -4,6 +4,7 @@ import { cacheGet, cacheSet } from '../lib/cache.js';
 import { useOnline, useAutoSync } from '../hooks/useOnline.js';
 import { useLang } from '../context/LanguageContext.jsx';
 import Icon from './Icon.jsx';
+import { numText } from '../lib/numberText.js';
 
 const CACHE_KEY = 'collection_board_today';
 
@@ -66,7 +67,7 @@ export default function CollectionBoard({ locationFilter = null }) {
           </span>
         </div>
         <span className="text-[10px] font-black text-emerald-700 shrink-0">
-          {list.length} · {totalQty.toLocaleString()} pcs
+          {numText(totalQty)} {t('board.unit')}
         </span>
       </div>
 
@@ -92,7 +93,7 @@ export default function CollectionBoard({ locationFilter = null }) {
                 </div>
               </div>
               <div className="text-right shrink-0">
-                <div className="font-black text-sm text-slate-800">{Number(b.collection_qty || 0).toLocaleString()}</div>
+                <div className="font-black text-sm text-slate-800">{numText(Number(b.collection_qty || 0))}</div>
                 <span className={`inline-block text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${statusStyle(b.status)}`}>
                   {b.status || 'booked'}
                 </span>

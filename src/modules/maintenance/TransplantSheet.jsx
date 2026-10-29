@@ -7,14 +7,22 @@ import {
   asksDate,
   TRANSPLANT_JOBS,
   TRANSPLANT_SETUP_NEEDED,
+  TRANSPLANT_NOT_DONE_SETUP_NEEDED,
+  isNotDone,
   jobByKey,
   jobLabel,
   loadTransplantingSince,
   loadTransplantRecords,
   saveTransplantRecord,
 } from './transplantData.js';
+import { numText } from '../../lib/numberText.js';
+import { missingJobs, owedForJob, owedQty } from '../../components/verify/pending.js';
 
-const num = (n) => Number(n || 0).toLocaleString();
+const num = (n) => numText(Number(n || 0));
+
+/* The batches ONE RECORD was made for, as the ledger spells them. */
+const recBatches = (rec) => String((rec && rec.batch_name) || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
 
 /* When a record was saved, as a person reads a date. Falls back through the
    columns a row might have: created_at is the first save, work_date is the
@@ -31,10 +39,16 @@ const plantedOn = (raw) => {
 /* Was this record priced on a figure the report has since moved?
    Compared on the number the record STORED, because that is the number the
    payroll divides among the crew — not the one on screen. */
+/* COMPARED AGAINST THE BATCHES THIS RECORD IS FOR, not against the plot's
+   whole total. A plot that took a second delivery carries one record for
+   the first batch and one for the second, and each is priced on its own
+   batch — measuring either against the sum would report every one of them
+   as a figure the report has moved. A record with no batch on it falls
+   back to the plot total, which is what it always compared against. */
 const staleQty = (rec, row) => {
   if (!rec || !row) return false;
   const was = Number(rec.source_qty);
-  const now = Number(row.qty);
+  const now = Number(owedQty(row, recBatches(rec)));
   if (!Number.isFinite(was) || !Number.isFinite(now)) return false;
   return Math.round(was) !== Math.round(now);
 };
@@ -118,6 +132,33 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
 
   const row = plot ? rows.find((r) => r.plot === plot) : null;
 
+  /* WHICH JOBS THIS PLOT STILL OWES, by the board's own rule — a job is
+     owed again when a batch has arrived that no record of it mentions.
+     Asked here rather than "has it any record at all", so the sheet and
+     the card that opened it cannot disagree about what is left. */
+  const owedJobs = useMemo(
+    () => new Set(missingJobs(row ? row.plot : '', done, row ? row.batches : []).map((j) => j.key)),
+    [row, done]
+  );
+  /* And what ONE job is owed FOR: the batches outstanding on it and what
+     they came to. This is the figure that reaches `source_qty` and is
+     divided among the crew, so it is the 135 and never the 3,303. */
+  const jobRow = (key) => {
+    if (!row) return row;
+    const ow = owedForJob(row, done, key);
+    if (ow.batches.length) {
+      return { ...row, batches: ow.batches, batch: ow.batches.join(', '), qty: ow.qty };
+    }
+    /* Nothing owed: the form is a VIEW of the record that answered it, so
+       it shows the batch and the figure THAT record was made for — not the
+       plot's lifetime total, which on a two-delivery plot is a number that
+       record was never about. */
+    const rb = recBatches(recordOf.get(`${row.plot}|${key}`));
+    return rb.length
+      ? { ...row, batches: rb, batch: rb.join(', '), qty: owedQty(row, rb) }
+      : row;
+  };
+
   /* THE MONTH FOLLOWS THE DATE THE WORK WAS DONE, not the board.
      It used to be the board's month with `today` as the date, which is right
      only while a conductor records a job the same month he does it. He does
@@ -133,10 +174,31 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
   async function save(payload) {
     const asking = asksDate(today);
     const when = (asking && payload.date) || today;
+    /* THE BATCHES AND THE FIGURE ARE THE JOB'S OWN, not the plot's. A
+       second delivery is a second crew and a second record: what goes in
+       is 135 against batch 271, and September's 3,168 against 269 is left
+       exactly as it was. */
+    const jr = jobRow(payload.workTypeKey);
+    /* ONE RECORD PER PLOT PER JOB PER MONTH is the unique key, so a second
+       delivery recorded in the SAME month as the first would REPLACE it —
+       a crew's pay overwritten by the next crew's, silently. It cannot be
+       merged either: they are two crews. So it is refused, naming the
+       record that is in the way; dating the work in the month it was
+       actually done is the answer, and that is what the date box is for. */
+    const clash = (done || []).find((r) => r
+      && r.plot_name === row.plot && r.work_type === payload.workTypeKey
+      && r.schedule_month === (asking ? monthLabelOf(when) : month)
+      && String(r.id) !== String(payload.id || ''));
+    if (clash) {
+      throw new Error(t('tp.monthTaken', {
+        b: clash.batch_name || '—', d: String(clash.work_date || '').slice(0, 10),
+        m: asking ? monthLabelOf(when) : month,
+      }));
+    }
     await saveTransplantRecord({
       ...payload,
       nursery, month: asking ? monthLabelOf(when) : month, date: when,
-      plot: row.plot, batch: row.batch, sourceQty: row.qty,
+      plot: row.plot, batch: jr.batch, sourceQty: jr.qty,
       reportedBy: staffName,
     });
     setJob(null);
@@ -192,15 +254,23 @@ export default function TransplantSheet({ nursery, month, plotNames, workers, st
             <Notice text={t('mt.loadErr', { msg: error })} />
           ) : job && row ? (
             <JobForm
-              job={jobByKey(job)} row={row} workers={workers}
-              existing={recordOf.get(`${row.plot}|${job}`)}
+              job={jobByKey(job)} row={jobRow(job)} workers={workers}
+              /* A JOB THAT OWES A NEW BATCH OPENS BLANK. The record on the
+                 plot is September's crew for batch 269; opening the form
+                 on it would make October's 135 a CORRECTION of it, and
+                 saving would overwrite somebody's pay. It is shown as the
+                 line above the ticks instead, which is what it is: what
+                 was recorded before, for another delivery. */
+              existing={owedJobs.has(job) ? null : recordOf.get(`${row.plot}|${job}`)}
+              prior={owedJobs.has(job) ? recordOf.get(`${row.plot}|${job}`) : null}
               mayEdit={mayEdit} today={today}
               onSave={save} t={t} lang={lang}
             />
           ) : row ? (
-            <JobList row={row} recordOf={recordOf} onPick={setJob} t={t} lang={lang} />
+            <JobList row={row} records={done} recordOf={recordOf} owedJobs={owedJobs}
+              onPick={setJob} t={t} lang={lang} />
           ) : (
-            <PlotList rows={rows} recordOf={recordOf} onPick={setPlot} t={t} />
+            <PlotList rows={rows} records={done} recordOf={recordOf} onPick={setPlot} t={t} />
           )}
         </div>
       </div>
@@ -216,7 +286,7 @@ function Notice({ text }) {
 }
 
 /** Every plot the report says was transplanted this month. */
-function PlotList({ rows, recordOf, onPick, t }) {
+function PlotList({ rows, records, recordOf, onPick, t }) {
   if (!rows.length) {
     return <Notice text={t('tp.nothingSince', { d: plantedOn(TRANSPLANT_FLOW_FROM) })} />;
   }
@@ -224,7 +294,18 @@ function PlotList({ rows, recordOf, onPick, t }) {
      The list no longer empties at the end of a month, so without this a plot
      still waiting on a job would sink under every plot already done as the
      months went by — which is the one thing this screen exists to surface. */
-  const doneOf = (r) => TRANSPLANT_JOBS.filter((j) => recordOf.has(`${r.plot}|${j.key}`)).length;
+  /* COUNTED BY WHAT IS STILL OWED, not by what has any record at all. A
+     plot whose four jobs were recorded for September's delivery and that
+     took another in October owes all four again — it read 4/4 ALL DONE
+     while the board beside it was raising it. */
+  const doneOf = (r) => TRANSPLANT_JOBS.length - missingJobs(r.plot, records, r.batches).length;
+  /* A PLOT WITH A JOB NOBODY DID IS ANSWERED, NOT FINISHED. All four
+     questions have been answered, which is what takes it off the
+     Verification board and puts it under "finished" here -- but a green
+     ALL DONE over a blanket spray that never happened is the list claiming
+     work that was not carried out. So it sorts as finished and says
+     ANSWERED, in slate, and the job list one tap away says which. */
+  const skipOf = (r) => TRANSPLANT_JOBS.some((j) => isNotDone(recordOf.get(`${r.plot}|${j.key}`)));
   const ordered = [...rows].sort((a, b) => {
     const fa = doneOf(a) === TRANSPLANT_JOBS.length, fb = doneOf(b) === TRANSPLANT_JOBS.length;
     if (fa !== fb) return fa ? 1 : -1;
@@ -271,10 +352,14 @@ function PlotList({ rows, recordOf, onPick, t }) {
                   the list is scanned for. */}
               <span className={`shrink-0 text-[10px] font-black uppercase tracking-widest rounded-full px-2.5 py-1 ${
                 n === TRANSPLANT_JOBS.length
-                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  ? (skipOf(r) ? 'bg-slate-200 text-slate-600 border border-slate-300'
+                               : 'bg-emerald-50 text-emerald-700 border border-emerald-200')
                   : n ? 'bg-amber-50 text-amber-700 border border-amber-200'
                       : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                {n === TRANSPLANT_JOBS.length ? (<><Icon name="check" className="w-3 h-3 inline-block align-[-2px]" /> {t('tp.allDone')}</>) : `${n}/${TRANSPLANT_JOBS.length}`}
+                {n === TRANSPLANT_JOBS.length
+                  ? (skipOf(r) ? t('tp.allAnswered')
+                               : (<><Icon name="check" className="w-3 h-3 inline-block align-[-2px]" /> {t('tp.allDone')}</>))
+                  : `${n}/${TRANSPLANT_JOBS.length}`}
               </span>
               <span className="text-slate-300 text-[18px] shrink-0">›</span>
             </div>
@@ -287,12 +372,25 @@ function PlotList({ rows, recordOf, onPick, t }) {
 }
 
 /** The four jobs for one plot. */
-function JobList({ row, recordOf, onPick, t, lang }) {
+function JobList({ row, records, recordOf, owedJobs, onPick, t, lang }) {
   return (
     <div className="space-y-2.5">
       {TRANSPLANT_JOBS.map((j) => {
         const rec = recordOf.get(`${row.plot}|${j.key}`);
         const who = rec ? (rec.workers || []).map((w) => w.name) : [];
+        /* OWED AGAIN IS NOT DONE. A job recorded for an earlier delivery
+           still has a record, so the tick used to go green over a batch
+           nobody has been paid for. The crew that DID do it stays on the
+           row — it is their work — with the outstanding batch under it. */
+        const owes = owedJobs ? owedJobs.has(j.key) : !rec;
+        const ow = owes && records ? owedForJob(row, records, j.key) : null;
+        /* ANSWERED WITH "NOBODY DID IT" IS NOT THE SAME AS ANSWERED, and it
+           must not wear the same tick: a green ✓ against a blanket spray
+           that never happened is the screen saying the work was done. It is
+           not a TO DO either -- somebody has answered the question, which is
+           the whole reason the plot is off the board. So it is its own
+           state, in slate, saying what it says. */
+        const skipped = isNotDone(rec);
         return (
           <button key={j.key} type="button" onClick={() => onPick(j.key)}
             className="w-full bg-white rounded-2xl border border-slate-200 shadow-[0_4px_16px_rgba(0,0,0,.06)]
@@ -305,9 +403,21 @@ function JobList({ row, recordOf, onPick, t, lang }) {
                 <div className="font-black text-slate-800 text-[14px] leading-tight">
                   {jobLabel(j, lang)}
                 </div>
-                <div className="text-[11.5px] font-bold text-slate-400 mt-0.5 break-words">
-                  {who.length ? who.join(', ') : t('tp.notRecorded')}
+                <div className={`text-[11.5px] font-bold mt-0.5 break-words ${
+                  skipped ? 'text-slate-500' : 'text-slate-400'}`}>
+                  {skipped ? t('tp.notDoneWho')
+                    : who.length ? who.join(', ') : t('tp.notRecorded')}
                 </div>
+                {/* WHICH DELIVERY IS STILL OWED, and what it came to. On a
+                    job with a crew already on it this is the whole reason
+                    the row is not finished, and the figure is what the next
+                    crew will be paid — so it is the one that has to be on
+                    screen, not the plot's lifetime total. */}
+                {ow && rec && ow.batches.length > 0 && (
+                  <div className="text-[11.5px] font-black text-amber-700 mt-1 leading-snug">
+                    {t('tp.owesBatch', { b: ow.batches.join(', '), n: num(ow.qty) })}
+                  </div>
+                )}
                 {/* WHEN it was saved, on the list. A record's date is the
                     first thing asked about it and the last thing anybody
                     wants to open four forms to find. */}
@@ -330,17 +440,22 @@ function JobList({ row, recordOf, onPick, t, lang }) {
                   </div>
                 )}
                 {/* The split, where there is one. Seeing it on the list is
-                    what stops somebody opening all four to find it. */}
-                {rec && j.split && (
+                    what stops somebody opening all four to find it. A job
+                    nobody did has no split to show. */}
+                {rec && j.split && !skipped && (
                   <div className="text-[11px] font-black text-slate-600 mt-1 tabular-nums">
                     {(rec.workers || []).map((w) => `${w.name} ${num(w.qty)}`).join('  ·  ')}
                   </div>
                 )}
               </div>
               <span className={`shrink-0 text-[9px] font-black uppercase tracking-widest rounded-full px-2 py-1 ${
-                rec ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                {rec ? <Icon name="check" className="w-3 h-3 inline-block" /> : t('tp.todo')}
+                owes ? (rec ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : 'bg-slate-100 text-slate-500 border border-slate-200')
+                : skipped ? 'bg-slate-200 text-slate-600 border border-slate-300'
+                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                {owes ? t('tp.todo')
+                  : skipped ? t('tp.notDoneTag')
+                  : <Icon name="check" className="w-3 h-3 inline-block" />}
               </span>
             </div>
           </button>
@@ -368,11 +483,16 @@ function JobList({ row, recordOf, onPick, t, lang }) {
  * Setting → a person → Maintenance → Edit transplanting record. The tick
  * fails closed, like the other two corrections — see canMaintCorrect.
  */
-function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang }) {
+function JobForm({ job, row, workers, existing, prior, mayEdit, today, onSave, t, lang }) {
   const split = !!job.split;
   /* Saved, and this person may not reopen it. Not the same as "no existing
      record": the form still shows everything, it just cannot be changed. */
   const locked = !!existing && !mayEdit;
+  /* Already answered with "nobody did it". The form then shows the ticks
+     again where this person may correct it, because the one thing a
+     not-done record has to be is reversible: the grass came after all, the
+     crew went out, and the work has to be payable. */
+  const skipped = isNotDone(existing);
   const [picked, setPicked] = useState(() => {
     const m = {};
     (existing ? existing.workers || [] : []).forEach((w) => { m[w.name] = w.qty == null ? '' : String(w.qty); });
@@ -387,6 +507,15 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
     String((existing && existing.work_date) || today || '').slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  /* THE SECOND STEP OF SAYING NOBODY DID IT. One tap writes a record
+     against somebody's plot, and the button sits under the Save it is the
+     opposite of, so it is confirmed -- and confirmed in a panel of this
+     screen's own rather than a `confirm()`, because what has to be read is
+     three lines: which plot, which job, and that it can be undone. No
+     prompt asks for a reason: a prompt somebody dismisses out of habit is a
+     cancel that looks like a save, and the remark box above is already
+     where a reason goes. */
+  const [confirmSkip, setConfirmSkip] = useState(false);
 
   const names = Object.keys(picked);
   const total = names.reduce((n, k) => n + (Number(picked[k]) || 0), 0);
@@ -417,6 +546,42 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
            leave the old month's row standing and pay the job twice —
            see saveTransplantRecord. */
         id: existing && existing.id,
+        /* CLEARED EXPLICITLY, and only where it was set. A crew saved over a
+           not-done record is the work having happened after all, and a row
+           left flagged would show the names and pay nobody. Left undefined
+           on an ordinary save so the column is not named at all — see
+           saveTransplantRecord. */
+        notDone: skipped ? false : undefined,
+      });
+    } catch (e) {
+      setErr((e && e.message) || String(e));
+      setSaving(false);
+    }
+  }
+
+  /* NOBODY DID THIS JOB, and that is an answer rather than a gap.
+     A blanket spray is not always needed — the grass does not always come —
+     so a plot can genuinely never have one. With no way to say so the plot
+     owed four jobs for ever: it sat on the Verification board, no card could
+     ever be cleared, and now that a new delivery owes its jobs again it
+     would come back every time. The office asked for it in one line: 要有
+     option是没有做.
+     It is a RECORD and never a deletion, the same choice the admin-closed
+     plot and the rejected signup made — it goes through the one door
+     everything else goes through, it carries who said so and when, and it
+     can be reversed. The crew is EMPTY, which is what keeps it off every
+     claim line by construction rather than by a rule somebody has to
+     remember. */
+  async function submitNotDone() {
+    setSaving(true); setErr(null);
+    try {
+      await onSave({
+        workTypeKey: job.key,
+        workers: [],
+        remark: remark.trim(),
+        date,
+        id: existing && existing.id,
+        notDone: true,
       });
     } catch (e) {
       setErr((e && e.message) || String(e));
@@ -426,7 +591,10 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
 
   return (
     <div className="space-y-3">
-      {/* The report's figures, as read. */}
+      {/* The report's figures, as read. The BATCH and the quantity are the
+          ones this job still owes — on a plot that took a second delivery
+          that is the new batch and what it brought, never the two added
+          together, because this figure is what the crew is paid on. */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
           {t('tp.fromReport')}
@@ -435,6 +603,23 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
         {row.batch && <Row label={t('tp.batch')} value={row.batch} />}
         <Row label={t('tp.planted')} value={num(row.qty)} />
       </div>
+
+      {/* WHAT WAS RECORDED FOR THE EARLIER DELIVERY. Without it the form
+          looks like a plot nobody has ever worked, and the conductor has
+          no way of knowing he is keying the SECOND crew rather than
+          correcting the first. It is not editable here — that record
+          belongs to its own batch and is reached by its own month. */}
+      {prior && (
+        <div className="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3
+                        text-[11.5px] font-bold text-slate-600 leading-snug">
+          {t('tp.priorBatch', {
+            b: recBatches(prior).join(', ') || '—',
+            n: num(prior.source_qty),
+            d: savedOn(prior) || '—',
+            w: (prior.workers || []).map((x) => x.name).join(', ') || '—',
+          })}
+        </div>
+      )}
 
       {/* WHEN. The one field on this form that is not the report's and not a
           name, and the one that decides which month's claim pays it. It sits
@@ -472,6 +657,12 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
       </div>
       )}
 
+      {/* WHO. Left off a CLOSED not-done record altogether: "who was
+          credited" over an empty list reads as a crew somebody forgot to
+          fill in, which is the one thing this record must not look like.
+          The panel at the foot says what it is instead. Where this person
+          MAY correct it the ticks are shown, because that is the way back. */}
+      {!(locked && skipped) && (
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
           {locked ? t('tp.whoWasCredited') : split ? t('tp.whoAndHowMany') : t('tp.whoDidIt')}
@@ -558,6 +749,7 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
           </div>
         )}
       </div>
+      )}
 
       {(!locked || remark) && (
       <div className="bg-white rounded-2xl border border-slate-200 p-4">
@@ -583,16 +775,25 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
       {existing && mayEdit && (
         /* Reopening a closed record is a deliberate act, so it says what it
            is. Without this the form looks exactly like a blank one and a
-           correction looks exactly like a first record. */
+           correction looks exactly like a first record.
+           A not-done record says something else again: what ticking a crew
+           here MEANS, which is that the work happened after all and is going
+           back onto a claim. */
         <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3
                         text-[11.5px] font-bold leading-snug">
-          {t('tp.correcting', { d: savedOn(existing) || '—' })}
+          {skipped ? t('tp.undoNotDone', { d: savedOn(existing) || '—' })
+                   : t('tp.correcting', { d: savedOn(existing) || '—' })}
         </div>
       )}
 
       {err && (
         <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-3 text-[12.5px] font-bold">
-          {t('mt.saveErr', { msg: err })}
+          {/* The one refusal that is not a database fault but a file nobody
+              has run. Said as what to do about it, because "could not find
+              the not_done column" means nothing to a conductor. */}
+          {err === TRANSPLANT_NOT_DONE_SETUP_NEEDED
+            ? t('tp.notDoneSetup')
+            : t('mt.saveErr', { msg: err })}
         </div>
       )}
 
@@ -603,7 +804,8 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
            it cannot be pressed. */
         <div className="bg-slate-100 border border-slate-200 rounded-xl px-4 py-3.5">
           <div className="text-[12px] font-black text-slate-600 uppercase tracking-widest">
-            <Icon name="lock" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('tp.lockedTitle')}
+            <Icon name="lock" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {
+              skipped ? t('tp.notDoneTitle') : t('tp.lockedTitle')}
           </div>
           <div className="text-[11.5px] font-semibold text-slate-500 mt-1 leading-snug">
             {t('tp.savedOn', { d: savedOn(existing) || '—' })}
@@ -611,15 +813,59 @@ function JobForm({ job, row, workers, existing, mayEdit, today, onSave, t, lang 
             {existing.reported_by ? ` · ${existing.reported_by}` : ''}
           </div>
           <div className="text-[11.5px] font-semibold text-slate-400 mt-1.5 leading-snug">
-            {t('tp.lockedHint')}
+            {skipped ? t('tp.notDoneLockedHint') : t('tp.lockedHint')}
+          </div>
+        </div>
+      ) : confirmSkip ? (
+        /* THE CONFIRM NAMES WHAT IT IS ABOUT TO DO — the plot, the job, and
+           that nobody is paid for it. The same rule the admin-closed plot
+           follows, and for the same reason: a row of similar-looking
+           buttons on a phone is not necessarily pressed where it was
+           aimed. Cancel writes nothing. */
+        <div className="bg-slate-100 border border-slate-300 rounded-xl px-4 py-3.5 space-y-3">
+          <div className="text-[12px] font-black text-slate-700 uppercase tracking-widest">
+            {t('tp.notDoneConfirmTitle')}
+          </div>
+          <div className="text-[12px] font-bold text-slate-600 leading-snug">
+            {t('tp.notDoneConfirm', { p: row.plot, j: jobLabel(job, lang) })}
+          </div>
+          <div className="text-[11.5px] font-semibold text-slate-500 leading-snug">
+            {t('tp.notDoneConfirmHint')}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmSkip(false)} disabled={saving}
+              className="flex-1 bg-white border border-slate-300 text-slate-600 font-black text-[12px]
+                         uppercase tracking-widest rounded-xl py-3 disabled:opacity-40">
+              {t('common.cancel')}
+            </button>
+            <button onClick={submitNotDone} disabled={saving || !date}
+              className="flex-1 bg-slate-700 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-default
+                         text-white font-black text-[12px] uppercase tracking-widest rounded-xl py-3 transition-colors">
+              {saving ? t('auth.processing') : t('tp.notDoneGo')}
+            </button>
           </div>
         </div>
       ) : (
-        <button onClick={submit} disabled={saving || !balanced}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-default
-                     text-white font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors">
-          {saving ? t('auth.processing') : existing ? t('mt.saveCorrection') : t('mt.save')}
-        </button>
+        <div className="space-y-2">
+          <button onClick={submit} disabled={saving || !balanced}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-default
+                       text-white font-black text-[12px] uppercase tracking-widest rounded-xl py-3.5 transition-colors">
+            {saving ? t('auth.processing') : existing ? t('mt.saveCorrection') : t('mt.save')}
+          </button>
+          {/* NOBODY DID IT. Offered only where there is nothing recorded yet:
+              a job already recorded with a crew is corrected by changing the
+              crew, and one already answered this way is already answered.
+              Quiet and underneath, because it is the rarer answer of the two
+              and the destructive-looking one — the same shape as Resume
+              sitting above Start again on the parked walk. */}
+          {!existing && (
+            <button onClick={() => setConfirmSkip(true)} disabled={saving}
+              className="w-full bg-white border border-slate-300 text-slate-500 hover:text-slate-700
+                         font-black text-[11px] uppercase tracking-widest rounded-xl py-3 disabled:opacity-40">
+              {t('tp.notDoneBtn')}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

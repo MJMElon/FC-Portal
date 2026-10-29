@@ -13,6 +13,7 @@ import { openCasePlots } from '../../lib/nelos.js';
 import { clearRefused, refusedCases, retryRefused, submitCase } from './cullingOffline.js';
 import { clearInang, draftInang, loadInang, pruneInang, saveInang } from './cullingInang.js';
 import { cullingLines } from './cullingLines.js';
+import { numText } from '../../lib/numberText.js';
 
 /**
  * The Culling Calculator.
@@ -182,7 +183,7 @@ export default function CullingTab({ t, staffName, userId, flash, nurseryKeys, c
          column up by hand. */
       lines.filter((l) => l.why === 'LISTED' && l.orders.length).forEach((l) => {
         console.log(
-          `%c${l.plot} batch ${l.batch} collected ${l.collected.toLocaleString()} on ` +
+          `%c${l.plot} batch ${l.batch} collected ${numText(l.collected)} on ` +
             `${l.orders.length} order${l.orders.length === 1 ? '' : 's'}: ` +
             l.orders.map((o) => `${o.do || '(no number)'} ${o.qty}`).join(', '),
           'font-weight:bold'

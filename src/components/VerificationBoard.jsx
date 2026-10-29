@@ -1,24 +1,16 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
-import { allowedNurseries, canDo, canMaintain, nurseryKey } from '../lib/access.js';
-import { customerOfDO, loadDOsMissingWorkers, loadDOWorkers, loadDropdownData, plotsOfDO } from '../modules/do/data.js';
+import Icon from './Icon.jsx';
+import { canDo, canMaintain } from '../lib/access.js';
+import { customerOfDO, plotsOfDO } from '../modules/do/data.js';
 import { useWorkerTick } from '../modules/do/useWorkerTick.js';
 import WorkerTickModal from '../modules/do/WorkerTickModal.jsx';
 import { canMaintCorrect } from '../modules/maintenance/functions.js';
 import { todayStr } from '../modules/maintenance/data.js';
 import { monthLabelOf } from '../modules/maintenance/schedule.js';
-import {
-  loadTransplantRecords,
-  loadTransplantingSince,
-  TRANSPLANT_SETUP_NEEDED,
-} from '../modules/maintenance/transplantData.js';
-import {
-  clampIndex,
-  doNeedsWorkers,
-  LOADING_WORKERS_FROM,
-  plotsOwingJobs,
-} from './verify/pending.js';
+import { loadPendingDOs, loadPendingTransplants } from '../lib/verifyCount.js';
+import { clampIndex } from './verify/pending.js';
 
 /* The sheet is most of its own screen and nearly nobody opens it on a given
    morning, so it is not in the bundle until somebody taps a plot -- the same
@@ -75,18 +67,17 @@ function Arrow({ dir, disabled, onClick, label, tone }) {
   );
 }
 
-/** One half of the board: a heading with its count and arrows, and one card. */
+/** One half of the board: a heading and arrows, and one card. The count that
+    used to sit beside the title is gone — "how many are left" is answered by
+    the stepper under the card (1 / 88), so the title was saying it twice. */
 function Half({ icon, title, tone, n, i, setI, children, emptyText, prevLabel, nextLabel }) {
   const c = TONE[tone];
   return (
     <div className={`rounded-xl border ${c.box} overflow-hidden flex flex-col`}>
-      <div className={`flex items-center justify-between gap-1 px-2.5 py-1.5 border-b ${c.head}`}>
-        <span className={`font-black uppercase tracking-wider text-[11px] ${c.name} truncate min-w-0`}>
+      <div className={`flex items-center gap-1 px-2.5 py-1.5 border-b ${c.head}`}>
+        <span className={`inline-flex items-center gap-1 font-black uppercase tracking-wider text-[11px] ${c.name} truncate min-w-0`}>
           {icon} {title}
         </span>
-        {/* HOW MANY ARE LEFT, never how many there were. A conductor wants
-            the size of what is in front of him. */}
-        <span className={`text-[11px] font-black ${c.n} shrink-0 tabular-nums`}>{n}</span>
       </div>
 
       {n === 0 ? (
@@ -121,17 +112,21 @@ function Half({ icon, title, tone, n, i, setI, children, emptyText, prevLabel, n
  * that was really done, by people who are really owed for it, and in both
  * cases the only trace of the gap is a column nothing was looking at.
  *
- * It sits between today's collections and the maintenance status because
- * that is the order of the morning: who is coming, what is owed, what is
- * planned.
+ * It USED TO sit on the dashboard itself, last, and disappear when there was
+ * nothing to verify — the right default for something that pushed itself in
+ * front of you unasked. It is the floating dock's own window now, the same
+ * one PALMS and Nelos already open from, so it is opened on purpose rather
+ * than pushed — which is also why it no longer disappears when empty: a
+ * window somebody chose to open and found blank is a bug, not a quiet
+ * success, so it says "Nothing outstanding" instead of rendering nothing.
+ * See VerifyWindow.jsx for the chrome and FloatingDock.jsx for the badge
+ * that tells you whether to open it at all.
  *
- * IT DISAPPEARS WHEN THERE IS NOTHING TO VERIFY, which the office asked for
- * and which is the right default for a prompt: a card reading "nothing to
- * do" every day is a card nobody reads on the day it says something else.
- * The cost is that the transplanting sheet has no door on a nursery-month
- * where everything is recorded -- taken knowingly; see CLAUDE.md.
+ * The two reads (loadPendingDOs / loadPendingTransplants) are shared with
+ * the dock's own badge count now, in lib/verifyCount.js — one copy, so the
+ * number on the icon and the cards behind it cannot disagree.
  */
-export default function VerificationBoard() {
+export default function VerificationBoard({ onCount }) {
   const { permissions, staffName } = useAuth();
   const { t } = useLang();
 
@@ -150,8 +145,6 @@ export default function VerificationBoard() {
   const [doTick, setDoTick] = useState(0);
 
   const month = monthLabelOf(todayStr());
-  const allowed = allowedNurseries(permissions, 'maintenance');
-  const allowedSig = allowed === null ? '*' : [...allowed].sort().join('|');
 
   const wt = useWorkerTick(workers);
 
@@ -175,71 +168,24 @@ export default function VerificationBoard() {
 
   /* ── The delivery orders ─────────────────────────────────────────── */
   useEffect(() => {
-    if (!mayDo) { setDos([]); return; }
     let live = true;
-    (async () => {
-      try {
-        const [rows, { plots }, ws] = await Promise.all([
-          loadDOsMissingWorkers(LOADING_WORKERS_FROM),
-          loadDropdownData().catch(() => ({ plots: [] })),
-          loadDOWorkers().catch(() => []),
-        ]);
-        if (!live) return;
-        const map = {};
-        (plots || []).forEach((p) => { map[p.plot_name] = p.nursery_name; });
-        setPlotMap(map);
-        setWorkers(ws || []);
-        setDos((rows || []).filter(doNeedsWorkers));
-      } catch (e) {
-        /* Offline, or the column is not on this project yet. An empty half
-           is the safe answer: this card exists to raise work, and raising
-           none is better than raising a wrong one. */
-        if (live) setDos([]);
-      }
-    })();
+    loadPendingDOs(permissions).then(({ dos: rows, plotMap: map, workers: ws }) => {
+      if (!live) return;
+      setPlotMap(map);
+      setWorkers(ws);
+      setDos(rows);
+    });
     return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mayDo, doTick]);
 
   /* ── The transplanted plots ──────────────────────────────────────── */
   useEffect(() => {
-    if (!mayMaint) { setTp([]); return; }
     let live = true;
-    (async () => {
-      try {
-        const { plots } = await loadDropdownData();
-        /* Scoped the same way the module scopes itself, and through
-           nurseryKey: the access tick list is typed by hand and says
-           "UNN1" where shared_plots says "UNN 1". */
-        const mine = (plots || []).filter((p) => allowed === null
-          || allowed.some((a) => nurseryKey(a) === nurseryKey(p.nursery_name)));
-        const names = mine.map((p) => p.plot_name);
-        if (!names.length) { if (live) setTp([]); return; }
-
-        const nurseries = [...new Set(mine.map((p) => p.nursery_name).filter(Boolean))];
-        const [rows, ...recsPer] = await Promise.all([
-          loadTransplantingSince(names),
-          ...nurseries.map((n) => loadTransplantRecords(n).catch((e) => {
-            if (e && e.message === TRANSPLANT_SETUP_NEEDED) return [];
-            throw e;
-          })),
-        ]);
-        if (!live) return;
-        const recs = recsPer.flat();
-        const nurseryOf = {};
-        mine.forEach((p) => { nurseryOf[p.plot_name] = p.nursery_name; });
-        setTp(plotsOwingJobs(rows, recs).map((r) => ({
-          ...r,
-          nursery: nurseryOf[r.plot] || '',
-          plotNames: mine
-            .filter((p) => nurseryKey(p.nursery_name) === nurseryKey(nurseryOf[r.plot] || ''))
-            .map((p) => p.plot_name),
-        })));
-      } catch (e) {
-        if (live) setTp([]);
-      }
-    })();
+    loadPendingTransplants(permissions).then((rows) => { if (live) setTp(rows); });
     return () => { live = false; };
-  }, [mayMaint, allowedSig]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mayMaint]);
 
   /* A list that SHRANK under the card you are on -- answering a DO takes it
      off -- must not leave the stepper pointing past the end. */
@@ -256,24 +202,45 @@ export default function VerificationBoard() {
      second after the page has settled is one that reads as an alert. Held
      back until both halves have answered. */
   const ready = dos !== null && tp !== null;
-  if (!ready || total === 0) return null;
+  /* Reports the count up to whoever opened this window — FloatingDock's
+     badge is read before this has loaded, off the lighter pendingVerifyCount()
+     call; once the real rows are in, this is the figure the cards agree
+     with, and the one the badge corrects itself to if the two ever differ
+     (a case settled on another screen in the second between the two reads,
+     say). */
+  useEffect(() => {
+    if (ready && onCount) onCount(total);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, total]);
+
+  if (!ready) {
+    return (
+      <div className="py-16 text-center text-[11px] font-bold text-slate-400 uppercase tracking-widest animate-pulse">
+        {t('common.loading')}
+      </div>
+    );
+  }
+
+  if (total === 0) {
+    /* Opened on purpose now, through the dock, rather than pushed in front
+       of anybody — so finding nothing here is the window working, and it
+       says so instead of rendering a blank sheet somebody tapped a button
+       to see. */
+    return (
+      <div className="py-16 text-center">
+        <div className="text-[13px] font-black text-slate-500">{t('vrf.allDone')}</div>
+        <div className="mt-1 text-[11px] font-bold text-slate-400">{t('vrf.footer')}</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4 shadow-[0_4px_16px_rgba(0,0,0,.06)]">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200 bg-amber-50">
-        <span className="font-black uppercase tracking-widest text-[11px] sm:text-xs text-amber-800 truncate">
-          ⏳ {t('vrf.title')}
-        </span>
-        <span className="text-[10px] font-black text-amber-700 shrink-0">
-          {t('vrf.count', { n: total })}
-        </span>
-      </div>
-
+    <>
       {/* Side by side on every width, which is what the office asked for.
           The cards inside are built narrow enough to hold a 360px phone. */}
       <div className="grid grid-cols-2 gap-2 p-2">
         <Half
-          icon="📋" tone="sky" title={t('vrf.loading')} n={nDo} i={di} setI={setDi}
+          icon={<Icon name="clipboard" className="w-3.5 h-3.5 shrink-0" />} tone="sky" title={t('vrf.loading')} n={nDo} i={di} setI={setDi}
           emptyText={t('vrf.allDone')} prevLabel={t('vrf.prev')} nextLabel={t('vrf.next')}
         >
           {doCard && (
@@ -310,24 +277,56 @@ export default function VerificationBoard() {
         </Half>
 
         <Half
-          icon="🌱" tone="emerald" title={t('vrf.transplanting')} n={nTp} i={ti} setI={setTi}
+          icon={<Icon name="seedling" className="w-3.5 h-3.5 shrink-0" />} tone="emerald" title={t('vrf.transplanting')} n={nTp} i={ti} setI={setTi}
           emptyText={t('vrf.allDone')} prevLabel={t('vrf.prev')} nextLabel={t('vrf.next')}
         >
           {tpCard && (
+            /* A PLOT ON NO NURSERY LIST OPENS NOTHING. TransplantSheet
+               loads and saves BY NURSERY, so a sheet opened with none would
+               file the crew -- which is somebody pay -- under no nursery at
+               all. The card still RAISES the plot, which is the whole point
+               of it, and says the one thing that fixes it. */
             <button
               type="button"
-              onClick={() => setSheetFor({ nursery: tpCard.nursery, plotNames: tpCard.plotNames })}
+              onClick={() => {
+                if (tpCard.unplaced) return;
+                setSheetFor({ nursery: tpCard.nursery, plotNames: tpCard.plotNames });
+              }}
               className="w-full text-left"
             >
               <div className="font-mono font-black text-[16px] text-emerald-800 truncate">
                 {tpCard.plot}
               </div>
               <div className="text-[14px] font-bold text-slate-700 truncate">
-                {tpCard.nursery || '—'}
+                {tpCard.unplaced ? t('vrf.noNursery') : (tpCard.nursery || '—')}
               </div>
+              {/* THE FIGURE IS WHAT IS OWED, not what the plot has ever
+                  taken. B11 took 3,168 in September and 135 more in
+                  October, and this line read 3,303 — the number the next
+                  crew would have been paid for having moved 135. The
+                  office: *"之前3168记录了就记录了 这次的135 不要combine起
+                  来"*. A plot nobody has recorded anything for owes every
+                  batch, so nothing moves for the ordinary case. */}
               <div className="text-[12px] text-slate-400 truncate">
-                {(tpCard.qty || 0)}{tpCard.batch ? ' · ' + tpCard.batch : ''}
+                {(tpCard.owedQty == null ? tpCard.qty : tpCard.owedQty) || 0}
+                {(tpCard.owed || []).length
+                  ? ' · ' + tpCard.owed.join(', ')
+                  : (tpCard.batch ? ' · ' + tpCard.batch : '')}
               </div>
+              {/* THERE IS NO LINE SAYING "new batch not recorded", and the
+                  office took it off in one sentence: *"干嘛要有那一行小字 …
+                  他就和 B3 一样啊 同样 plot 不一样日期种"*. A second
+                  delivery IS the ordinary case — the same plot, planted on
+                  another day — and a card that explains itself reads as an
+                  exception somebody has to think about.
+
+                  It was put there for a reason that no longer exists: the
+                  sheet used to open with all four jobs ticked green for the
+                  earlier batch, so the card had to say why it was raising a
+                  plot that looked finished. The sheet now says it where it
+                  belongs — the ticks go back to TO DO and each job names
+                  the batch it owes — so this line was the same answer
+                  twice, in the place with the least room for it. */}
               {/* The job NAMES were here and the office asked for them out.
                   Four of them spelt in full -- "Lining & Arranging Polybag
                   15" x 18"" among them -- wrapped to three lines and made
@@ -335,15 +334,16 @@ export default function VerificationBoard() {
                   looking for, had the least weight on it. Which jobs are
                   missing is the first thing the sheet says anyway, one tap
                   away. */}
-              <div className="mt-2 text-[11px] font-black uppercase tracking-wider text-emerald-700">
-                {t('vrf.openSheet')} ›
+              <div className={'mt-2 text-[11px] font-black uppercase tracking-wider '
+                + (tpCard.unplaced ? 'text-amber-700' : 'text-emerald-700')}>
+                {tpCard.unplaced ? t('vrf.addPlotFirst') : t('vrf.openSheet') + ' \u203a'}
               </div>
             </button>
           )}
         </Half>
       </div>
 
-      <div className="px-4 py-1.5 border-t border-slate-100 text-[10px] font-bold text-slate-400">
+      <div className="px-1 py-1.5 text-[10px] font-bold text-slate-400">
         {t('vrf.footer')}
       </div>
 
@@ -362,6 +362,6 @@ export default function VerificationBoard() {
           />
         </Suspense>
       )}
-    </div>
+    </>
   );
 }

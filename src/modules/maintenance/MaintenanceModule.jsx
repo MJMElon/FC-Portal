@@ -63,6 +63,7 @@ import {
   weekDates,
   weekOfDate,
 } from './schedule.js';
+import { numText } from '../../lib/numberText.js';
 
 /** Matches the work sheet: three photos is enough to show a job was done. */
 const MAX_PHOTOS = 3;
@@ -119,6 +120,18 @@ export default function MaintenanceModule({
   plotFilter = null,
   subtitle = 'FC Portal',
   back = '/dashboard',
+  /* { week, workTypeKey } — opens straight to that job's record form,
+     skipping the week board. The dashboard's own maintenance dials use
+     this: tapping one pops the form directly rather than landing on the
+     whole module first. The task list it needs (tasksByWeek) is still
+     built the ordinary way below and fills in once the schedule has
+     loaded, same as it would after a tap from WeekBoard itself. */
+  initialSheet = null,
+  /* Closes the WHOLE thing when the sheet initialSheet opened is
+     dismissed, instead of revealing the module page behind it — a
+     dashboard dial only ever asked for the one form, not a landing on
+     this page. Ignored without initialSheet. */
+  onQuickClose = null,
 }) {
   const auth = useAuth();
   const staffName   = identity ? identity.name        : auth.staffName;
@@ -143,7 +156,9 @@ export default function MaintenanceModule({
      worked out from. Null until read, and null forever on a source that
      cannot read it, which the board takes as "say nothing". */
   const [cap, setCap] = useState(null);
-  const [sheet, setSheet] = useState(null);         // { week, workType }
+  const [sheet, setSheet] = useState(() => (initialSheet
+    ? { week: initialSheet.week, workType: workTypeByKey(initialSheet.workTypeKey) }
+    : null));                                       // { week, workType }
   const [history, setHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [workers, setWorkers] = useState([]);   // the roster a conductor may credit work to
@@ -868,7 +883,7 @@ export default function MaintenanceModule({
               workTypeKey: sheet.workType.key, plot: task.plot,
               chemical: task.chemical, week: sheet.week, month })}
             onSave={handleSheetSave}
-            onClose={() => setSheet(null)}
+            onClose={() => { setSheet(null); if (onQuickClose) onQuickClose(); }}
           />
         )}
 
@@ -1104,7 +1119,7 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
                 <span className="font-black text-slate-800 text-[14px] flex-1 min-w-0">{b.batch}</span>
                 <span className={`text-[12px] font-bold shrink-0 tabular-nums ${
                   b.qty < 0 ? 'text-amber-600' : 'text-slate-400'}`}>
-                  {b.qty.toLocaleString()}
+                  {numText(b.qty)}
                 </span>
               </label>
             ))}
@@ -1124,7 +1139,7 @@ function EntrySheet({ record, plots, batchMap, onClose, onSave, allowPhotos = tr
           {t('mt.qty')} <span className="text-slate-400 normal-case">· {t('mt.qtyFromBatches')}</span>
         </label>
         <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-3 text-sm font-black text-slate-700 mb-3">
-          {qty ? qty.toLocaleString() : '—'}
+          {qty ? numText(qty) : '—'}
         </div>
         </>}
 

@@ -38,12 +38,51 @@ function Loading() {
   );
 }
 
+/* The door shut for a reason the sign-in screen cannot say.
+   'customer' — a Sales Web account. Already signed out; this is all it sees.
+   'unchecked' — the profile could not be read and this phone holds nothing of
+   this person's to go on. The session is kept, so Try again is all it takes
+   once there is a line. */
+function Refused() {
+  const { refusal, retryOpsGate, setRefusal } = useAuth();
+  const { t } = useLang();
+  const customer = refusal === 'customer';
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#050a0e] px-4">
+      <div className="max-w-sm w-full text-center space-y-4" data-refusal={refusal}>
+        <p className="text-slate-100 text-sm leading-relaxed">
+          {customer ? t('auth.customerRefused') : t('auth.uncheckedAccount')}
+        </p>
+        {customer ? (
+          <button
+            onClick={() => setRefusal(null)}
+            className="text-xs text-slate-400 underline"
+          >
+            {t('auth.backToSignIn')}
+          </button>
+        ) : (
+          <button
+            onClick={retryOpsGate}
+            className="px-4 py-2 rounded bg-emerald-600 text-white text-sm"
+          >
+            {t('auth.tryAgain')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Gate for the authenticated area. Bounces to the login screen if there is no
-// session or the ops-access check failed.
+// session or the ops-access check said no, and draws NOTHING behind the door
+// while the check is still out for somebody this phone holds no staff access
+// for — a customer account must never see the dashboard, not even for the
+// second it takes the profile read to come back.
 function Protected({ children }) {
-  const { session, loading, allowed } = useAuth();
+  const { session, loading, allowed, refusal, mayEnter } = useAuth();
   if (loading) return <Loading />;
-  if (!session || allowed === false) return <Navigate to="/" replace />;
+  if (refusal || !session || allowed === false) return <Navigate to="/" replace />;
+  if (!mayEnter) return <Loading />;
   return children;
 }
 
@@ -59,7 +98,7 @@ function PageGate({ page, children }) {
 }
 
 export default function App() {
-  const { session, loading, allowed } = useAuth();
+  const { session, loading, allowed, refusal, mayEnter } = useAuth();
 
   return (
     <>
@@ -69,11 +108,17 @@ export default function App() {
         element={
           loading ? (
             <Loading />
-          ) : // `allowed` is null until the ops gate answers. Waiting for it
-          // here would show the login screen to somebody already signed in,
-          // so only a definite NO keeps them on it.
-          session && allowed !== false ? (
+          ) : refusal ? (
+            <Refused />
+          ) : // `allowed` is null until the ops gate answers. Somebody this
+          // phone already holds staff access for goes straight in; anybody
+          // else signed in waits on the loading screen rather than being
+          // shown the login (they ARE signed in) or the dashboard (nobody has
+          // checked them yet). Only a definite NO puts them on the login.
+          mayEnter ? (
             <Navigate to="/dashboard" replace />
+          ) : session && allowed === null ? (
+            <Loading />
           ) : (
             <AuthScreen />
           )

@@ -14,6 +14,7 @@
 // entries are stored per plot and survive every refresh.
 
 import { NURSERIES as PALMS_NURSERIES, plotsOf } from './data.js';
+import { numText } from '../../lib/numberText.js';
 
 /** The nurseries, with the long name the plot modal shows. Plots themselves
     come from PALMS, so there is one list of what exists, not two. */
@@ -103,6 +104,8 @@ export function fmtPct(fraction) {
 }
 
 export function fmtNum(n) {
-  return n.toLocaleString('en-US');
+  // Through the one formatter rather than pinning a second copy of the
+  // locale here -- see lib/numberText.js for why it is pinned at all.
+  return numText(n);
 }
 

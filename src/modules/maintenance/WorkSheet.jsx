@@ -7,6 +7,7 @@ import WhoDidIt from './WhoDidIt.jsx';
 import { batchesIn } from './plotBatches.js';
 import WorkIcon from './WorkIcons.jsx';
 import Icon from '../../components/Icon.jsx';
+import { numText } from '../../lib/numberText.js';
 
 /** Enough to show the work from more than one angle, few enough that a
     morning in the field does not turn into a bill for storage. */
@@ -133,7 +134,7 @@ export default function WorkSheet({
 
         {/* The plots the schedule asks for */}
         <div className="px-5 pt-4">
-          <div className={label}>{t('mt.plotsToDo', { n: tasks.length.toLocaleString() })}</div>
+          <div className={label}>{t('mt.plotsToDo', { n: numText(tasks.length) })}</div>
           {tasks.length === 0 ? (
             <div className="text-[13px] font-bold text-slate-400 py-2">{t('mt.nothingDue')}</div>
           ) : (
@@ -219,7 +220,7 @@ export default function WorkSheet({
                           a number to query, not as stock standing there. */}
                       <span className={`text-[12px] font-bold shrink-0 tabular-nums ${
                         b.qty < 0 ? 'text-amber-600' : 'text-slate-400'}`}>
-                        {b.qty.toLocaleString()}
+                        {numText(b.qty)}
                       </span>
                     </label>
                   ))}

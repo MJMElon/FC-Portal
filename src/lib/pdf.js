@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { formatSealRanges, SHOW_SEALS_ON_DO } from './sealRanges.js';
+import { numText } from './numberText.js';
 
 // Company letterhead — same identity block the Sales Web proforma invoice
 // uses (admin-orders.js openProformaInvoice).
@@ -12,7 +13,11 @@ const GREY = [85, 85, 85]; // #555
 const LIGHT = [229, 231, 235]; // #e5e7eb row separators
 const HEAD_BG = [244, 244, 245]; // #f4f4f5 table header
 
-const fmtQty = (n) => Number(n || 0).toLocaleString('en-MY');
+/* Through the one formatter. It used to pin en-MY of its own, which reads
+   the same as the pin in numberText.js -- but a second copy of a rule is a
+   second thing to change, and a printed sheet disagreeing with the screen
+   it came off is the fault that rule exists to stop. */
+const fmtQty = (n) => numText(Number(n || 0));
 
 // Draw a data-URL image contained (aspect-fit, centred) inside a box.
 function fitImage(doc, dataUrl, x, y, boxW, boxH, pad = 1.5) {

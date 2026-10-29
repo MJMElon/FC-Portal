@@ -1,6 +1,7 @@
 import { useLang } from '../../context/LanguageContext.jsx';
 import Icon from '../../components/Icon.jsx';
 import { customerOfDO, itemsFromRecord } from './data.js';
+import { numText } from '../../lib/numberText.js';
 
 /* "Who Loaded This DO" — one toggle-button section per nursery the DO's
    items touch, same picker style as WhoDidIt.jsx. Rendered by both the DO
@@ -71,7 +72,7 @@ export default function WorkerTickModal({ wt, staffName }) {
                     )}
                   </span>
                   <span className="font-mono text-[12px] font-black text-slate-800 shrink-0">
-                    {l.qty ? l.qty.toLocaleString() : '—'}
+                    {l.qty ? numText(l.qty) : '—'}
                   </span>
                 </div>
               )) : (
@@ -82,7 +83,7 @@ export default function WorkerTickModal({ wt, staffName }) {
                   {t('do.whoLoadedTotal')}
                 </span>
                 <span className="font-mono text-sm font-black text-slate-900 shrink-0">
-                  {total ? total.toLocaleString() : '—'}
+                  {total ? numText(total) : '—'}
                 </span>
               </div>
             </div>
