@@ -15,10 +15,12 @@ import {
 } from './tiles.js';
 import {
   START_ACCURACY_M,
+  STALL_AFTER_S,
   addFix,
   formatDistance,
   formatDuration,
   isStalled,
+  longestGapS,
   mayStart,
   stalledFor,
   trackPayload,
@@ -511,6 +513,15 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
      a worse thing than the one being two seconds late. */
   const stalledNow = recording && isStalled(Date.now() - stalled * 1000, Date.now());
 
+  /* AND WHAT THE STALL BAND COULD NOT SAY, because it was drawn behind a dark
+     screen: a walk that is OVER and has a hole in it. The next fix clears the
+     band, so by the time anybody is looking again the only thing left is a
+     short straight line that reads exactly like a short walk. The gap is in
+     the track — `t` is seconds since the start — so it is said here, where the
+     figures are, for as long as the track is on screen. */
+  const blind = longestGapS(state.points);
+  const blindNow = !recording && blind.gap >= STALL_AFTER_S;
+
   const btn = 'rounded-2xl font-black uppercase tracking-widest text-[12px] transition-colors';
 
   return (
@@ -600,6 +611,11 @@ export default function TrackMap({ onClose, onDone, initial = null, viewOnly = f
         {recording && stalledNow && (
           <div className="rounded-xl bg-rose-600 px-3 py-2 text-[11.5px] font-black text-white">
             {t('mt.trkStalled', { n: formatDuration(stalled) })}
+          </div>
+        )}
+        {blindNow && (
+          <div className="rounded-xl bg-amber-500 px-3 py-2 text-[11.5px] font-black text-slate-900">
+            {t('mt.trkHadGap', { n: formatDuration(blind.gap) })}
           </div>
         )}
         {recording && !stalledNow && why && (

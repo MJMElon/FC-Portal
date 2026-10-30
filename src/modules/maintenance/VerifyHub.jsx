@@ -11,6 +11,7 @@ import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
 import Icon from '../../components/Icon.jsx';
 import { numText } from '../../lib/numberText.js';
+import { formatDuration, gapIsCertain, secondsBetween } from './track/track.js';
 
 /* Leaflet is most of a megabyte, and a conductor who never opens a track
    never downloads a byte of it. Same lazy import GpsTrack uses. */
@@ -625,6 +626,17 @@ function VerifyCard({ record: r, t, lang, yes, no, batches, picked, onToggleBatc
                     r.gps_points != null ? t('mt.fixes', { n: numText(Number(r.gps_points)) }) : null,
                   ].filter(Boolean).join(' · ') || t('mt.openMap')}
                 </span>
+                {/* The walk has a hole in it, said on the row. The office is
+                    the one who looks at a straight line and asks why, and the
+                    two stamps beside the count are what answer it. */}
+                {gapIsCertain(r.gps_points, secondsBetween(r.gps_started_at, r.gps_ended_at)) > 0 && (
+                  <span className="block text-[11px] font-black text-amber-700">
+                    {t('mt.trkHadGap', {
+                      n: formatDuration(gapIsCertain(r.gps_points,
+                        secondsBetween(r.gps_started_at, r.gps_ended_at))),
+                    })}
+                  </span>
+                )}
               </span>
               <span className="text-slate-300 text-[18px] shrink-0">›</span>
             </button>
