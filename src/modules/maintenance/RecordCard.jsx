@@ -3,7 +3,7 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import { localeOf, shortDate } from '../../lib/day.js';
 import { didTheWork } from './helpers.js';
 import { workTypeByKey, workTypeLabel } from './data.js';
-import { formatDistance, formatDuration, gapIsCertain, mapsUrl, secondsBetween } from './track/track.js';
+import { formatDistance, mapsUrl } from './track/track.js';
 import { tintOf } from './tints.js';
 import WorkIcon from './WorkIcons.jsx';
 import Icon from '../../components/Icon.jsx';
@@ -79,12 +79,6 @@ export default function RecordCard({
   const [track, setTrack] = useState(null);
   const own = r.gps_track && r.gps_track.length ? r.gps_track : null;
   const hasTrack = !!own || (Number(r.gps_points) > 0 && !!loadTrack);
-  /* A WALK WITH A HOLE IN IT, said on the row rather than only inside the map.
-     "33 m · 2 fixes" reads exactly like a short walk; what it is, where the
-     two fixes are minutes apart, is a plot walked with the phone asleep. The
-     two stamps and the count are already in the list read, and between them
-     they PROVE a gap rather than suggesting one — see gapIsCertain. */
-  const blindS = gapIsCertain(r.gps_points, secondsBetween(r.gps_started_at, r.gps_ended_at));
 
   async function openMap() {
     setMapOpen(true);
@@ -219,14 +213,6 @@ export default function RecordCard({
               <span className="text-emerald-700 uppercase tracking-widest text-[10px] font-black">
                 {t('wk.seeTrack')}
               </span>
-              {blindS > 0 && (
-                <span
-                  className="text-amber-700 uppercase tracking-widest text-[10px] font-black"
-                  title={t('mt.trkHadGap', { n: formatDuration(blindS) })}
-                >
-                  {t('mt.trkGapTag')}
-                </span>
-              )}
             </button>
           ) : r.gps_lat != null && r.gps_lng != null ? (
             <a

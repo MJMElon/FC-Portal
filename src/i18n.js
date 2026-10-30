@@ -455,8 +455,6 @@ const en = {
   'mt.trkResume': 'Resume this walk',
   'mt.trkCameBack': 'A walk of {n} points was still going when this page was last closed. It is here, stopped.',
   'mt.trkGapWarning': 'Nothing was recorded while the phone was away, so there is a gap. Resume adds to the same walk.',
-  'mt.trkHadGap': 'THIS WALK HAS A HOLE IN IT: {n} with no position at all. The phone stops giving positions the moment the screen goes off, so keep this screen on and in your hand for the whole walk.',
-  'mt.trkGapTag': '⚠ gap',
 
   // top nav / offline
 
@@ -1334,8 +1332,6 @@ const ms = {
   'mt.trkResume': 'Sambung jejak ini',
   'mt.trkCameBack': 'Jejak {n} titik masih berjalan ketika halaman ini ditutup. Ia ada di sini, berhenti.',
   'mt.trkGapWarning': 'Tiada rekod ketika telefon tiada, jadi ada jurang. Sambung akan menambah pada jejak yang sama.',
-  'mt.trkHadGap': 'JEJAK INI ADA LUBANG: {n} tanpa sebarang posisi. Telefon berhenti memberi posisi sebaik skrin padam, jadi biarkan skrin ini hidup dan di tangan sepanjang jejak.',
-  'mt.trkGapTag': '⚠ jurang',
 
   // top nav / offline
 

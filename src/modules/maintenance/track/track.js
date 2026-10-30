@@ -53,64 +53,6 @@ export const MAX_STEP_M = 120;
  */
 export const STALL_AFTER_S = 45;
 
-/**
- * THE STALL BAND IS DRAWN ON A SCREEN NOBODY CAN SEE.
- *
- * It is the right thing to show while somebody is looking, and the case it was
- * written for is the case where they are not: the phone sleeps, the positions
- * stop, the band goes up behind a dark screen, and the next fix — the one that
- * arrives when the phone comes back out of a pocket — clears it. What is left
- * is a saved track reading "33 m · 2 fixes", which looks exactly like a short
- * walk and is in fact a whole plot walked for nothing.
- *
- * So the track has to say it AFTERWARDS, and the evidence is inside it: `t` is
- * seconds since the walk started, so two fixes forty-five seconds apart are
- * forty-five seconds the phone was not listening through. A walk in the open
- * gives a position every second or two.
- *
- * Returns { gap, at } — the longest gap in whole seconds and the `t` it opens
- * at — or { gap: 0, at: null } for a track with nothing to say.
- */
-export function longestGapS(points) {
-  const ps = points || [];
-  let gap = 0, at = null;
-  for (let i = 1; i < ps.length; i += 1) {
-    const d = Math.round((Number(ps[i][2]) || 0) - (Number(ps[i - 1][2]) || 0));
-    if (d > gap) { gap = d; at = Number(ps[i - 1][2]) || 0; }
-  }
-  return { gap: Math.max(0, gap), at };
-}
-
-/**
- * The same question asked of a record whose POINTS ARE NOT IN HAND.
- *
- * The list read deliberately leaves `gps_track` behind — a thousand points a
- * row is most of a nursery's signal — so a card has the count and the two
- * timestamps and nothing else. That is enough, and it is enough EXACTLY
- * rather than nearly: `n` fixes leave `n - 1` gaps between them covering the
- * whole walk, so if the walk divided by those gaps is already STALL_AFTER_S,
- * then at least one of them is that long. It cannot be otherwise. A track of
- * one fix leaves the whole walk uncovered and counts as one gap.
- *
- * Nearly is not good enough here and never has been: a mark that guessed would
- * end up on honest short walks, and then it is a mark nobody reads on the day
- * it means something.
- */
-export function gapIsCertain(points, seconds) {
-  const n = Math.round(Number(points) || 0);
-  const s = Math.round(Number(seconds) || 0);
-  if (n < 1 || s < STALL_AFTER_S) return 0;
-  const worst = Math.floor(s / Math.max(1, n - 1));
-  return worst >= STALL_AFTER_S ? worst : 0;
-}
-
-/** Seconds between two stamps, for the callers that hold only those. */
-export function secondsBetween(startedAt, endedAt) {
-  const a = Date.parse(startedAt || ''), b = Date.parse(endedAt || '');
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
-  return Math.max(0, Math.round((b - a) / 1000));
-}
-
 /** How long the line has been standing still, in whole seconds. */
 export function stalledFor(lastFixAtMs, nowMs) {
   if (!lastFixAtMs) return 0;
