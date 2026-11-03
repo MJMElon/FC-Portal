@@ -167,12 +167,29 @@ export function saveDB(db) {
 }
 
 /* ---------- helpers ---------- */
+/**
+ * A -R plot is a REPLANT plot — ground a 3rd-culling transfer moved seedlings
+ * onto. PALMS has nothing to say about one, so it is on no PALMS screen: not
+ * the plot list, not the Culling Calculator. The office: "plot-R 不需要出现在
+ * palms 完全不需要".
+ *
+ * SHARED RULE — isReplantPlot in the office repository,
+ * shared/shared_palms.js. Change one, change the other. A trailing number is
+ * allowed for, so B4-R and B4-R2 both go; a split area ("B4-R#A") is judged
+ * by its plot.
+ */
+export function isReplantPlot(plot) {
+  return /-R\d*$/i.test(String(plot == null ? '' : plot).split('#')[0].trim());
+}
+
 export function plotsOf(nk) {
   const n = NURSERIES[nk];
   if (!n) return [];
   // The office's list once it has been read; the generated one until then, so
   // a portal that cannot reach the server still has plots to show.
-  if (n.plots && n.plots.length) return n.plots;
+  // Filtered here as well as where the list is built, because a phone can
+  // be holding a list cached before -R plots were left out of it.
+  if (n.plots && n.plots.length) return n.plots.filter((p) => !isReplantPlot(p));
   return Array.from({ length: n.count }, (_, i) => n.prefix + (i + 1));
 }
 

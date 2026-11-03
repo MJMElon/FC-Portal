@@ -2,7 +2,7 @@ import { fetchAllRows, supabase } from '../../lib/supabase.js';
 import { cacheBlocks, cachedBlocks } from './cullingOffline.js';
 import { isOnline } from '../../lib/outbox.js';
 import { batchKey, plotKey } from '../maintenance/plotBatches.js';
-import { nurseryOfPlot, todayStr } from './data.js';
+import { isReplantPlot, nurseryOfPlot, todayStr } from './data.js';
 
 /**
  * Where the Culling Calculator's numbers come from.
@@ -142,11 +142,14 @@ const stageKey = (s) => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase
 const CULLING_STAGES = new Set([
   stageKey('Pengambilan'),
   stageKey('Saringan Anak Bibit'),
+  /* The plot is waiting for its culling, and the office wants it on the
+     calculator while it waits, so the count is ready before Pengambilan. */
+  stageKey('Tunggu buat culling'),
 ]);
 
 /**
- * Which plots PALMS says are at Pengambilan or Saringan Anak Bibit, right
- * now.
+ * Which plots PALMS says are at Pengambilan, Saringan Anak Bibit or Tunggu
+ * buat culling, right now.
  *
  * Read for the DIAGNOSIS, not for the list. The status answers a question
  * about a plot — is the field collecting from it — and the calculator's
@@ -766,19 +769,13 @@ export function collectionLines(d) {
   return out;
 }
 
-/**
- * The -R plots, which do not belong on this screen.
- *
- * B4 and B4-R are different ground, and only the first is counted here. The
- * suffix is kept by plotKey rather than trimmed, which is what makes them
- * possible to tell apart at all — so the two never share a row, and the -R one
- * simply never opens one.
- *
- * A trailing number is allowed for, so B4-R and B4-R2 are both left out.
- */
-export function isReplantPlot(plot) {
-  return /-R\d*$/.test(String(plot || ''));
-}
+/* The -R plots, which do not belong on this screen — nor on any PALMS
+ * screen. B4 and B4-R are different ground, and only the first is counted
+ * here. The suffix is kept by plotKey rather than trimmed, which is what makes
+ * them possible to tell apart at all — so the two never share a row, and the
+ * -R one simply never opens one. The rule lives in data.js now, beside the
+ * plot list it also keeps -R plots out of. */
+export { isReplantPlot };
 
 /**
  * The oldest batch this screen carries.

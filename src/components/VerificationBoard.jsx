@@ -281,20 +281,52 @@ export default function VerificationBoard({ onCount }) {
           emptyText={t('vrf.allDone')} prevLabel={t('vrf.prev')} nextLabel={t('vrf.next')}
         >
           {tpCard && (
+            /* A PLOT ON NO NURSERY LIST OPENS NOTHING. TransplantSheet
+               loads and saves BY NURSERY, so a sheet opened with none would
+               file the crew -- which is somebody pay -- under no nursery at
+               all. The card still RAISES the plot, which is the whole point
+               of it, and says the one thing that fixes it. */
             <button
               type="button"
-              onClick={() => setSheetFor({ nursery: tpCard.nursery, plotNames: tpCard.plotNames })}
+              onClick={() => {
+                if (tpCard.unplaced) return;
+                setSheetFor({ nursery: tpCard.nursery, plotNames: tpCard.plotNames });
+              }}
               className="w-full text-left"
             >
               <div className="font-mono font-black text-[16px] text-emerald-800 truncate">
                 {tpCard.plot}
               </div>
               <div className="text-[14px] font-bold text-slate-700 truncate">
-                {tpCard.nursery || '—'}
+                {tpCard.unplaced ? t('vrf.noNursery') : (tpCard.nursery || '—')}
               </div>
+              {/* THE FIGURE IS WHAT IS OWED, not what the plot has ever
+                  taken. B11 took 3,168 in September and 135 more in
+                  October, and this line read 3,303 — the number the next
+                  crew would have been paid for having moved 135. The
+                  office: *"之前3168记录了就记录了 这次的135 不要combine起
+                  来"*. A plot nobody has recorded anything for owes every
+                  batch, so nothing moves for the ordinary case. */}
               <div className="text-[12px] text-slate-400 truncate">
-                {(tpCard.qty || 0)}{tpCard.batch ? ' · ' + tpCard.batch : ''}
+                {(tpCard.owedQty == null ? tpCard.qty : tpCard.owedQty) || 0}
+                {(tpCard.owed || []).length
+                  ? ' · ' + tpCard.owed.join(', ')
+                  : (tpCard.batch ? ' · ' + tpCard.batch : '')}
               </div>
+              {/* THERE IS NO LINE SAYING "new batch not recorded", and the
+                  office took it off in one sentence: *"干嘛要有那一行小字 …
+                  他就和 B3 一样啊 同样 plot 不一样日期种"*. A second
+                  delivery IS the ordinary case — the same plot, planted on
+                  another day — and a card that explains itself reads as an
+                  exception somebody has to think about.
+
+                  It was put there for a reason that no longer exists: the
+                  sheet used to open with all four jobs ticked green for the
+                  earlier batch, so the card had to say why it was raising a
+                  plot that looked finished. The sheet now says it where it
+                  belongs — the ticks go back to TO DO and each job names
+                  the batch it owes — so this line was the same answer
+                  twice, in the place with the least room for it. */}
               {/* The job NAMES were here and the office asked for them out.
                   Four of them spelt in full -- "Lining & Arranging Polybag
                   15" x 18"" among them -- wrapped to three lines and made
@@ -302,8 +334,9 @@ export default function VerificationBoard({ onCount }) {
                   looking for, had the least weight on it. Which jobs are
                   missing is the first thing the sheet says anyway, one tap
                   away. */}
-              <div className="mt-2 text-[11px] font-black uppercase tracking-wider text-emerald-700">
-                {t('vrf.openSheet')} ›
+              <div className={'mt-2 text-[11px] font-black uppercase tracking-wider '
+                + (tpCard.unplaced ? 'text-amber-700' : 'text-emerald-700')}>
+                {tpCard.unplaced ? t('vrf.addPlotFirst') : t('vrf.openSheet') + ' \u203a'}
               </div>
             </button>
           )}

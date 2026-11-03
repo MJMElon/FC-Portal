@@ -17,6 +17,10 @@ const en = {
   // auth
   'auth.portal': 'FC Portal',
   'auth.noAccess': 'Your account does not yet have operations access. Please contact an admin.',
+  'auth.customerRefused': 'This is the MJM Nursery staff system. Customer accounts cannot sign in here. Please use the MJM Nursery shop at https://www.mjmnursery.com',
+  'auth.uncheckedAccount': 'We could not check your account just now. Please check your connection and try again.',
+  'auth.tryAgain': 'Try again',
+  'auth.backToSignIn': 'Back to sign in',
   'auth.fullName': 'Full Name',
   'auth.email': 'Email Address',
   'auth.password': 'Password',
@@ -324,6 +328,27 @@ const en = {
   'tp.lockedTitle': 'Saved — cannot be changed',
   'tp.lockedHint': 'This record is what the payroll pays the month on. To change it, ask for Edit transplanting record on your access.',
   'tp.correcting': 'Correcting a record saved {d}. Saving replaces what is there.',
+  /* NOBODY DID THIS JOB — an answer, not a gap. A blanket spray is not
+     always needed, so a plot can genuinely never have one, and without a way
+     to say so that plot owes four jobs for ever. */
+  'tp.notDoneBtn': 'This job was not done',
+  'tp.notDoneTag': 'Not done',
+  'tp.notDoneWho': 'Nobody did this job',
+  'tp.allAnswered': 'answered',
+  'tp.notDoneConfirmTitle': 'Record as not done',
+  'tp.notDoneConfirm': '{j} was not done on {p} and nobody is to be paid for it.',
+  'tp.notDoneConfirmHint': 'It is recorded with your name and today’s date, so the plot stops asking for it. If the work is done later, open this job again and tick the crew. Seedlings arriving in a new batch will ask again.',
+  'tp.notDoneGo': 'Yes, not done',
+  'tp.notDoneTitle': 'Recorded as not done',
+  'tp.notDoneLockedHint': 'Nobody did this job and nobody is paid for it. To put that right, ask for Edit transplanting record on your access.',
+  'tp.undoNotDone': 'This job is recorded as not done ({d}). Ticking a crew here says it was done after all, and it goes back onto the salary claim.',
+  'tp.notDoneSetup': 'This database cannot record “not done” yet. Ask the office to run shared/RUN_ME_transplant_not_done.sql in Supabase. Nothing has been saved.',
+  /* A SECOND DELIVERY IS A SECOND CREW. The figure on screen is what the
+     outstanding batch brought, never the plot lifetime total -- that is
+     what the people ticked here are paid on. */
+  'tp.owesBatch': 'Batch {b} not recorded yet \u2014 {n} seedlings',
+  'tp.priorBatch': 'Batch {b} ({n}) was recorded {d} \u2014 {w}. This is a NEW record for the delivery above, and does not change theirs.',
+  'tp.monthTaken': 'This job already has a record in {m} \u2014 batch {b}, {d}. Two deliveries cannot share one month on one job. Key the day the work was really done, so it is paid in its own month.',
   'mt.tapToRecord': 'Tap a job to record it',
   'mt.weekTally': '{done} of {n} done',
   'mt.verifyHub': 'Verify Work Done',
@@ -444,6 +469,14 @@ const en = {
   'vrf.transplanting': 'Transplanting',
   'vrf.pickWorkers': 'Pick workers',
   'vrf.openSheet': 'Record jobs',
+  /* A plot the ledger transplanted into that is on no nursery list.
+     It is raised rather than dropped -- it owes four jobs and they
+     are somebody pay -- and the card says the one thing that fixes
+     it, because the sheet cannot be filled without a nursery. */
+  'vrf.noNursery': 'On no nursery list',
+  /* The batch that has arrived and has no record of these four jobs
+     against it -- the plot own earlier batches are recorded. */
+  'vrf.addPlotFirst': 'Add this plot in Seedling Stock',
   'vrf.allDone': 'Nothing to verify',
   'vrf.prev': 'Previous',
   'vrf.next': 'Next',
@@ -910,6 +943,10 @@ const ms = {
   // auth
   'auth.portal': 'Portal FC',
   'auth.noAccess': 'Akaun anda belum mempunyai akses operasi. Sila hubungi admin.',
+  'auth.customerRefused': 'Ini ialah sistem kakitangan MJM Nursery. Akaun pelanggan tidak boleh log masuk di sini. Sila gunakan kedai MJM Nursery di https://www.mjmnursery.com',
+  'auth.uncheckedAccount': 'Kami tidak dapat menyemak akaun anda sekarang. Sila semak sambungan anda dan cuba lagi.',
+  'auth.tryAgain': 'Cuba lagi',
+  'auth.backToSignIn': 'Kembali ke log masuk',
   'auth.fullName': 'Nama Penuh',
   'auth.email': 'Alamat E-mel',
   'auth.password': 'Kata Laluan',
@@ -1176,6 +1213,21 @@ const ms = {
   'tp.lockedTitle': 'Sudah disimpan \u2014 tidak boleh diubah',
   'tp.lockedHint': 'Rekod ini yang menentukan gaji bulan ini. Untuk mengubahnya, minta akses Edit rekod menanam.',
   'tp.correcting': 'Membetulkan rekod yang disimpan {d}. Simpan akan menggantikan yang sedia ada.',
+  'tp.notDoneBtn': 'Kerja ini tidak dibuat',
+  'tp.notDoneTag': 'Tidak dibuat',
+  'tp.notDoneWho': 'Tiada sesiapa buat kerja ini',
+  'tp.allAnswered': 'dijawab',
+  'tp.notDoneConfirmTitle': 'Rekod sebagai tidak dibuat',
+  'tp.notDoneConfirm': '{j} tidak dibuat di {p} dan tiada sesiapa dibayar untuknya.',
+  'tp.notDoneConfirmHint': 'Ia direkod dengan nama anda dan tarikh hari ini, jadi plot ini tidak bertanya lagi. Jika kerja dibuat kemudian, buka kerja ini semula dan tanda pekerjanya. Anak benih batch baharu akan bertanya semula.',
+  'tp.notDoneGo': 'Ya, tidak dibuat',
+  'tp.notDoneTitle': 'Direkod sebagai tidak dibuat',
+  'tp.notDoneLockedHint': 'Tiada sesiapa buat kerja ini dan tiada sesiapa dibayar. Untuk membetulkannya, minta akses Edit rekod menanam.',
+  'tp.undoNotDone': 'Kerja ini direkod sebagai tidak dibuat ({d}). Menanda pekerja di sini bermakna kerja itu ada dibuat, dan ia kembali ke tuntutan gaji.',
+  'tp.notDoneSetup': 'Pangkalan data ini belum boleh merekod “tidak dibuat”. Minta pejabat jalankan shared/RUN_ME_transplant_not_done.sql di Supabase. Tiada apa-apa disimpan.',
+  'tp.owesBatch': 'Batch {b} belum direkod \u2014 {n} anak benih',
+  'tp.priorBatch': 'Batch {b} ({n}) telah direkod {d} \u2014 {w}. Ini rekod BAHARU untuk penghantaran di atas, dan tidak mengubah rekod mereka.',
+  'tp.monthTaken': 'Kerja ini sudah ada rekod dalam {m} \u2014 batch {b}, {d}. Dua penghantaran tidak boleh berkongsi satu bulan bagi satu kerja. Masukkan tarikh kerja itu benar-benar dibuat, supaya ia dibayar dalam bulannya sendiri.',
   'mt.tapToRecord': 'Tekan kerja untuk merekod',
   'mt.weekTally': '{done} daripada {n} siap',
   'mt.verifyHub': 'Sahkan Kerja Selesai',
@@ -1296,6 +1348,8 @@ const ms = {
   'vrf.transplanting': 'Pemindahan Bibit',
   'vrf.pickWorkers': 'Pilih pekerja',
   'vrf.openSheet': 'Rekod kerja',
+  'vrf.noNursery': 'Tiada dalam senarai nurseri',
+  'vrf.addPlotFirst': 'Tambah plot ini di Seedling Stock',
   'vrf.allDone': 'Tiada untuk disahkan',
   'vrf.prev': 'Sebelum',
   'vrf.next': 'Seterusnya',

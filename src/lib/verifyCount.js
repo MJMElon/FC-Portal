@@ -15,11 +15,20 @@ import {
   loadTransplantingSince,
   TRANSPLANT_SETUP_NEEDED,
 } from '../modules/maintenance/transplantData.js';
-import { doNeedsWorkers, LOADING_WORKERS_FROM, plotsOwingJobs } from '../components/verify/pending.js';
+import { doIsMine, doNeedsWorkers, LOADING_WORKERS_FROM, plotsOwingJobs } from '../components/verify/pending.js';
 
-/* A delivery order whose loading gang was never named. Fails soft to an
-   empty list: this exists to RAISE work, and raising none is better than
-   raising a wrong one over a read that failed. */
+/* A delivery order whose loading gang was never named, SCOPED to the
+   conductor own nurseries the way the transplanting half beside it always
+   has been -- the office asked for the two halves to agree: *"BNN acc 只看
+   到 BNN 的 plot, UNN1 只看到 UNN1 的 plot"*. The rule itself is
+   `doIsMine` in verify/pending.js, where a test can drive it.
+
+   SCOPED HERE AND NOT IN THE CARD, because this one read feeds both the
+   dock badge and the board. Narrowing the cards alone would badge the icon
+   with a number nobody could find anything behind.
+
+   Fails soft to an empty list: this exists to RAISE work, and raising none
+   is better than raising a wrong one over a read that failed. */
 export async function loadPendingDOs(permissions) {
   if (!canDo(permissions, 'view')) return { dos: [], plotMap: {}, workers: [] };
   try {
@@ -30,7 +39,17 @@ export async function loadPendingDOs(permissions) {
     ]);
     const plotMap = {};
     (plots || []).forEach((p) => { plotMap[p.plot_name] = p.nursery_name; });
-    return { dos: (rows || []).filter(doNeedsWorkers), plotMap, workers: ws || [] };
+    /* The DO page's OWN nursery list, not maintenance's -- they are two
+       doors and the office may well narrow one and not the other. Absent
+       is every nursery, because access fails open. */
+    const allowed = allowedNurseries(permissions, 'do');
+    return {
+      dos: (rows || [])
+        .filter(doNeedsWorkers)
+        .filter((d) => doIsMine(d, plotMap, allowed)),
+      plotMap,
+      workers: ws || [],
+    };
   } catch (e) {
     return { dos: [], plotMap: {}, workers: [] };
   }
@@ -52,8 +71,13 @@ export async function loadPendingTransplants(permissions) {
     if (!names.length) return [];
 
     const nurseries = [...new Set(mine.map((p) => p.nursery_name).filter(Boolean))];
+    /* EVERY plot Seedling Stock lists, not only this conductor own, so the
+       read can tell "another nursery plot" from "a plot on NO list". The
+       first is correctly not his; the second is on nobody board at all,
+       with its four jobs owed and nobody ever asked to record them. */
+    const everyPlot = (plots || []).map((p) => p.plot_name).filter(Boolean);
     const [rows, ...recsPer] = await Promise.all([
-      loadTransplantingSince(names),
+      loadTransplantingSince(names, undefined, everyPlot),
       ...nurseries.map((n) => loadTransplantRecords(n).catch((e) => {
         if (e && e.message === TRANSPLANT_SETUP_NEEDED) return [];
         throw e;
@@ -65,7 +89,10 @@ export async function loadPendingTransplants(permissions) {
     return plotsOwingJobs(rows, recs).map((r) => ({
       ...r,
       nursery: nurseryOf[r.plot] || '',
-      plotNames: mine
+      /* A plot on no nursery list has no sheet to open: TransplantSheet
+         loads and saves BY NURSERY, so opening one would file the crew
+         under no nursery at all. The card says what to do instead. */
+      plotNames: r.unplaced ? [] : mine
         .filter((p) => nurseryKey(p.nursery_name) === nurseryKey(nurseryOf[r.plot] || ''))
         .map((p) => p.plot_name),
     }));

@@ -27,6 +27,18 @@ import { fetchAllRows, supabase } from '../../lib/supabase.js';
 /** Raised when the table has not been created yet. */
 export const TRANSPLANT_SETUP_NEEDED = 'TRANSPLANT_SETUP_NEEDED';
 
+/* Raised when the table is there and the NOT DONE column is not. Kept apart
+   from the one above because the answer is a different file to run, and
+   because the two errors read alike: PostgREST says "could not find the
+   'not_done' column ... in the schema cache" for a missing column and
+   "could not find the table ... in the schema cache" for a missing table,
+   and `missingTable` below matches "schema cache". A missing column tested
+   second would be reported as a missing table. */
+export const TRANSPLANT_NOT_DONE_SETUP_NEEDED = 'TRANSPLANT_NOT_DONE_SETUP_NEEDED';
+
+/** Was this job answered with "nobody did it"? */
+export const isNotDone = (rec) => !!(rec && rec.not_done);
+
 const TABLE = 'nops_transplant_field_records';
 
 /* ONE type, because this screen answers to the Transplanting Report and that
@@ -182,9 +194,21 @@ export function asksDate(today) {
  *
  * @returns {Promise<Array<{plot, batches:string[], batch:string, qty:number, last:string}>>}
  */
-export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_FROM) {
+export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_FROM, knownPlots) {
   const allowed = new Set((plotNames || []).map(plotKey));
   if (!allowed.size) return [];
+  /* A PLOT SEEDLING STOCK CANNOT PLACE MUST NOT VANISH.
+     `allowed` is the plots of THIS conductor nurseries, so a ledger plot
+     outside it is one of two completely different things: another
+     nursery plot, which is correctly not his, or a plot that is on NO
+     nursery list at all -- which is nobody plot, on nobody board, with
+     four jobs owed and nobody ever asked to record them. That is
+     somebody pay dropped on the floor, and it is the exact fault the DO
+     half of this board already has a rule about.
+     `knownPlots` is every plot Seedling Stock lists ANYWHERE. Given it,
+     the two can be told apart and the unplaceable one is kept, marked.
+     Not given it, this behaves exactly as it always did. */
+  const known = knownPlots ? new Set(knownPlots.map(plotKey)) : null;
 
   /* A row with no transaction_date is kept and dated below, by the report's
      own rule. Narrowing in the query alone would drop exactly those rows —
@@ -201,16 +225,30 @@ export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_F
   const byPlot = new Map();
   (res.data || []).forEach((r) => {
     const k = plotKey(r.plot_name);
-    if (!allowed.has(k)) return;
+    const unplaced = !!known && !allowed.has(k) && !known.has(k);
+    if (!allowed.has(k) && !unplaced) return;
     const when = logDate(r);
     // Undated by every rule: it cannot be placed, so it is not placed.
     if (!when || when < from) return;
     const qty = Math.abs(Number(r.quantity_change || 0));
     if (!qty) return;
-    const cur = byPlot.get(k) || { plot: String(r.plot_name || '').trim(), batches: [], qty: 0, last: '' };
+    const cur = byPlot.get(k)
+      || { plot: String(r.plot_name || '').trim(), batches: [], qty: 0, last: '',
+           unplaced, byBatch: {} };
     cur.qty += qty;
     const b = String(r.batch_name || '').trim();
     if (b && !cur.batches.includes(b)) cur.batches.push(b);
+    /* WHAT EACH DELIVERY BROUGHT, kept apart as well as summed.
+       `qty` is every arrival since the floor, which is the right figure
+       for a plot nobody has recorded anything for. It is the WRONG figure
+       for a plot coming back because a second delivery arrived: B11 took
+       3,168 in September and 135 more in October, and the card offered
+       3,303 — which is what the next crew would have been PAID for having
+       moved 135 seedlings. The office said it in one line: *"之前3168记录
+       了就记录了 这次的135 不要combine起来"*.
+       Keyed on the batch name as the ledger spells it, which is what
+       `batches` carries and what a record is matched by. */
+    cur.byBatch[b] = (cur.byBatch[b] || 0) + qty;
     if (!cur.last || when > cur.last) cur.last = when;
     byPlot.set(k, cur);
   });
@@ -227,6 +265,12 @@ export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_F
 function missingTable(error) {
   const m = String((error && error.message) || '');
   return /relation .* does not exist|Could not find the table|schema cache/i.test(m);
+}
+
+/* The NOT DONE column is not on this database. Asked BEFORE missingTable,
+   which matches "schema cache" and would answer yes to this as well. */
+function missingNotDoneColumn(error) {
+  return /not_done/i.test(String((error && error.message) || ''));
 }
 
 /** Every transplanting job already recorded for this nursery and month. */
@@ -299,16 +343,39 @@ export async function saveTransplantRecord(rec) {
     schedule_month: rec.month,
     source_qty:     rec.sourceQty == null ? null : Number(rec.sourceQty),
     workers,
-    total_qty:      job && job.split ? total : null,
+    total_qty:      job && job.split && !rec.notDone ? total : null,
     remark:         rec.remark || null,
     reported_by:    rec.reportedBy || null,
     updated_at:     new Date().toISOString(),
   };
 
+  /* THE DECISION IS A COLUMN, NEVER THE REMARK.
+     A job that is genuinely never going to be done -- a blanket spray on a
+     plot where the grass never came -- is answered with "nobody did it", and
+     that answer has to be a record: without one the plot owes four jobs for
+     ever and sits on the Pending Verification board with nothing anybody can
+     do about it. The remark is free text the office edits, and a decision
+     that can be undone by somebody tidying a sentence is not a record of
+     anything -- the same reason a rejected signup is two columns and not a
+     remark.
+     THE FLAG IS SENT ONLY BY CODE THAT KNOWS ABOUT IT. `notDone` left
+     undefined omits the key, so every caller from before this existed writes
+     exactly the row it always wrote and goes on working on a database that
+     has not had RUN_ME_transplant_not_done.sql run. Passing it FALSE is how
+     a not-done record is turned back into a real one, so that has to be
+     sent as well. */
+  if (rec.notDone !== undefined) row.not_done = !!rec.notDone;
+
   const { error } = rec.id
     ? await supabase.from(TABLE).update(row).eq('id', rec.id)
     : await supabase.from(TABLE).upsert(row, { onConflict: 'plot_name,work_type,schedule_month' });
   if (error) {
+    /* IT REFUSES RATHER THAN WRITING THE ROW WITHOUT THE FLAG. Dropping it
+       would store a record naming nobody, which every office screen reads as
+       a crew somebody forgot to fill in -- "names nobody, go and add who did
+       the work" about a job nobody is ever going to do. The job staying
+       unrecorded is the truth, and the message says which file to run. */
+    if (missingNotDoneColumn(error)) throw new Error(TRANSPLANT_NOT_DONE_SETUP_NEEDED);
     if (missingTable(error)) throw new Error(TRANSPLANT_SETUP_NEEDED);
     throw error;
   }
