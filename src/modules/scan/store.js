@@ -298,11 +298,23 @@ export function applyIssuedShares(prev, cards, shares, queuedALs) {
     const local = cur.issuedQty || 0;
     if (local === share) return;
     if (local > share && queuedALs && queuedALs.has(c.al_number)) return;
-    map[c.id] = { ...cur, issuedQty: share, doIssued: share > 0 };
-    if (share > 0) {
+    /* doIssued means this card's own qty is FULLY out, not merely that
+       something is — see the long comment on mergeConsents' own read of
+       it. A share smaller than the card's qty (the AL's total DO-issued
+       split oldest-first, same as everywhere else here) still leaves a
+       balance on it. */
+    const fullyIssued = share > 0 && share >= (c.qty || 0);
+    map[c.id] = { ...cur, issuedQty: share, doIssued: fullyIssued };
+    if (fullyIssued) {
+      /* A merged card's other members never get their own issuedQty —
+         everything is tracked under the anchor's id above. Stamping the
+         GROUP's full qty onto them here (never their own smaller share of
+         it, which this function has no way to know) is what lets
+         mergeConsents' self-heal trust a member's doIssued on its own,
+         without re-deriving the whole group's history to check it. */
       (c.memberIds || [c.id]).forEach((id) => {
         if (id === c.id) return;
-        map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+        map[id] = { ...(map[id] || defaultProgress()), doIssued: true, issuedQty: c.qty || 0 };
       });
     }
     changed = true;
@@ -340,13 +352,36 @@ export function statusOf(c) {
 // resync. memberIds carries every row in the group, for fetchScanRecords /
 // subscribeScanRecords to read scans already filed against any of them —
 // a scan does not go looking for a NEW row somebody just signed.
+/* Live, not the stored doIssued flag alone: a row — or, read as a card's
+   own qty, a merged group — counts as fully out only once what was
+   actually issued REACHES what it was for, checked fresh every time
+   rather than trusted from a flag that can be stale. Both writers
+   (onDoSaved, applyIssuedShares) only ever set doIssued once this is
+   already true, but a phone can still be holding an older saved copy of
+   a row marked true on less than that, from before that was fixed — this
+   is what lets it read correctly again without a round trip through a
+   correct writer first. */
+function fullyOut(qty, p) {
+  const out = (p && p.issuedQty) || 0;
+  return out > 0 && out >= (qty || 0);
+}
+
 export function mergeConsents(serverList, progress) {
   const rows = (serverList || []).filter((s) => s.customer_name);
 
   const groups = new Map(); // al_number -> rows[], only not-yet-issued ones
   const singles = [];
   rows.forEach((s) => {
-    const issued = !!(progress[s.id] || {}).doIssued;
+    /* A row can carry doIssued:true from a PARTIAL issue — a DO for less
+       than its own consent_qty, or an AL-wide DO total split across cards
+       (issuedShares) that did not reach this one's own qty. Trusting the
+       flag alone split a merged group apart the moment ANY amount went
+       out on one member, so a second consent for the rest of the order
+       could never rejoin it — N2T596 read Qty 600 forever on a 1,200
+       order with 750 still on the ground, because its first 600 consent
+       had 450 go out against it and was never seen whole again. */
+    const p = progress[s.id] || {};
+    const issued = !!p.doIssued && fullyOut(s.consent_qty, p);
     if (s.al_number && !issued) {
       if (!groups.has(s.al_number)) groups.set(s.al_number, []);
       groups.get(s.al_number).push(s);
@@ -360,13 +395,14 @@ export function mergeConsents(serverList, progress) {
     members.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
     const anchor = members[0];
     const p = progress[anchor.id] || defaultProgress();
+    const qty = members.reduce((sum, m) => sum + (m.consent_qty || 0), 0);
     cards.push({
       id: anchor.id,
       memberIds: members.map((m) => m.id),
       al_number: anchor.al_number || '',
       order_number: anchor.order_number || '',
       customer: anchor.customer_name || anchor.al_number || '—',
-      qty: members.reduce((sum, m) => sum + (m.consent_qty || 0), 0),
+      qty,
       ref: anchor.al_number || '',
       createdAt: anchor.created_at ? new Date(anchor.created_at).getTime() : 0,
       seen: p.seen || [],
@@ -375,7 +411,13 @@ export function mergeConsents(serverList, progress) {
       over: p.over || 0,
       completedFired: !!p.completedFired,
       overFired: !!p.overFired,
-      doIssued: !!p.doIssued,
+      // Live, same as the grouping test above — not the raw flag, which
+      // applyIssuedShares can leave stale when a recomputed share happens
+      // to numerically match what was already stored (see its own "local
+      // === share" short-circuit). onList's filter is already safe either
+      // way (it ORs this with issuedQty < qty), but a card should not say
+      // something its own numbers do not.
+      doIssued: fullyOut(qty, p),
       issuedQty: p.issuedQty || 0,
       doSeals: Array.isArray(p.doSeals) ? p.doSeals : null,
     });
@@ -398,7 +440,7 @@ export function mergeConsents(serverList, progress) {
       over: p.over || 0,
       completedFired: !!p.completedFired,
       overFired: !!p.overFired,
-      doIssued: !!p.doIssued,
+      doIssued: fullyOut(s.consent_qty, p),
       issuedQty: p.issuedQty || 0,
       doSeals: Array.isArray(p.doSeals) ? p.doSeals : null,
     });

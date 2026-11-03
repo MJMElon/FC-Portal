@@ -592,7 +592,7 @@ export default function ScanModule() {
        SUGGESTION the conductor may key over, and binding a delivery order
        to a figure no scanner ever saw would be the opposite of the rule. */
     const scannedQty = newScans > 0 ? newScans : 0;
-    setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
+    setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, consentQty: consent.qty || 0, memberIds: consent.memberIds || [consent.id] });
   }
 
   /* THE SEALS THAT WENT OUT ON THIS DO: everything scanned on the card
@@ -625,6 +625,7 @@ export default function ScanModule() {
   function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     const al = doEntry?.al || {};
     const consentId = doEntry?.consentId;
+    const consentQty = doEntry?.consentQty || 0;
     const memberIds = doEntry?.memberIds || (consentId ? [consentId] : []);
     const sealsOut = doSealsRef.current && doSealsRef.current.consentId === consentId ? doSealsRef.current.codes : [];
     doSealsRef.current = null;
@@ -634,22 +635,38 @@ export default function ScanModule() {
         /* Marked as gone whether or not the DO could name them -- they went
            out on this lorry either way, and must not reappear on the next. */
         const cur = markSealsOnDO(prev[consentId] || defaultProgress(), sealsOut);
+        const issuedQty = (cur.issuedQty || 0) + (payload.total_qty || 0);
+        /* doIssued means FINISHED — every bit of this card's own qty has
+           gone out — not merely "something has". A DO for PART of a card
+           (450 of its own 600, say) used to mark it doIssued:true all the
+           same, which is exactly what mergeConsents reads as "a genuinely
+           separate, finished collection" and excludes from grouping — so a
+           second consent signed for the rest of the order could never
+           rejoin this one, and the 150 still owed on this card alone was
+           the only thing anyone could scan for. See the long comment in
+           mergeConsents. */
+        const fullyIssued = consentQty > 0 && issuedQty >= consentQty;
         const map = {
           ...prev,
           [consentId]: {
             ...cur,
-            doIssued: true,
-            issuedQty: (cur.issuedQty || 0) + (payload.total_qty || 0),
+            doIssued: fullyIssued,
+            issuedQty,
           },
         };
         // A merged card's OTHER member rows carry no progress of their own
         // (all scans and the issuedQty live under the anchor id above) — but
         // they still need doIssued so mergeConsents stops treating them as
-        // open and folding them back into a fresh group next load.
-        memberIds.forEach((id) => {
-          if (id === consentId) return;
-          map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-        });
+        // open and folding them back into a fresh group next load, once the
+        // WHOLE group (not just this one DO) is actually finished. Stamped
+        // with the GROUP's own qty, not a share of it this function has no
+        // way to know — see the matching comment in applyIssuedShares.
+        if (fullyIssued) {
+          memberIds.forEach((id) => {
+            if (id === consentId) return;
+            map[id] = { ...(map[id] || defaultProgress()), doIssued: true, issuedQty: consentQty };
+          });
+        }
         saveProgress(map);
         return map;
       });
