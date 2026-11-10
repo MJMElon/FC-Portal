@@ -241,7 +241,15 @@ export async function saveDORecord(payload, al) {
   if (error) throw error;
   if (al && al.id != null) {
     const newBalance = (al.balance_quantity ?? 0) - (payload.total_qty || 0);
-    await supabase.from('shared_al_orders').update({ balance_quantity: newBalance }).eq('id', al.id);
+    // The DO row is IN the table by this line. A network blip on the balance
+    // deduct must not throw the whole save back to persistDO's catch — that
+    // queues the DO and the next flush inserts it a SECOND time. A missed
+    // deduct is the smaller fault: issuedQtyByAL derives the collected figure
+    // from the DO rows themselves, so the balance heals on the next read that
+    // recomputes it, while a doubled DO row is a doubled collection for good.
+    try {
+      await supabase.from('shared_al_orders').update({ balance_quantity: newBalance }).eq('id', al.id);
+    } catch (e) { /* deduct lost to a blip — the DO itself is saved */ }
     return { row, balance: newBalance };
   }
   return { row, balance: null };
@@ -300,8 +308,20 @@ export async function persistDO({ payload, photoBase64, al, sigDataUrl, staff })
   if (navigator.onLine) {
     try {
       const finalPayload = { ...payload };
-      if (photoBase64) finalPayload.image_url = await uploadDOPhoto(photoBase64, al.al_number, payload.do_number);
-      if (sigDataUrl) finalPayload.signature_url = await uploadDOSignature(sigDataUrl, al.al_number, payload.do_number);
+      // THE NUMBER IS CLAIMED AT SAVE, never trusted from the form. The Entry
+      // modal generates its DO number when it OPENS, and the insert happens
+      // minutes later — so a second save out of the same session (a figure
+      // corrected and Save pressed again), or a modal opened before the
+      // previous insert landed, wrote a SECOND row under the SAME number, and
+      // the office DO list showed one DO twice (DO-MUGJB901, 5 Nov: qty 13 at
+      // 06:31 and qty 47 at 06:33). Re-deriving here means the generator can
+      // see every row already in the table, the one on screen included. The
+      // number on the modal is a preview; the row, the PDF and onSaved all
+      // carry this one. A generate that cannot answer keeps the preview
+      // number rather than losing the save over it.
+      try { finalPayload.do_number = await generateDONumber(al); } catch (e) { /* keep the preview number */ }
+      if (photoBase64) finalPayload.image_url = await uploadDOPhoto(photoBase64, al.al_number, finalPayload.do_number);
+      if (sigDataUrl) finalPayload.signature_url = await uploadDOSignature(sigDataUrl, al.al_number, finalPayload.do_number);
       const { row } = await saveDORecord(finalPayload, al);
       await attachDOToOrder({ payload: finalPayload, al, staff, sigDataUrl, photoBase64 });
       return { queued: false, payload: finalPayload, savedRow: row || null };
@@ -368,6 +388,26 @@ export async function flushDOQueue() {
       // a unique number.
       if (payload.do_number && /OFF/i.test(payload.do_number)) {
         payload.do_number = await generateDONumber(alRow || { al_number: payload.al_number });
+      } else if (payload.do_number) {
+        // A queued DO with a REAL number is usually one whose insert landed
+        // and whose acknowledgement was lost — a timeout is not a refusal
+        // (the audit outbox learned this the hard way). Inserting it again is
+        // the second copy the office sees on the DO list. So the table is
+        // asked first: the same DO already there (same number, order, day and
+        // quantity) is retired as synced; a DIFFERENT row wearing this number
+        // means the number was taken while this one waited, and the queued DO
+        // gets the next free number instead of a twin.
+        const { data: existing } = await supabase
+          .from('shared_do_records')
+          .select('id, total_qty, delivery_date')
+          .eq('do_number', payload.do_number)
+          .eq('al_number', payload.al_number);
+        const sameRow = (existing || []).some((r) =>
+          Number(r.total_qty) === Number(payload.total_qty) && r.delivery_date === payload.delivery_date);
+        if (sameRow) { synced++; continue; }
+        if ((existing || []).length) {
+          payload.do_number = await generateDONumber(alRow || { al_number: payload.al_number });
+        }
       }
       if (item.photoBase64) {
         payload.image_url = await uploadDOPhoto(item.photoBase64, payload.al_number, payload.do_number);
