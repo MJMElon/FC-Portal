@@ -124,6 +124,37 @@ export default function SecondCullCard({ allowed, online }) {
   );
 
   const doneCount = SECOND_CULL_NURSERIES.filter((n) => doneRows[n]).length;
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState(null); // [{ month, done: {nursery: row}, caseOpened }]
+
+  useEffect(() => {
+    if (!showHistory || history) return;
+    (async () => {
+      try {
+        const [doneRes, caseRes] = await Promise.all([
+          supabase.from('nops_2nd_cull_nursery').select('*').order('month', { ascending: false }).limit(500),
+          supabase.from('nops_2nd_cull_case').select('*').order('month', { ascending: false }).limit(120),
+        ]);
+        if (doneRes.error) throw doneRes.error;
+        if (caseRes.error) throw caseRes.error;
+        const byMonth = new Map();
+        const slot = (m) => {
+          if (!byMonth.has(m)) byMonth.set(m, { month: m, done: {}, caseOpened: false });
+          return byMonth.get(m);
+        };
+        for (const r of doneRes.data || []) {
+          if (allowed && !allowed.has(r.nursery)) continue;
+          slot(r.month).done[r.nursery] = r;
+        }
+        for (const c of caseRes.data || []) slot(c.month).caseOpened = true;
+        setHistory([...byMonth.values()].sort((x, y) => (x.month < y.month ? 1 : -1)));
+      } catch (e) {
+        setError(String(e?.message || e));
+        setShowHistory(false);
+      }
+    })();
+  }, [showHistory, history, allowed]);
+
 
   async function markDone(nursery) {
     if (busy || !online || doneRows[nursery]) return;
@@ -182,6 +213,12 @@ export default function SecondCullCard({ allowed, online }) {
       ? 'Pending drone flight'
       : 'Pending workdone';
 
+  // Once the month's case is open, the month is finished for this card: its
+  // nursery blocks leave and the card keeps only a line that says so, with the
+  // history one press away. A nursery's own block also leaves once its FC has
+  // pressed done.
+  const finished = !!caseRow;
+
   return (
     <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -189,7 +226,15 @@ export default function SecondCullCard({ allowed, online }) {
           <div className="text-[13px] font-black text-slate-800">2nd Cull · Pusing Polibeg</div>
           <div className="text-[11px] font-bold text-slate-400">{monthLabel(month)}</div>
         </div>
-        <div className="text-[11px] font-black uppercase tracking-widest text-slate-600">{status}</div>
+        <div className="flex flex-col items-end gap-1">
+          <div className="text-[11px] font-black uppercase tracking-widest text-slate-600">{status}</div>
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            className="text-[10px] font-black uppercase tracking-widest text-emerald-700"
+          >
+            {showHistory ? 'Hide history' : 'History'}
+          </button>
+        </div>
       </div>
 
       {!online && (
@@ -205,16 +250,13 @@ export default function SecondCullCard({ allowed, online }) {
         <div className="text-[12px] font-bold text-slate-400">Loading…</div>
       )}
 
-      {due && visible.map((n) => {
+      {due && !finished && visible.filter((n) => !doneRows[n]).map((n) => {
         const list = plotsOf(due.items[n]);
-        const done = doneRows[n];
         return (
           <div key={n} className="rounded-xl border border-slate-200 p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div className="text-[12px] font-black text-slate-700">{n}</div>
-              <div className={`text-[10px] font-black uppercase tracking-widest ${done ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {done ? `Done by ${done.done_by || '—'}` : 'Pending workdone'}
-              </div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-amber-600">Pending workdone</div>
             </div>
 
             {list.length === 0 ? (
@@ -232,16 +274,50 @@ export default function SecondCullCard({ allowed, online }) {
 
             <button
               onClick={() => markDone(n)}
-              disabled={!online || busy || !!done}
+              disabled={!online || busy}
               className="w-full rounded-xl py-2.5 font-black text-[11px] uppercase tracking-widest bg-emerald-600 text-white disabled:bg-slate-200 disabled:text-slate-500"
             >
-              {done ? '2nd cull done' : busy ? 'Saving…' : '2nd cull done'}
+              {busy ? 'Saving…' : '2nd cull done'}
             </button>
           </div>
         );
       })}
 
+      {due && !finished && visible.length > 0 && visible.every((n) => doneRows[n]) && (
+        <div className="text-[12px] font-bold text-slate-500">
+          Done for your nursery. Waiting for the other nurseries.
+        </div>
+      )}
+
+      {showHistory && (
+        <div className="border-t border-slate-200 pt-3 space-y-3">
+          <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">History</div>
+          {!history && <div className="text-[12px] font-bold text-slate-400">Loading…</div>}
+          {history && history.length === 0 && (
+            <div className="text-[12px] font-bold text-slate-400">No 2nd cull has been recorded yet.</div>
+          )}
+          {history && history.map((h) => (
+            <div key={h.month} className="rounded-xl border border-slate-200 p-3 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[12px] font-black text-slate-700">{monthLabel(h.month)}</div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  {h.caseOpened ? 'Drone flight requested' : 'Not finished'}
+                </div>
+              </div>
+              {visible.map((n) => (
+                <div key={n} className="text-[11px] text-slate-600">
+                  <span className="font-black">{n}</span>
+                  <span className="text-slate-400">
+                    {' · '}{h.done[n]
+                      ? `done by ${h.done[n].done_by || '—'} on ${String(h.done[n].done_at || '').slice(0, 10)}`
+                      : 'not done'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
-
