@@ -592,10 +592,26 @@ export function markSealsOnDO(p, codes) {
 
 // Persist a single scan event. ON CONFLICT DO NOTHING → unique(consent_id, barcode)
 // prevents double-counting when two devices scan the same seal.
-export async function insertScanRecord(consentId, alNumber, barcode) {
-  const { error } = await supabase
-    .from('fcportal_scan_records')
-    .insert({ consent_id: consentId, al_number: alNumber, barcode });
+/* KEYED BY HAND rides on the row, so Seal Manage can show a seal typed on
+   the Add dialog in red beside the ones the camera read. Sent ONLY for a typed
+   seal: a scanned one writes exactly the row it always wrote. A database that
+   has not had shared/RUN_ME_scan_keyed_by_hand.sql run refuses the WHOLE row
+   over a column it has not got, so a refusal that NAMES the column drops it,
+   is remembered for the session, and the same row goes again at once -- the
+   seal is never lost over the mark. Any other refusal is not that answer. */
+let _noKeyedCol = false;
+const _namesKeyedCol = (e) => !!e && /keyed_by_hand/.test(String(e.message || '') + ' ' + String(e.details || ''))
+  && (e.code === '42703' || e.code === 'PGRST204' || /column/i.test(String(e.message || '')));
+
+export async function insertScanRecord(consentId, alNumber, barcode, typed) {
+  const row = { consent_id: consentId, al_number: alNumber, barcode };
+  if (typed && !_noKeyedCol) row.keyed_by_hand = true;
+  let { error } = await supabase.from('fcportal_scan_records').insert(row);
+  if (error && row.keyed_by_hand && _namesKeyedCol(error)) {
+    _noKeyedCol = true;
+    delete row.keyed_by_hand;
+    ({ error } = await supabase.from('fcportal_scan_records').insert(row));
+  }
   if (error && error.code !== '23505') throw error; // 23505 = unique_violation (safe to ignore)
 }
 
@@ -612,12 +628,12 @@ export async function insertScanRecord(consentId, alNumber, barcode) {
  */
 export const SCAN_JOB = 'scan_record';
 
-export async function saveScanRecord(consentId, alNumber, barcode) {
+export async function saveScanRecord(consentId, alNumber, barcode, typed) {
   try {
-    await insertScanRecord(consentId, alNumber, barcode);
+    await insertScanRecord(consentId, alNumber, barcode, typed);
   } catch (e) {
     if (looksOffline(e)) {
-      await queueJob(SCAN_JOB, { consentId, alNumber, barcode });
+      await queueJob(SCAN_JOB, { consentId, alNumber, barcode, typed: !!typed });
       return;
     }
     // The server refused it for a reason of its own; the local progress
@@ -629,7 +645,7 @@ export function flushScanRecords() {
   return flushOutbox({
     [SCAN_JOB]: async (p) => {
       try {
-        await insertScanRecord(p.consentId, p.alNumber, p.barcode);
+        await insertScanRecord(p.consentId, p.alNumber, p.barcode, p.typed);
       } catch (e) {
         if (looksOffline(e)) throw e;      // try again later
         throw new Error(PERMANENT);        // the server refused the row itself

@@ -46,6 +46,9 @@ import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibra
 import Icon from '../../components/Icon.jsx';
 import { numText } from '../../lib/numberText.js';
 
+/* A seal number keyed by hand on the Add dialog is exactly this many digits. */
+const MANUAL_SEAL_DIGITS = 6;
+
 const DEDUPE_DEBOUNCE_MS = 800;
 const OVER_REPEAT_MS = 1200;
 
@@ -429,7 +432,7 @@ export default function ScanModule() {
       // Write to server so other devices see this scan in real time. With no
       // line it QUEUES instead of being skipped — see saveScanRecord — so the
       // other phones hear about it when the line returns rather than never.
-      saveScanRecord(a.id, a.al_number, code).catch(() => {});
+      saveScanRecord(a.id, a.al_number, code, typed).catch(() => {});
 
       // Does this seal already belong to a DIFFERENT order? Scanning stays
       // fast/optimistic — this runs in the background and flags the entry
@@ -1274,6 +1277,16 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       setManualSaid({ ok: false, key: 'scan.manualEmpty' });
       return;
     }
+    /* A seal number is SIX digits, and a typed one has to be all six. The
+       office asked for it outright: a seal keyed short or long is refused
+       here, before it reaches recordScan, rather than saved as a different
+       seal -- 3320 and 003320 are the same number, but a thumb that dropped
+       a digit has keyed a seal nobody issued. The camera and the gun are
+       untouched: what they read is what is printed on the sticker. */
+    if (code.length !== MANUAL_SEAL_DIGITS) {
+      setManualSaid({ ok: false, key: 'scan.manualSix', vars: { n: code.length } });
+      return;
+    }
     const said = onScanRef.current(code, { typed: true }) || { ok: false };
     setManualSaid(said);
     if (said.ok) {
@@ -1492,8 +1505,9 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
               <input
                 ref={manualInputRef}
                 value={manualCode}
-                onChange={(e) => setManualCode(e.target.value)}
+                onChange={(e) => setManualCode(String(e.target.value).replace(/\D+/g, '').slice(0, MANUAL_SEAL_DIGITS))}
                 inputMode="numeric"
+                maxLength={MANUAL_SEAL_DIGITS}
                 autoComplete="off"
                 autoFocus
                 placeholder={t('scan.manualPlaceholder')}
@@ -1516,7 +1530,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                 </button>
                 <button
                   type="submit"
-                  disabled={!manualCode.trim()}
+                  disabled={sealDigits(manualCode) == null || sealDigits(manualCode).length !== MANUAL_SEAL_DIGITS}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-mono text-xs font-bold uppercase tracking-wider rounded-xl py-3"
                 >
                   {t('scan.manualAdd')}

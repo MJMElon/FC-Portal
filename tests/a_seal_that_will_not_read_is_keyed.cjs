@@ -100,6 +100,7 @@ function build(card, allocs) {
     labelOfConsent: () => 'another order',
     sealRangesText: () => '0035190-0035199',
     useCallback: (fn) => fn,
+    numText: (n) => String(n),
   });
   vm.runInContext('globalThis.__rec = ' + recordSrc + ';', ctx);
   return { rec: vm.runInContext('__rec', ctx), ctx };
@@ -170,6 +171,19 @@ const ALLOCS = [{ consent_id: 'c1', al_number: 'AL-1', start_no: 35190, end_no: 
   const { rec } = build(CARD, ALLOCS);
   is(rec('   ', { typed: true }).key, 'scan.manualEmpty', 'an empty box asks for the number');
 }
+
+/* ── 6b. A seal keyed by hand is SIX digits, or it is not saved ─────────── */
+/* The office asked for it outright. The DIALOG refuses, before the seal ever
+   reaches recordScan, and the box itself only ever holds digits, six at most. */
+yes(/const MANUAL_SEAL_DIGITS = 6;/.test(SRC), 'the Add dialog takes a six-digit seal');
+yes(/code\.length !== MANUAL_SEAL_DIGITS[\s\S]{0,120}scan\.manualSix/.test(SRC),
+    'a typed seal of any other length is refused with its own sentence, not saved');
+yes(/maxLength=\{MANUAL_SEAL_DIGITS\}/.test(SRC) && /replace\(\/\\D\+\/g, ''\)\.slice\(0, MANUAL_SEAL_DIGITS\)/.test(SRC),
+    'and the box takes digits only, six at most');
+yes(/disabled=\{sealDigits\(manualCode\) == null \|\| sealDigits\(manualCode\)\.length !== MANUAL_SEAL_DIGITS\}/.test(SRC),
+    'and Add stays off until all six are keyed');
+const I18N = R('src/i18n.js');
+yes((I18N.match(/'scan\.manualSix'/g) || []).length === 2, 'the refusal is said in both languages');
 
 /* ── 7. The wiring on the page ───────────────────────────────────────── */
 /* The button is beside the scan log, it is off on a card with nothing
