@@ -46,6 +46,9 @@ import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibra
 import Icon from '../../components/Icon.jsx';
 import { numText } from '../../lib/numberText.js';
 
+/* A seal number keyed by hand on the Add dialog is exactly this many digits. */
+const MANUAL_SEAL_DIGITS = 6;
+
 const DEDUPE_DEBOUNCE_MS = 800;
 const OVER_REPEAT_MS = 1200;
 
@@ -429,7 +432,7 @@ export default function ScanModule() {
       // Write to server so other devices see this scan in real time. With no
       // line it QUEUES instead of being skipped — see saveScanRecord — so the
       // other phones hear about it when the line returns rather than never.
-      saveScanRecord(a.id, a.al_number, code).catch(() => {});
+      saveScanRecord(a.id, a.al_number, code, typed).catch(() => {});
 
       // Does this seal already belong to a DIFFERENT order? Scanning stays
       // fast/optimistic — this runs in the background and flags the entry
@@ -592,7 +595,7 @@ export default function ScanModule() {
        SUGGESTION the conductor may key over, and binding a delivery order
        to a figure no scanner ever saw would be the opposite of the rule. */
     const scannedQty = newScans > 0 ? newScans : 0;
-    setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
+    setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, consentQty: consent.qty || 0, memberIds: consent.memberIds || [consent.id] });
   }
 
   /* THE SEALS THAT WENT OUT ON THIS DO: everything scanned on the card
@@ -625,6 +628,7 @@ export default function ScanModule() {
   function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     const al = doEntry?.al || {};
     const consentId = doEntry?.consentId;
+    const consentQty = doEntry?.consentQty || 0;
     const memberIds = doEntry?.memberIds || (consentId ? [consentId] : []);
     const sealsOut = doSealsRef.current && doSealsRef.current.consentId === consentId ? doSealsRef.current.codes : [];
     doSealsRef.current = null;
@@ -634,22 +638,38 @@ export default function ScanModule() {
         /* Marked as gone whether or not the DO could name them -- they went
            out on this lorry either way, and must not reappear on the next. */
         const cur = markSealsOnDO(prev[consentId] || defaultProgress(), sealsOut);
+        const issuedQty = (cur.issuedQty || 0) + (payload.total_qty || 0);
+        /* doIssued means FINISHED — every bit of this card's own qty has
+           gone out — not merely "something has". A DO for PART of a card
+           (450 of its own 600, say) used to mark it doIssued:true all the
+           same, which is exactly what mergeConsents reads as "a genuinely
+           separate, finished collection" and excludes from grouping — so a
+           second consent signed for the rest of the order could never
+           rejoin this one, and the 150 still owed on this card alone was
+           the only thing anyone could scan for. See the long comment in
+           mergeConsents. */
+        const fullyIssued = consentQty > 0 && issuedQty >= consentQty;
         const map = {
           ...prev,
           [consentId]: {
             ...cur,
-            doIssued: true,
-            issuedQty: (cur.issuedQty || 0) + (payload.total_qty || 0),
+            doIssued: fullyIssued,
+            issuedQty,
           },
         };
         // A merged card's OTHER member rows carry no progress of their own
         // (all scans and the issuedQty live under the anchor id above) — but
         // they still need doIssued so mergeConsents stops treating them as
-        // open and folding them back into a fresh group next load.
-        memberIds.forEach((id) => {
-          if (id === consentId) return;
-          map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-        });
+        // open and folding them back into a fresh group next load, once the
+        // WHOLE group (not just this one DO) is actually finished. Stamped
+        // with the GROUP's own qty, not a share of it this function has no
+        // way to know — see the matching comment in applyIssuedShares.
+        if (fullyIssued) {
+          memberIds.forEach((id) => {
+            if (id === consentId) return;
+            map[id] = { ...(map[id] || defaultProgress()), doIssued: true, issuedQty: consentQty };
+          });
+        }
         saveProgress(map);
         return map;
       });
@@ -1257,6 +1277,16 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       setManualSaid({ ok: false, key: 'scan.manualEmpty' });
       return;
     }
+    /* A seal number is SIX digits, and a typed one has to be all six. The
+       office asked for it outright: a seal keyed short or long is refused
+       here, before it reaches recordScan, rather than saved as a different
+       seal -- 3320 and 003320 are the same number, but a thumb that dropped
+       a digit has keyed a seal nobody issued. The camera and the gun are
+       untouched: what they read is what is printed on the sticker. */
+    if (code.length !== MANUAL_SEAL_DIGITS) {
+      setManualSaid({ ok: false, key: 'scan.manualSix', vars: { n: code.length } });
+      return;
+    }
     const said = onScanRef.current(code, { typed: true }) || { ok: false };
     setManualSaid(said);
     if (said.ok) {
@@ -1475,8 +1505,9 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
               <input
                 ref={manualInputRef}
                 value={manualCode}
-                onChange={(e) => setManualCode(e.target.value)}
+                onChange={(e) => setManualCode(String(e.target.value).replace(/\D+/g, '').slice(0, MANUAL_SEAL_DIGITS))}
                 inputMode="numeric"
+                maxLength={MANUAL_SEAL_DIGITS}
                 autoComplete="off"
                 autoFocus
                 placeholder={t('scan.manualPlaceholder')}
@@ -1499,7 +1530,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                 </button>
                 <button
                   type="submit"
-                  disabled={!manualCode.trim()}
+                  disabled={sealDigits(manualCode) == null || sealDigits(manualCode).length !== MANUAL_SEAL_DIGITS}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-mono text-xs font-bold uppercase tracking-wider rounded-xl py-3"
                 >
                   {t('scan.manualAdd')}

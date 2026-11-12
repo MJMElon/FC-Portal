@@ -150,5 +150,66 @@ function oldRule(prev, cards, byAL) {
   is([card.qty, share, Math.max(0, card.qty - share)], [300, 0, 300], 'the 300 card opens with 0 collected and 300 to scan, not Fully Collected');
 }
 
+/* ── 8. A card that is only PARTIALLY out must not read as finished ───
+   N2T596: 1,200 ordered, a 600 consent signed in July with nothing ever
+   scanned against it, a 600 consent signed in November with 450 (not all
+   600) actually out. The OLD rule (doIssued: share > 0) marked BOTH
+   finished the moment the 450 went anywhere — the July one for sharing
+   none of it, the November one for sharing some — which split them
+   apart for good: two 600-qty cards, each reading its own slice, and no
+   way to scan the remaining 750 the order still owed. */
+{
+  const AL2 = 'N2T596';
+  const july = { id: 'july', al_number: AL2, order_number: AL2, customer_name: 'UNIBEAR PLANTATION SDN BHD', consent_qty: 600, created_at: '2026-07-02T09:43:00Z' };
+  const nov  = { id: 'nov',  al_number: AL2, order_number: AL2, customer_name: 'UNIBEAR PLANTATION SDN BHD', consent_qty: 600, created_at: '2026-11-03T08:17:00Z' };
+  const doRows2 = [{ al_number: AL2, total_qty: 450, status: 'Issued', remark: '' }];
+
+  // What a phone running the OLD rule would have saved: both marked
+  // doIssued the instant any amount went out, July's own issuedQty never
+  // even set (it took no share — see issuedShares' oldest-first split).
+  const staleFromOldRule = { july: { ...S.defaultProgress(), doIssued: true, issuedQty: 450 },
+                              nov:  { ...S.defaultProgress(), doIssued: true } };
+
+  const merged = S.mergeConsents([nov, july], staleFromOldRule);
+  is(merged.length, 1, 'the stale split from before the fix is NOT trusted — one card, not two');
+  is([merged[0].id, merged[0].qty], ['july', 1200], 'qty is the full 1,200 — July is oldest, so it anchors the group');
+
+  const shares2 = S.issuedShares(merged, D.issuedQtyByAL(doRows2));
+  is(shares2, { july: 450 }, 'the AL’s whole 450 lands on the one merged card');
+  const healed = S.applyIssuedShares(staleFromOldRule, merged, shares2, new Set());
+  is(healed.july.issuedQty, 450, 'the merged card carries the 450 actually out');
+
+  const reDrawn = S.mergeConsents([nov, july], healed);
+  is(reDrawn.length, 1, 'stays merged on the next draw — this does not flap back apart');
+  is(reDrawn.map((c) => [c.qty, c.issuedQty, c.doIssued]), [[1200, 450, false]],
+     '450 of 1,200 reads as NOT finished, whatever applyIssuedShares left the raw flag as');
+  is(reDrawn.filter(onList).map((c) => [c.qty, c.issuedQty]), [[1200, 450]], 'on the scan list reading 1,200 / 450, 750 left to scan');
+}
+
+/* ── 9. Once a merged card is GENUINELY finished, it must not reopen ──
+   The flip side of #8: a merged group's other member never carries its
+   own issuedQty (everything lives under the anchor — see
+   applyIssuedShares), so once the group is truly done, that member is
+   stamped with the GROUP's own qty rather than being left at 0, or the
+   self-heal in #8 would read it as still owing its own full consent_qty
+   and open a phantom card for an order that is actually finished. */
+{
+  const AL3 = 'FULL1';
+  const a = { id: 'a', al_number: AL3, order_number: AL3, customer_name: 'FINISHED ORDER SDN BHD', consent_qty: 600, created_at: '2026-01-01T00:00:00Z' };
+  const b = { id: 'b', al_number: AL3, order_number: AL3, customer_name: 'FINISHED ORDER SDN BHD', consent_qty: 600, created_at: '2026-01-02T00:00:00Z' };
+  const doRowsFull = [{ al_number: AL3, total_qty: 1200, status: 'Issued', remark: '' }];
+
+  const merged2 = S.mergeConsents([b, a], {});
+  is(merged2.map((c) => c.id), ['a'], 'a (oldest) anchors the merged 1,200 card');
+  const sharesFull = S.issuedShares(merged2, D.issuedQtyByAL(doRowsFull));
+  const closed = S.applyIssuedShares({}, merged2, sharesFull, new Set());
+  is([closed.a.issuedQty, closed.a.doIssued], [1200, true], 'the anchor reads fully out');
+  is([closed.b.issuedQty, closed.b.doIssued], [1200, true], 'the OTHER member is stamped with the group’s own qty, not left at 0');
+
+  const after2 = S.mergeConsents([b, a], closed);
+  is(after2.length, 2, 'both rows stand on their own once finished, same shape a genuinely separate collection always had');
+  is(after2.filter(onList).map((c) => c.id), [], 'and neither reopens on the scan list');
+}
+
 console.log(failed ? '\n' + failed + ' FAILED' : '\nall good');
 process.exit(failed ? 1 : 0);

@@ -82,9 +82,15 @@ export function toCsv(rows, lang) {
  *   5. otherwise, anything that does not read as a non-worker role
  */
 
-/** The roles the payroll register offers. Kept in step with ROLES there. */
-export const ROLES = ['Field Conductor', 'Assistant Field Conductor',
-                      'Water Pump Operator', 'General Worker', 'Driver', 'Gardener'];
+/** The roles the payroll register offers. Kept in step with ROLES there
+ *  (mjm-ai-system/scan/scan_workers.html), which says the same of this copy.
+ *  It is what `isKnownRole` below asks, so a role known there and unknown
+ *  here is a worker who is off the maintenance tick sheets on one side of
+ *  the system and on them on the other. Estate Manager and Admin joined it
+ *  when the Team Board grew a row for each. */
+export const ROLES = ['Estate Manager', 'Admin',
+                      'Field Conductor', 'Assistant Field Conductor',
+                      'Water Pump Operator', 'General Worker', 'Gardener', 'Driver'];
 
 const MAINT_ROLE       = /^general\s*worker$|pekerja am|buruh am/i;
 const NON_GENERAL_ROLE = /driver|pemandu|conductor|kondektor|konduktor|supervisor|penyelia|mandor|mandur|kepala|kerani|clerk|admin|manager|pengurus|executive|eksekutif|mekanik|mechanic|technician|juruteknik|security|pengawal|jaga|foreman|operator|storekeeper|storeman/i;
