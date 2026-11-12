@@ -51,6 +51,10 @@ const grab = (decl, name) => {
   }
   throw new Error(name + ' not closed');
 };
+/* The helpers added with the database half are absent from the previous
+   build; lifted where present so the old code still RUNS and fails by name. */
+const tryGrab = (decl, name) => { try { return grab(decl, name); } catch (e) { return ''; } };
+const tryLine = (re) => (SRC.match(re) || [''])[0];
 
 /* ── A supabase stub that KEEPS A TABLE. One that swallows writes signs
       off whatever the page sent it — the house rule. ─────────────────── */
@@ -63,9 +67,34 @@ function makeSupabase(state) {
       return Promise.resolve({ data: null, error: null });
     }
     if (q.op === 'insert') {
-      const rows = q.rows.map((r) => ({ id: ++state.nextId, ...r }));
+      if (state.noUidColumn && q.rows.some((r) => 'client_uid' in r)) {
+        return Promise.resolve({ data: null, error: { code: 'PGRST204', message: "Could not find the 'client_uid' column of 'shared_do_records' in the schema cache" } });
+      }
+      if (q.rows.some((r) => r.client_uid && state.dos.some((d) => d.client_uid === r.client_uid))) {
+        return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "shared_do_records_one_per_press"' } });
+      }
+      const rows = q.rows.map((r) => {
+        const row = { id: ++state.nextId, ...r };
+        /* The database trigger (RUN_ME_do_number_never_repeats.sql): a
+           number of the order series already taken, or a placeholder, is
+           moved to the next free one. Off where the SQL is not run. */
+        if (state.trigger && row.al_number) {
+          const pfx = 'DO-' + row.al_number;
+          const rest = String(row.do_number || '').slice(pfx.length);
+          if (String(row.do_number || '').startsWith(pfx) || !row.do_number) {
+            if (!row.do_number || !/^[0-9]+$/.test(rest) || state.dos.some((d) => d.do_number === row.do_number)) {
+              let max = 0;
+              state.dos.forEach((d) => { const t = String(d.do_number || '');
+                if (t.startsWith(pfx) && /^[0-9]+$/.test(t.slice(pfx.length))) max = Math.max(max, parseInt(t.slice(pfx.length), 10)); });
+              row.do_number = pfx + String(max + 1).padStart(2, '0');
+            }
+          }
+        }
+        return row;
+      });
       state.dos.push(...rows);
       state.inserts.push(...rows);
+      if (state.loseAckOnce) { state.loseAckOnce = false; return Promise.reject(new Error('timed out (the row landed)')); }
       return Promise.resolve({ data: q.single ? rows[0] : rows, error: null });
     }
     // select
@@ -76,6 +105,7 @@ function makeSupabase(state) {
         rows = rows.filter((r) => String(r[f] || '').toLowerCase().startsWith(pre));
       } else rows = rows.filter((r) => r[f] === v);
     }
+    if (state.staleRead && q.filters.some((f) => f[2] === 'ilike')) rows = [];
     if (q.single) return Promise.resolve({ data: rows[0] || null, error: null });
     return Promise.resolve({ data: rows, error: null });
   };
@@ -89,6 +119,7 @@ function makeSupabase(state) {
         eq(f, v) { q.filters.push([f, v]); return api; },
         ilike(f, v) { q.filters.push([f, v, 'ilike']); return api; },
         order() { return api; },
+        limit() { return api; },
         single() { q.single = true; return api; },
         maybeSingle() { q.single = true; return api; },
         then(res, rej) { return exec(q).then(res, rej); },
@@ -101,7 +132,8 @@ function makeSupabase(state) {
 function build(state) {
   const store = {};
   const ctx = {
-    console, Date, JSON, Math, Object, Array, String, Number, Boolean, Promise, parseInt,
+    console, Date, JSON, Math, Object, Array, String, Number, Boolean, Promise, parseInt, Error,
+    crypto: require("crypto").webcrypto,
     navigator: { onLine: true },
     localStorage: {
       getItem: (k) => (k in store ? store[k] : null),
@@ -117,6 +149,11 @@ function build(state) {
   vm.createContext(ctx);
   vm.runInContext([
     SRC.match(/^const DO_QUEUE_KEY = .*$/m)[0],
+    tryLine(/^let _doNoClientUid = .*$/m),
+    tryGrab('export function ', 'newDOPressId'),
+    tryGrab('function ', '_namesClientUid'),
+    tryGrab('async function ', '_doByPress'),
+    tryGrab('export async function ', 'insertDORow'),
     grab('export async function ', 'generateDONumber'),
     grab('export async function ', 'saveDORecord'),
     grab('export async function ', 'persistDO'),
@@ -199,6 +236,53 @@ const payloadOf = (doNumber, qty) => ({
     await api.flushDOQueue();
     is(state.dos.map((d) => d.do_number).sort(), ['DO-MUGJB901', 'DO-MUGJB902'],
       'the OFF placeholder synced as DO-MUGJB902');
+  }
+
+  // ── 5. The DATABASE gives the number, and the app is told it ─────────
+  console.log('\n5. A number the app thought was free is moved by the database, and the DO carries the moved one');
+  {
+    // The read the app counts from comes back short (a slow connection, a
+    // read racing another phone): the app picks 01 for a second DO again.
+    // That is exactly 5 Nov. The trigger moves it, and the app has to USE
+    // the number on the row for the PDF, the portal and the toast.
+    const state = freshState();
+    state.trigger = true;
+    const api = build(state);
+    const r1 = await api.persistDO({ payload: payloadOf('DO-MUGJB901', 13), al: AL });
+    state.staleRead = true;
+    const r2 = await api.persistDO({ payload: payloadOf('DO-MUGJB901', 47), al: AL });
+    is(state.dos.map((d) => d.do_number), ['DO-MUGJB901', 'DO-MUGJB902'], 'the table holds 01 and 02, never 01 twice');
+    is([r1.payload.do_number, r2.payload.do_number], ['DO-MUGJB901', 'DO-MUGJB902'],
+      'and the second DO was told it is 02 — the number its PDF and the customer portal carry');
+  }
+
+  // ── 6. A save that landed and lost its answer is NOT a second DO ──────
+  console.log('\n6. A retry of a press already in the table finds it, even after the number moved');
+  {
+    const state = freshState();
+    state.trigger = true;
+    const api = build(state);
+    state.dos.push({ id: ++state.nextId, ...payloadOf('DO-MUGJB901', 13) });
+    state.staleRead = true;          // the app picks 01 again
+    state.loseAckOnce = true;        // the row goes in as 02, and the answer is lost
+    const r = await api.persistDO({ payload: payloadOf('DO-MUGJB901', 47), al: AL });
+    is(r.queued, true, 'the phone, hearing nothing back, queued it');
+    state.staleRead = false;
+    const f = await api.flushDOQueue();
+    is(state.dos.length, 2, 'after the flush the table still holds TWO DOs, not three');
+    is(f.synced, 1, 'and the queued copy was retired as already saved');
+    yes(state.dos.filter((d) => d.total_qty === 47).length === 1, 'the 47 is on the list once');
+  }
+
+  // ── 7. A database that has not had the SQL run still takes a DO ───────
+  console.log('\n7. With no client_uid column the DO is still saved, once');
+  {
+    const state = freshState();
+    state.noUidColumn = true;
+    const api = build(state);
+    const r = await api.persistDO({ payload: payloadOf('DO-MUGJB901', 13), al: AL });
+    yes(!r.queued && state.dos.length === 1, 'saved straight in, one row');
+    yes(!('client_uid' in (state.dos[0] || {})), 'without the column the database does not have');
   }
 
   console.log('\n' + (failed ? failed + ' FAILED' : 'all checks passed'));

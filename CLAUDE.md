@@ -507,3 +507,13 @@ the Team Board grew a row for each, along with Gardener and Driver, which
 were roles with no row and whose people sat in **Other** — the row that
 means *a role nobody recognises*, over roles the list names perfectly well.
 Change one, change the other.
+
+## A DO number on the form is a preview
+
+The database hands out the real one (`shared/RUN_ME_do_number_never_repeats.sql`
+in the office repo moves a number already taken to the next free one), so
+`persistDO` and `flushDOQueue` take the number off the inserted ROW, and a
+retry is recognised by `client_uid` (one id per press of Save), never by the
+number. `insertDORow` in `src/modules/do/data.js` and `sendDO` in the Admin
+Portal's `src/lib/mobileQueue.js` are the two copies. Change one, change the
+other.

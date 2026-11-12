@@ -236,9 +236,66 @@ export async function uploadDOSignature(base64, alNumber, doNumber) {
 // do_number is a race a request this close behind the write is not
 // guaranteed to win — the Mobile app hit exactly this and the fix there was
 // the same one applied here, returning the row the insert already has.
-export async function saveDORecord(payload, al) {
-  const { data: row, error } = await supabase.from('shared_do_records').insert([payload]).select().single();
+/* ONE PRESS OF SAVE IS ONE DO, AND THE DATABASE HANDS OUT ITS NUMBER.
+
+   A customer who collects twice in one day gets two DOs, and the second
+   must not wear the first one's number (DO-MUGJB901 did, on 5 Nov). Every
+   app works the next number out by reading the highest and adding one, so
+   two saves close together, or a read that comes back short, give the same
+   number twice. shared/RUN_ME_do_number_never_repeats.sql puts a trigger
+   on the table that, under a lock on the order, moves a number already
+   taken to the next free one. So the number on the form is a PREVIEW, and
+   the number on the row that comes back is the DO. Everything after the
+   insert (the PDF, the customer portal, the toast) must use the row.
+
+   client_uid is one id per press of Save, made on the phone, carried by a
+   queued copy too. A save that timed out while it landed, retried, comes
+   back 23505 on the one-per-press index: that is the same DO, already in,
+   and it is fetched rather than made a second time under a new number.
+
+   A database that has not had the SQL run has no client_uid column, and
+   naming a column a table has not got refuses the whole insert. A refusal
+   that names it is remembered for the session and the same row is sent
+   again without it. Shared with the Admin Portal (Mobile/src/lib/
+   mobileQueue.js). Change one, change the other. */
+let _doNoClientUid = false;
+export function newDOPressId() {
+  try { if (globalThis.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) { /* fall through */ }
+  return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+function _namesClientUid(err) {
+  const t = `${err?.message || ''} ${err?.details || ''} ${err?.hint || ''}`;
+  return /client_uid/i.test(t) && (err?.code === '42703' || err?.code === 'PGRST204' || /column/i.test(t));
+}
+async function _doByPress(uid) {
+  if (!uid || _doNoClientUid) return null;
+  const { data, error } = await supabase.from('shared_do_records').select('*').eq('client_uid', uid).limit(1);
+  if (error) { if (_namesClientUid(error)) _doNoClientUid = true; return null; }
+  return (data && data[0]) || null;
+}
+// Insert one DO row. Answers { row, existed }: existed is a retry of a
+// press whose DO is already in the table.
+export async function insertDORow(payload) {
+  const body = { ...payload };
+  if (_doNoClientUid) delete body.client_uid;
+  let { data: row, error } = await supabase.from('shared_do_records').insert([body]).select().single();
+  if (error && body.client_uid && _namesClientUid(error)) {
+    _doNoClientUid = true;
+    delete body.client_uid;
+    ({ data: row, error } = await supabase.from('shared_do_records').insert([body]).select().single());
+  }
+  if (error && error.code === '23505' && body.client_uid) {
+    const already = await _doByPress(body.client_uid);
+    if (already) return { row: already, existed: true };
+  }
   if (error) throw error;
+  return { row, existed: false };
+}
+
+export async function saveDORecord(payload, al) {
+  const { row, existed } = await insertDORow(payload);
+  // A press already in the table had its balance deducted the first time.
+  if (existed) return { row, balance: null };
   if (al && al.id != null) {
     const newBalance = (al.balance_quantity ?? 0) - (payload.total_qty || 0);
     // The DO row is IN the table by this line. A network blip on the balance
@@ -305,6 +362,9 @@ export async function attachDOToOrder({ payload, al, staff, sigDataUrl, photoBas
 // has no server row yet to open the Who Loaded This DO step against, same as
 // the Mobile app's equivalent flow.
 export async function persistDO({ payload, photoBase64, al, sigDataUrl, staff }) {
+  // Stamped ONCE, before either path, so a queued copy of a save that
+  // landed carries the same id and is recognised.
+  if (!payload.client_uid) payload = { ...payload, client_uid: newDOPressId() };
   if (navigator.onLine) {
     try {
       const finalPayload = { ...payload };
@@ -323,6 +383,8 @@ export async function persistDO({ payload, photoBase64, al, sigDataUrl, staff })
       if (photoBase64) finalPayload.image_url = await uploadDOPhoto(photoBase64, al.al_number, finalPayload.do_number);
       if (sigDataUrl) finalPayload.signature_url = await uploadDOSignature(sigDataUrl, al.al_number, finalPayload.do_number);
       const { row } = await saveDORecord(finalPayload, al);
+      // The trigger may have moved the number; the row is the DO.
+      if (row && row.do_number) finalPayload.do_number = row.do_number;
       await attachDOToOrder({ payload: finalPayload, al, staff, sigDataUrl, photoBase64 });
       return { queued: false, payload: finalPayload, savedRow: row || null };
     } catch (e) {
@@ -386,6 +448,9 @@ export async function flushDOQueue() {
       // Replace offline placeholder numbers with the real per-order running
       // number now that we are online. The loop is sequential so each DO gets
       // a unique number.
+      // A press already in the table (the save landed, its answer was lost)
+      // is retired as synced, whatever number it carries.
+      if (payload.client_uid && await _doByPress(payload.client_uid)) { synced++; continue; }
       if (payload.do_number && /OFF/i.test(payload.do_number)) {
         payload.do_number = await generateDONumber(alRow || { al_number: payload.al_number });
       } else if (payload.do_number) {
@@ -415,11 +480,10 @@ export async function flushDOQueue() {
       if (item.sigDataUrl) {
         payload.signature_url = await uploadDOSignature(item.sigDataUrl, payload.al_number, payload.do_number);
       }
-      const { error } = await supabase.from('shared_do_records').insert([payload]);
-      if (error) {
-        remaining.push(item);
-        continue;
-      }
+      let inserted;
+      try { inserted = await insertDORow(payload); } catch (e) { remaining.push(item); continue; }
+      if (inserted.row && inserted.row.do_number) payload.do_number = inserted.row.do_number;
+      if (inserted.existed) { synced++; continue; }
       if (alRow) {
         await supabase
           .from('shared_al_orders')
