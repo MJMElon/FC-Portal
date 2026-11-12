@@ -119,6 +119,7 @@ export async function raiseCase(opts) {
        added later — a database without it still takes the insert as long as
        nobody names it. */
     if (opts.assignedModule) row.assigned_module = opts.assignedModule;
+    if (opts.assignedSeatNo) row.assigned_seat_no = opts.assignedSeatNo;
     if (opts.assigneeId) {
       row.assignee_id = opts.assigneeId;
       row.assignee_name = opts.assigneeName || null;

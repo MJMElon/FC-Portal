@@ -119,7 +119,7 @@ export function plotsOf(list) {
  * the list the nursery already has.
  */
 export function requestText(items) {
-  const lines = ['Request Drone Terbang', '', 'Plot:'];
+  const lines = ['Request Drone Terbang', ''];
   for (const n of SECOND_CULL_NURSERIES) {
     const plots = plotsOf(items[n]).map((p) => p.plot);
     if (plots.length) lines.push(`${n}: ${plots.join(', ')}`);

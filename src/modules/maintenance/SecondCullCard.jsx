@@ -148,6 +148,9 @@ export default function SecondCullCard({ allowed, online }) {
           title: `${SECOND_CULL_CATEGORY} ${month}`,
           description: requestText(due.items),
           category: SECOND_CULL_CATEGORY,
+          // Audit Portal, seat 2 (Pre Nursery Auditor + Drone Operator).
+          assignedModule: 'audit',
+          assignedSeatNo: 2,
           priority: SECOND_CULL_PRIORITY,
           source: 'scan',
           nursery: 'All Nursery',
