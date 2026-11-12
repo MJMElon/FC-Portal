@@ -40,6 +40,11 @@ export function monthKeyOf(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/** The transplant month whose 2nd cull falls due in `dueYm`. */
+export function transplantMonthOf(dueYm) {
+  return ymOf(monthIndex(dueYm) - SECOND_CULL_AFTER_MONTHS);
+}
+
 /** The month the 2nd cull for a transplant month falls due. */
 export function dueMonthOf(transplantYm) {
   return ymOf(monthIndex(transplantYm) + SECOND_CULL_AFTER_MONTHS);

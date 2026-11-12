@@ -11,6 +11,7 @@ import {
   dueItems,
   monthKeyOf,
   plotsOf,
+  transplantMonthOf,
   requestText,
 } from './secondCull.js';
 
@@ -28,22 +29,57 @@ import {
 
 const PAGE = 1000;
 
-// PostgREST answers at most 1,000 rows per request, and a silent cut is the
-// worst outcome for a list of work, so the ledger is read page by page.
-async function readTransplants() {
+// PostgREST answers at most 1,000 rows per request, so every read below is
+// paged, and a silent cut is never taken as the end of the list.
+async function readAllPages(build) {
   const out = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from('shared_inventory_logs')
-      .select('plot_name, batch_name, transaction_date, created_at, transaction_type')
-      .in('transaction_type', TRANSPLANT_TYPES)
-      .order('id', { ascending: true })
-      .range(from, from + PAGE - 1);
+    const { data, error } = await build().range(from, from + PAGE - 1);
     if (error) throw error;
     out.push(...(data || []));
     if (!data || data.length < PAGE) break;
   }
   return out;
+}
+
+const TRANSPLANT_COLS = 'plot_name, batch_name, transaction_date, created_at, transaction_type';
+
+/**
+ * The rows the due list is worked out from, for one due month.
+ *
+ * A batch is due in the month after four months only when its FIRST transplant
+ * into that plot was in the transplant month, so two reads are needed:
+ *   1. every transplant in the transplant month (the candidates), and
+ *   2. every EARLIER transplant of those same batches, which knocks out any
+ *      that were first transplanted before that month.
+ * Both are small. Nothing older than the batches on the list is read.
+ */
+async function readTransplants(dueYm) {
+  const tYm = transplantMonthOf(dueYm);
+  const from = `${tYm}-01`;
+  const [y, m] = tYm.split('-').map(Number);
+  const to = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+
+  const inMonth = await readAllPages(() => supabase
+    .from('shared_inventory_logs')
+    .select(TRANSPLANT_COLS)
+    .in('transaction_type', TRANSPLANT_TYPES)
+    .gte('transaction_date', from)
+    .lt('transaction_date', to)
+    .order('id', { ascending: true }));
+
+  const batches = [...new Set(inMonth.map((r) => r.batch_name).filter(Boolean))];
+  if (!batches.length) return inMonth;
+
+  const earlier = await readAllPages(() => supabase
+    .from('shared_inventory_logs')
+    .select(TRANSPLANT_COLS)
+    .in('transaction_type', TRANSPLANT_TYPES)
+    .in('batch_name', batches)
+    .lt('transaction_date', from)
+    .order('id', { ascending: true }));
+
+  return [...inMonth, ...earlier];
 }
 
 function monthLabel(ym) {
@@ -66,7 +102,7 @@ export default function SecondCullCard({ allowed, online }) {
     setError('');
     try {
       const [rows, doneRes, caseRes] = await Promise.all([
-        readTransplants(),
+        readTransplants(month),
         supabase.from('nops_2nd_cull_nursery').select('*').eq('month', month),
         supabase.from('nops_2nd_cull_case').select('*').eq('month', month).maybeSingle(),
       ]);
