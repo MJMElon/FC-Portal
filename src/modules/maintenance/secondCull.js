@@ -21,6 +21,11 @@ export const SECOND_CULL_CATEGORY = 'Request Drone Terbang (2nd cull)';
 export const SECOND_CULL_PRIORITY = 'normal';
 export const SECOND_CULL_NURSERIES = ['BNN', 'UNN1', 'UNN2'];
 
+// Places that appear in the transplant ledger but are not a nursery plot, and
+// are not part of the 2nd cull. Premium Care is one of them. Skipped outright,
+// so they are not listed even as "not placed".
+export const NOT_A_PLOT = ['PREMIUMCARE'];
+
 // The transplant types the Batch Report counts as moved into a plot.
 export const TRANSPLANT_TYPES = ['Transplanted', 'Transplanted_Premium', 'Transplanted_DoubleTone'];
 
@@ -71,7 +76,7 @@ export function dueItems(rows, month) {
     if (r.transaction_type && !TRANSPLANT_TYPES.includes(r.transaction_type)) continue;
     const plot = plotKey(r.plot_name);
     const batch = batchKey(r.batch_name);
-    if (!plot || !batch || isReplantPlot(plot)) continue;
+    if (!plot || !batch || isReplantPlot(plot) || NOT_A_PLOT.includes(plot)) continue;
     const ym = String(r.transaction_date || r.created_at || '').slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(ym)) continue;
     const key = `${plot}#${batch}`;
