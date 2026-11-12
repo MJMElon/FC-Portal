@@ -238,11 +238,6 @@ export default function SecondCullCard({ allowed, online }) {
         );
       })}
 
-      {due && due.unplaced.length > 0 && (
-        <div className="text-[11px] font-bold text-amber-700">
-          Not placed in any nursery (add the plot in Seedling Stock): {due.unplaced.map((u) => `${u.plot} (${u.batch})`).join(', ')}
-        </div>
-      )}
     </section>
   );
 }
