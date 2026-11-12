@@ -24,7 +24,8 @@ export const SECOND_CULL_NURSERIES = ['BNN', 'UNN1', 'UNN2'];
 // Places that appear in the transplant ledger but are not a nursery plot, and
 // are not part of the 2nd cull. Premium Care is one of them. Skipped outright,
 // so they are not listed even as "not placed".
-export const NOT_A_PLOT = ['PREMIUMCARE'];
+// plotKey cuts a name at its first space, so "Premium Care" arrives as PREMIUM.
+export const NOT_A_PLOT = ['PREMIUM', 'PREMIUMCARE'];
 
 // The transplant types the Batch Report counts as moved into a plot.
 export const TRANSPLANT_TYPES = ['Transplanted', 'Transplanted_Premium', 'Transplanted_DoubleTone'];
