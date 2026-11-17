@@ -17,16 +17,34 @@
 
    ── THE RULES ─────────────────────────────────────────────────────────────
 
-   THE RANGES ARE THE FLOOR, not the list. Whatever `shared_plots` holds is
-   added on top, deduped on letters and digits. So a read that fails changes
-   nothing — the form offers exactly what it offered before — and no plot
-   that is on screen today can disappear. That is the fail-open rule every
-   other gate in these two repositories follows, and an empty plot picker is
-   a form nobody can fill in.
+   THE RANGES ARE THE FALLBACK, and they were the FLOOR for a day. The office
+   asked for the other half the same afternoon — *"i deleted a plot, make it
+   remove from all modules too. i added a plot, make it add for all modules
+   too."* — and the floor was exactly what stopped the cross on the settings
+   page doing anything: B14 was offered whether or not `shared_plots` had a
+   row for it.
 
-   WHAT IT DOES NOT DO, said plainly: a plot DELETED on the settings page
-   does not leave the four ranges. That is the price of fail-open and it is
-   the safe direction here.
+   So the LIST is what Seedling Stock holds where the office has keyed
+   something, and the range answers for a nursery they have not. Two things
+   hold that up and the first is why `mergePlots` takes an `ok` at all:
+
+     - A READ THAT FAILS CHANGES NOTHING. The form offers exactly what it
+       offered before — the fail-open rule every other gate in these two
+       repositories follows, and an empty plot picker is a form nobody can
+       fill in. So only a reply that really ARRIVED narrows anything: an
+       empty object cannot be told from a refusal, which is the shape that
+       would have emptied every picker in the company at once.
+     - IT IS ASKED PER NURSERY, and the Pre Nursery is why. A nursery
+       `shared_plots` holds no plot for keeps its whole range, because an
+       absent answer is nobody having been asked — and PN is counted in
+       TRAYS, so a global test would wipe P01 to P52 off every form.
+
+   WHAT IT COSTS, said plainly: if `shared_plots` is short of a row, a plot
+   nobody deleted stops being offered. The office repository carries the
+   check that names every one of them —
+   shared/CHECK_which_plots_each_module_offers.sql, section 4 — and the
+   answer to a plot in that list is to add it back on the settings page, one
+   press, and it returns everywhere.
 
    THE NURSERY IS MATCHED ON LETTERS AND DIGITS, upper-cased, because
    `shared_plots` spells it the way Seedling Stock does — "UNN 1" with the
@@ -45,7 +63,8 @@ const pad = (letter, n) =>
   Array.from({ length: n }, (_, i) => `${letter}${String(i + 1).padStart(2, '0')}`);
 
 /* The four ranges, as every raise form in the company has always offered
-   them. The floor, never the whole answer. */
+   them. What answers for a nursery the office has keyed nothing for, and
+   what a failed read falls back on — never the whole answer. */
 export const NURSERY_RANGES = {
   PN: pad('P', 52),
   BNN: pad('B', 14),
@@ -78,17 +97,42 @@ function codeOf(name) {
 const order = (a, b) =>
   String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 
-/* The ranges plus whatever the office keyed, deduped on letters and digits.
-   Seedling Stock spells a plot 'B1' where the ranges spell it 'B01', and one
-   plot offered twice is a picker somebody has to read twice; the RANGE
-   spelling wins where both have it, so nothing moves for a plot that was
-   already there. */
-export function mergePlots(extra) {
+/* THE OFFICE'S LIST WINS, PER NURSERY.
+
+   A plot is added AND DELETED in Seedling Stock Management → System
+   Settings, and the office asked for both halves: *"i deleted a plot, make
+   it remove from all modules too. i added a plot, make it add for all
+   modules too."* So for a nursery the office has keyed, that list IS the
+   list — delete B14 there and it is off this form.
+
+   The ranges being the FLOOR is exactly what used to stop a deletion
+   biting, so they are now only the FALLBACK, and three things keep that
+   from being a cliff:
+
+   1. A READ THAT FAILED CHANGES NOTHING (`ok` false) — the ranges stand,
+      which is the fail-open rule everything here follows. An empty plot
+      picker is a form nobody can fill in.
+   2. ASKED PER NURSERY, never once for all four. The Pre Nursery is counted
+      in TRAYS, so `shared_plots` may hold no PN row at all; a single global
+      test would wipe P01 to P52 off this form. A nursery the office has said
+      NOTHING about keeps its range — an absent answer is nobody having been
+      asked.
+   3. A HAND-ADDED plot (`nops_maint_custom_plots`) is still appended: that
+      is the office saying it exists by another route.
+
+   `loaded` is { stock, custom, ok }. Deduped on letters and digits with the
+   leading zeros off, so the office's 'B1' is not offered beside a range's
+   'B01'. */
+export function mergePlots(loaded) {
+  const stock  = (loaded && loaded.stock)  || {};
+  const custom = (loaded && loaded.custom) || {};
+  const ok     = !!(loaded && loaded.ok);
   const out = {};
   NURSERY_CODES.forEach((n) => {
-    const list = NURSERY_RANGES[n].slice();
+    const keyed = ok && Array.isArray(stock[n]) && stock[n].length;
+    const list = (keyed ? stock[n] : NURSERY_RANGES[n]).slice();
     const seen = new Set(list.map(key));
-    ((extra || {})[n] || []).forEach((p) => {
+    (custom[n] || []).forEach((p) => {
       const k = key(p);
       if (!k || seen.has(k)) return;
       list.push(String(p).trim());
@@ -102,7 +146,8 @@ export function mergePlots(extra) {
 let _cache = null;
 
 /**
- * nursery code → [plot], the office's list over the four ranges.
+ * nursery code → [plot]: the office's list where they have keyed one,
+ * and the four ranges where they have not.
  *
  * Never throws and never rejects: a table that cannot be read, a refused
  * policy or no signal all give back the ranges, which is where the caller
@@ -115,12 +160,12 @@ let _cache = null;
  */
 export async function loadNurseryPlots() {
   if (_cache) return _cache;
-  const extra = {};
-  const add = (nursery, plot) => {
+  const loaded = { stock: {}, custom: {}, ok: false };
+  const add = (into, nursery, plot) => {
     const n = codeOf(nursery);
     const p = String(plot ?? '').trim();
     if (!n || !p) return;
-    (extra[n] || (extra[n] = [])).push(p);
+    (into[n] || (into[n] = [])).push(p);
   };
   try {
     const [stock, custom] = await Promise.all([
@@ -129,11 +174,19 @@ export async function loadNurseryPlots() {
       supabase.from('nops_maint_custom_plots').select('nursery, plot')
         .then((r) => r, (e) => ({ error: e })),
     ]);
-    if (!stock?.error) (stock?.data || []).forEach((r) => add(r?.nursery_name, r?.plot_name));
-    if (!custom?.error) (custom?.data || []).forEach((r) => add(r?.nursery, r?.plot));
+    if (!stock?.error) {
+      /* THE READ ANSWERED. Only this flag decides whether a plot the office
+         deleted disappears or the range stands, so it is set on a reply that
+         really came back and on nothing else. */
+      loaded.ok = true;
+      (stock?.data || []).forEach((r) => add(loaded.stock, r?.nursery_name, r?.plot_name));
+    }
+    if (!custom?.error) {
+      (custom?.data || []).forEach((r) => add(loaded.custom, r?.nursery, r?.plot));
+    }
   } catch (e) {
     /* Nothing: the ranges are the answer. */
   }
-  _cache = mergePlots(extra);
+  _cache = mergePlots(loaded);
   return _cache;
 }

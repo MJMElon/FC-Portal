@@ -535,14 +535,27 @@ transfer and is in no hardcoded range anywhere, so the one plot a Field
 Conductor most needs to raise a case about was the one plot the form would
 not offer him.
 
-`src/lib/nurseryPlots.js` is the read. Three rules, and the first is why it
-is shaped that way:
+`src/lib/nurseryPlots.js` is the read. Four rules, and the first two are why
+it is shaped that way:
 
-- **THE RANGES ARE THE FLOOR, never the list.** A read that fails leaves the
-  form offering exactly what it offered before — the fail-open rule
-  everything here follows. An empty plot picker is a form nobody can fill
-  in. It also means a plot DELETED in the office does not leave the ranges,
-  which is the price of that and the safe direction here.
+- **THE RANGES ARE THE FALLBACK, and they were the FLOOR for a day.** The
+  office asked for the other half the same afternoon — *"i deleted a plot,
+  make it remove from all modules too. i added a plot, make it add for all
+  modules too"* — and the floor was exactly what stopped the ✕ on the
+  settings page doing anything. So the LIST is what Seedling Stock holds
+  where the office has keyed something, and the range answers where they
+  have not.
+- **A READ THAT FAILS CHANGES NOTHING**, which is the fail-open rule
+  everything here follows: an empty plot picker is a form nobody can fill in.
+  So `mergePlots` takes an **`ok`** beside the plots and only a reply that
+  really ARRIVED narrows anything — an empty object cannot be told from a
+  refusal, which is the shape that would have emptied every picker in the
+  company at once. It is also asked **PER NURSERY**, because the Pre Nursery
+  is counted in trays and may have no row at all, so a global test would wipe
+  P01–P52 off every form. **What it costs:** if `shared_plots` is short of a
+  row, a plot nobody deleted stops being offered —
+  `shared/CHECK_which_plots_each_module_offers.sql` in the office repository,
+  section 4, names every one of them.
 - **THE NURSERY IS MATCHED ON LETTERS AND DIGITS** — `shared_plots` says
   "UNN 1" with the space where this form keys `UNN1`, the same `nurseryKey`
   rule as everywhere else. A plot under a FIFTH nursery is left out: there
