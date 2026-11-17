@@ -517,3 +517,50 @@ retry is recognised by `client_uid` (one id per press of Save), never by the
 number. `insertDORow` in `src/modules/do/data.js` and `sendDO` in the Admin
 Portal's `src/lib/mobileQueue.js` are the two copies. Change one, change the
 other.
+
+## The plots come from Seedling Stock, and the Nelos form was the last holdout
+
+A plot is added in ONE place — **Seedling Stock Management → System
+Settings → Add Plot**, which inserts a row into `shared_plots`. Nearly all
+of this portal already reads it: PALMS (`modules/palms/data.js`,
+`modules/palms/officeConfig.js`), the maintenance board
+(`modules/maintenance/data.js`) and the DO module (`modules/do/data.js`).
+
+**`src/components/NelosNewCase.jsx` did not.** It carried the four ranges
+written out — P01-P52, B01-B14, U01-U18, N01-N20 — with a comment saying the
+list was copied from the hub's dock, which copied it from the audit module.
+So a plot the office added could not be named on a case at all, and **the
+live case is the transfer plots**: a `-R` plot is made by a 3rd-culling
+transfer and is in no hardcoded range anywhere, so the one plot a Field
+Conductor most needs to raise a case about was the one plot the form would
+not offer him.
+
+`src/lib/nurseryPlots.js` is the read. Three rules, and the first is why it
+is shaped that way:
+
+- **THE RANGES ARE THE FLOOR, never the list.** A read that fails leaves the
+  form offering exactly what it offered before — the fail-open rule
+  everything here follows. An empty plot picker is a form nobody can fill
+  in. It also means a plot DELETED in the office does not leave the ranges,
+  which is the price of that and the safe direction here.
+- **THE NURSERY IS MATCHED ON LETTERS AND DIGITS** — `shared_plots` says
+  "UNN 1" with the space where this form keys `UNN1`, the same `nurseryKey`
+  rule as everywhere else. A plot under a FIFTH nursery is left out: there
+  is no option on the form to put it under.
+- **AND THEN THE LEADING ZEROS OFF THE NUMBER**, which letters-and-digits
+  alone does not do and which took a test to see. These ranges are PADDED
+  (`B01`) and the office types `B1`, so on letters and digits those are two
+  keys: the office's plot was added BESIDE the range's and the picker offered
+  one plot twice under two spellings. `B04-R` and `B4-R` go the same way.
+
+**`Mobile/src/lib/nurseryPlots.js` IS THIS FILE, word for word**, and
+`shared/shared_maint_plots.js` + `audit/audit_plots.js` + `loadPlots()` in
+`shared/shared_nelos_dock.js` are the office repository's copies. Different
+repositories cannot import from each other, so the only thing keeping the two
+phone copies in step is a check — section 5 of
+`mjm-ai-system/tests/a_plot_added_in_the_office_reaches_every_module.cjs`
+compares them with the comments stripped. Change one, change the other.
+
+That test is where the whole of this is held, office side and phone side
+together, because the question it answers is whether a plot added once
+reaches every module — and that cannot be asked one repository at a time.

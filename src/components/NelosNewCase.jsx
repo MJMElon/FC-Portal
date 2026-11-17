@@ -50,18 +50,19 @@ import { useEffect, useRef, useState } from 'react';
 import CfSelect from './CfSelect.jsx';
 import { supabase } from '../lib/supabase.js';
 import { raiseCase } from '../lib/nelos.js';
+import { NURSERY_RANGES, loadNurseryPlots } from '../lib/nurseryPlots.js';
 import { useLang } from '../context/LanguageContext.jsx';
 
 /* The four nurseries and the plots each one has, the same list the hub's
    dock and the Admin Portal's form offer, so all three raise forms ask the
    same question. PALMS' own NURSERIES has only the three this portal logs
-   plots in; a case can be about any of them, PN included. */
-const NURSERY_PLOTS = {
-  PN: Array.from({ length: 52 }, (_, i) => `P${String(i + 1).padStart(2, '0')}`),
-  BNN: Array.from({ length: 14 }, (_, i) => `B${String(i + 1).padStart(2, '0')}`),
-  UNN1: Array.from({ length: 18 }, (_, i) => `U${String(i + 1).padStart(2, '0')}`),
-  UNN2: Array.from({ length: 20 }, (_, i) => `N${String(i + 1).padStart(2, '0')}`),
-};
+   plots in; a case can be about any of them, PN included.
+
+   THE PLOTS COME FROM SEEDLING STOCK. `NURSERY_RANGES` is only the floor —
+   lib/nurseryPlots.js is the whole of why, and it is what the rest of this
+   portal already does. A plot the office adds on System Settings is on this
+   form; a read that fails leaves the four ranges, which is where this form
+   was. */
 const NURSERY_LABEL = { PN: 'Pre Nursery', BNN: 'BNN', UNN1: 'UNN1', UNN2: 'UNN2' };
 
 /* Shown only if nelos_modules cannot be read. The five systems as they
@@ -94,6 +95,9 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
   const [pic, setPic] = useState('');
   const [nursery, setNursery] = useState('');
   const [plot, setPlot] = useState('');
+  /* Starts as the four ranges so the picker works on the first paint, and
+     is replaced by the office's list the moment that read lands. */
+  const [plots, setPlots] = useState(NURSERY_RANGES);
   const [photo, setPhoto] = useState(null); // { file, url }
 
   const [busy, setBusy] = useState(false);
@@ -114,6 +118,11 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
      a valid case, not a blocked form. */
   useEffect(() => {
     let alive = true;
+
+    /* The office's plot list, over the four ranges. Never rejects, so there
+       is nothing to catch: the ranges are already on screen and this only
+       ever adds to them. */
+    loadNurseryPlots().then((by) => { if (alive) setPlots(by); });
 
     /* handler_label is the short name — Seedling Stock, HQ Operation, FC,
        Admin, Auditor — and it already exists. "Assign to" wants those same
@@ -326,7 +335,7 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
           <CfSelect id="nnc-nursery" value={nursery}
             onChange={(e) => { setNursery(e.target.value); setPlot(''); }}>
             <option value="">{t('nel.none')}</option>
-            {Object.keys(NURSERY_PLOTS).map((n) => <option key={n} value={n}>{NURSERY_LABEL[n]}</option>)}
+            {Object.keys(plots).map((n) => <option key={n} value={n}>{NURSERY_LABEL[n]}</option>)}
           </CfSelect>
         </div>
         <div>
@@ -334,7 +343,7 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
           <CfSelect id="nnc-plot" value={plot} onChange={(e) => setPlot(e.target.value)}
             disabled={!nursery}>
             <option value="">{nursery ? t('nel.none') : t('nel.nurseryFirst')}</option>
-            {(NURSERY_PLOTS[nursery] || []).map((p) => <option key={p} value={p}>{p}</option>)}
+            {(plots[nursery] || []).map((p) => <option key={p} value={p}>{p}</option>)}
           </CfSelect>
         </div>
       </div>
