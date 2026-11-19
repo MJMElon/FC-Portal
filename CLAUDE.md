@@ -577,3 +577,46 @@ compares them with the comments stripped. Change one, change the other.
 That test is where the whole of this is held, office side and phone side
 together, because the question it answers is whether a plot added once
 reaches every module — and that cannot be asked one repository at a time.
+
+## One order, two scan points, and a reset that clears one phone
+
+An order is often loaded from two places at once. **A scan point is a
+phone**: `myScanPoint()` in `src/modules/scan/scanPoints.js` makes an id
+once and keeps it in localStorage (`mjm.scan.point.v1`); the name is what
+the screen says and defaults to the person signed in. Every scan row carries
+`scan_point` / `scan_point_name`, and the card shows a count per point,
+mine first.
+
+- **Overlap was already refused** by the unique (consent_id, barcode) and
+  the realtime feed; the refusal now NAMES the place that has the seal
+  (`scan.duplicateAt`), scanned or keyed alike.
+- **Reset clears this phone only** — one server function,
+  `fcportal_reset_scans` (`shared/RUN_ME_scan_points.sql` in the office
+  repo), by point ID, never by name. It never deletes a seal already on a
+  DO, drops this point's queued scans from the outbox, and broadcasts
+  `reset` on `fcportal_scan:<card>`; the other phones re-read the table
+  (also every 20 s) and `reconcileWithServer` takes off another point's
+  seals the server no longer has. It needs a line.
+- **Seals with no point are "Earlier scans"** — written before this —
+  and the second Reset button clears them too. That is how an order
+  carrying seals nobody can account for is put right.
+
+## A DO is sent once, and a queued one is never lost
+
+Three causes of a twin DO and two of a missing one, all in
+`src/modules/do/data.js` / `EntryModal.jsx`:
+
+- **One press id per FORM** (`pressIdRef`), and a double tap is refused
+  (`savingRef`), so two taps are one `client_uid`.
+- **`flushDOQueue` is single-flight** — a module promise plus
+  `navigator.locks` across tabs. Two sweeps used to send the same queue.
+- **An item leaves the queue the moment its insert lands**, re-reading the
+  queue each time. The old flush wrote back the list it read at the START,
+  which threw away any DO queued while it ran.
+- **A database without `client_uid`** finds a lost ack by signature
+  (order, day, total, first line) before inserting again.
+- **A stuck item is SAID**: the amber banner on the scan screen counts the
+  queue, shows the last error and offers Send now.
+
+`tests/one_order_two_scan_points.cjs` and sections 8 to 11 of
+`tests/a_do_is_numbered_at_save.cjs` hold it.
