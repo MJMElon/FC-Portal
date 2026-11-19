@@ -577,3 +577,15 @@ compares them with the comments stripped. Change one, change the other.
 That test is where the whole of this is held, office side and phone side
 together, because the question it answers is whether a plot added once
 reaches every module — and that cannot be asked one repository at a time.
+
+## The Nelos raise form takes an optional location
+
+`src/lib/latLng.js` is the parser, the Detect call and the column probe, and
+it is the SAME FILE in `Barcode_Counter` and `Mobile`, word for word;
+`parseLatLng` is also in the office repository twice (`shared_nelos.js` and
+`shared_nelos_dock.js`). Change one, change the others. The box is not drawn
+until the database has `nelos_cases.location_lat` / `location_lng`
+(`shared/RUN_ME_nelos_case_location.sql` in the office repository), empty is
+allowed, and something typed that is not a coordinate is refused before
+anything is sent. `mjm-ai-system/CLAUDE.md` has the whole of it, and
+`tests/a_case_can_carry_a_location.cjs` there compares the copies.
