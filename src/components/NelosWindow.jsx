@@ -28,6 +28,7 @@ import { isOverdue, pendingCases } from '../lib/nelos.js';
 import { compressImage, dataUrlToBlob } from '../lib/image.js';
 import { useLang } from '../context/LanguageContext.jsx';
 import NelosNewCase from './NelosNewCase.jsx';
+import { fmtLatLng, mapsHref, gaiaHref } from '../lib/latLng.js';
 
 const MODULE = 'scan';                 // this portal's key in nelos_modules
 
@@ -270,6 +271,29 @@ function CaseView({ caseId, me, onBack, onChanged }) {
         <div className="min-w-0"><div className={kk}>{t('nel.pic')}</div>
           <div className={vv}>{c.assignee_name || <span className="text-slate-400 font-semibold">{t('nel.unassigned')}</span>}</div></div>
       </div>
+
+      {/* WHERE, as a coordinate, when the person raising it said. Optional
+          on the form, so absent on most cases and then not drawn at all.
+          TWO doors and never one: Gaia is the map the nursery walks by, and
+          its link does nothing on a phone without the app, so Maps always
+          stands beside it. Gaia is plain navigation rather than a new tab —
+          an app link opened in a new tab leaves an empty tab behind. */}
+      {fmtLatLng(c.location_lat, c.location_lng) && (
+        <div className="mt-2 px-3.5 py-[11px] bg-slate-50 border border-[#eef2f7] rounded-xl">
+          <div className={kk}>{t('nel.location')}</div>
+          <div className={vv}>📍 {fmtLatLng(c.location_lat, c.location_lng)}</div>
+          <div className="flex gap-2 mt-2">
+            <a href={gaiaHref(c.location_lat, c.location_lng)}
+              className="flex-1 text-center px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider text-white bg-[#1b4332]">
+              {t('nel.openGaia')}
+            </a>
+            <a href={mapsHref(c.location_lat, c.location_lng)} target="_blank" rel="noopener noreferrer"
+              className="flex-1 text-center px-3 py-2 rounded-lg text-[11px] font-black uppercase tracking-wider text-[#913673] bg-white border-[1.5px] border-slate-200">
+              {t('nel.openMaps')}
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* What was written about it — the one field saying what is actually
           wrong, and this window never showed it. */}
