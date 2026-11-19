@@ -69,11 +69,12 @@ function phone(name, card, sent) {
     lastCodeRef: { current: '' }, lastTimeRef: { current: 0 }, lastOverRef: { current: 0 },
     seenRef: { current: new Set() }, progressRef: { current: {} },
     pointRef: { current: point },
+    issuedOfRef: { current: () => 0 },
     flash: (text, kind) => said.push({ text, kind }),
     t: (k, v) => k + (v ? ' ' + JSON.stringify(v) : ''),
     beepDuplicate() {}, beepAlarm() {}, beepSuccess() {}, beepComplete() {}, vibrate() {}, setLastInfo() {},
     setProgress: (fn) => { L.progressRef.current = fn(L.progressRef.current); },
-    saveScanRecord: async (id, al, code, typed, pt) => { sent.push({ barcode: code, scan_point: pt && pt.id, scan_point_name: pt && pt.name }); },
+    saveScanRecord: async (id, al, code, typed, pt) => { sent.push({ barcode: code, scan_point: pt && pt.id, scan_point_name: pt && pt.name }); return L.__serverSays; },
     findBarcodeElsewhere: async () => null, takeBackScan() {}, labelOfConsent: () => 'another order',
     sealRangesText: () => '', useCallback: (fn) => fn, numText: (n) => String(n),
   });
@@ -159,6 +160,35 @@ if (A && B) {
     is(all.dropped.length, 4, 'asked to, it clears the earlier ones too');
     yes(all.progress.unique === 0 && all.progress.completedFired === false, 'and the card is no longer "complete"');
   }
+}
+
+if (A && B) {
+  console.log('\n4b. The order quantity is counted over EVERY scan point');
+  const C9 = { id: 'c9', al_number: 'AL-9', customer: 'Nine', qty: 9, memberIds: ['c9'] };
+  const srv = [], sA = [], sB = [];
+  const X = phone('Place X', C9, sA), Y = phone('Place Y', C9, sB);
+  for (let i = 1; i <= 9; i++) Y.rec('00900' + String(i).padStart(2, '0'), { typed: true });
+  sB.forEach((r) => srv.push(r)); X.hear(srv);
+  const r = X.rec('0090099', { typed: true });
+  yes(!r.ok && r.key === 'scan.orderFull', 'with 9 ordered and 9 taken at the other place, this phone cannot take one more (' + r.key + ')');
+  is(X.p().unique, 9, 'and the order still counts 9');
+  const ry = Y.rec('0090098', { typed: true });
+  yes(!ry.ok && ry.key === 'scan.orderFull', 'the place that took the nine cannot take a tenth either');
+
+  console.log('\n4c. A DO carries THIS phone own seals and the earlier ones, never the other place');
+  const C = { id: 'c5', al_number: 'AL-5', customer: 'Five', qty: 10, memberIds: ['c5'] };
+  const s2 = [], sx = [], sy = [];
+  const P = phone('P', C, sx), Q = phone('Q', C, sy);
+  ['0050001', '0050002'].forEach((c) => P.rec(c, { typed: true }));
+  ['0050003', '0050004', '0050005'].forEach((c) => Q.rec(c, { typed: true }));
+  sx.concat(sy).forEach((x) => s2.push(x));
+  s2.push({ barcode: '0050006' });   // an earlier scan, no point
+  P.hear(s2);
+  is(P.L.sealsMineForDO(P.p(), P.point.id).sort(), ['0050001', '0050002', '0050006'], 'P issues its own 2 and the 1 earlier seal, not Q 3');
+  const doCodes = /sealsMineForDO\(progressRef\.current\[consentId\]/.test(SRC);
+  yes(doCodes, 'the DO seals are picked by sealsMineForDO');
+  yes(/const newScans = sealsMineForDO\(/.test(SRC), 'and the DO quantity is this phone own count');
+  yes(!/data-reset-earlier/.test(SRC), 'Reset offers no button for the earlier scans');
 }
 
 console.log('\n5. The reset goes through ONE server function, and drops this point\'s queued scans');

@@ -29,7 +29,7 @@
    any phone may clear it, which is the only way an order carrying a
    thousand seals nobody can account for gets put right. */
 
-import { barcodeKey, defaultProgress, dedupeProgress, sealsAlreadyOnDO } from './store.js';
+import { barcodeKey, defaultProgress, dedupeProgress, sealsAlreadyOnDO, sealsForNextDO } from './store.js';
 
 const POINT_KEY = 'mjm.scan.point.v1';
 export const NO_POINT = '';
@@ -178,4 +178,26 @@ export function reconcileWithServer(cur, rows, myId, qty) {
     const id = pointOf[code] || NO_POINT;
     return id !== NO_POINT && id !== myId && !onServer.has(code);
   }, qty);
+}
+
+/* WHAT THIS PHONE ISSUES ON ITS DO: the seals it scanned itself that are not
+   on a DO yet -- never another named point's. A seal that names no point was
+   scanned before points existed (or by a phone on an older build); it is
+   nobody's, so whichever phone issues next takes it, which is what every DO
+   did before. Without that it could never go out on any DO at all. */
+export function sealsMineForDO(p, myId) {
+  const pointOf = (p && p.pointOf) || {};
+  return sealsForNextDO(p).filter((c) => {
+    const id = pointOf[barcodeKey(c)] || NO_POINT;
+    return id === NO_POINT || id === myId;
+  });
+}
+
+/* HOW MANY MORE SEALS THE ORDER TAKES, counted over EVERY scan point: the
+   order quantity, less what has gone out on a DO, less every seal waiting
+   for one wherever it was scanned. Nought means the order is full, and a
+   scan here is refused even though this phone has scanned none of it. */
+export function orderRoomLeft(p, qty, issued) {
+  const pending = sealsForNextDO(p).length;
+  return Math.max(0, (Number(qty) || 0) - (Number(issued) || 0) - pending);
 }

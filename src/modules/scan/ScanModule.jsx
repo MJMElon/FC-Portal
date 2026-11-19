@@ -38,13 +38,13 @@ import {
   sealFeatureLive,
   allocationsOf,
   sealVerdict,
-  sealsForNextDO,
+  barcodeKey,
   markSealsOnDO,
   fetchSealsOnDO,
   resetScans,
   broadcastReset,
 } from './store.js';
-import { myScanPoint, setScanPointName, markPoint, notePoints, countsByPoint, pointHolding, resetPoint, reconcileWithServer, NO_POINT } from './scanPoints.js';
+import { myScanPoint, setScanPointName, markPoint, notePoints, countsByPoint, pointHolding, resetPoint, reconcileWithServer, sealsMineForDO, orderRoomLeft, dropSeals, NO_POINT } from './scanPoints.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
 import Icon from '../../components/Icon.jsx';
 import { numText } from '../../lib/numberText.js';
@@ -81,6 +81,7 @@ export default function ScanModule() {
   /* The seals the DO being saved right now carries, so onDoSaved can mark
      them as gone once the save (or the queue) has taken it. */
   const doSealsRef = useRef(null);
+  const issuedOfRef = useRef(() => 0);
 
   // Issue DO popup state (opens the DO entry form in-place, no navigation).
   const [doEntry, setDoEntry] = useState(null); // { al, suggestQty, scannedQty, consentId }
@@ -136,6 +137,9 @@ export default function ScanModule() {
     return queuedDOALs().has(card.al_number) ? Math.max(local, share) : share;
   }
   activeRef.current = active;
+  /* recordScan is a callback that outlives renders, so it reads what has
+     gone out on a DO through this ref and not a stale closure. */
+  issuedOfRef.current = cardIssued;
 
   const sync = useCallback(async () => {
     setSyncing(true);
@@ -374,7 +378,10 @@ export default function ScanModule() {
   /* RESET THIS PHONE'S SCANS ON THE OPEN ORDER -- and, when asked, the
      earlier ones that name no point. Server first: a local reset the server
      does not know about would come straight back on the next read. */
-  async function resetMyScans(includeUnassigned) {
+  async function resetMyScans() {
+    /* This phone only, never the earlier scans: a seal nobody can name is not
+       this phone to clear. */
+    const includeUnassigned = false;
     const a = activeRef.current;
     if (!a) return { ok: false };
     if (!navigator.onLine) return { ok: false, msg: t('scan.resetNeedsLine') };
@@ -458,6 +465,21 @@ export default function ScanModule() {
         return { ok: false, key: 'scan.duplicate', vars: { code } };
       }
 
+      /* THE ORDER IS FULL, COUNTED OVER EVERY SCAN POINT. Two places can
+         scan one order, and the seals they take together may not pass the
+         order quantity: with 9 ordered and 9 taken at the other place,
+         this phone cannot take a 10th, though it has scanned none. The
+         database asks the same question as the row arrives, which is what
+         settles two phones taking the last seal in the same second. */
+      if (orderRoomLeft(progressRef.current[a.id], a.qty, issuedOfRef.current(a)) <= 0) {
+        const vars = { code, q: numText(a.qty) };
+        beepAlarm();
+        vibrate([120, 60, 120, 60, 200]);
+        setLastInfo({ key: 'scan.orderFull', vars });
+        flash(t('scan.orderFull', vars), 'danger');
+        return { ok: false, key: 'scan.orderFull', vars };
+      }
+
       /* A seal counted onto an earlier customer's lorry is spoken for, so
          it is NOT counted here -- it is the same seedlings being counted
          twice, and this order would be short by that much with nothing on
@@ -529,7 +551,24 @@ export default function ScanModule() {
       // Write to server so other devices see this scan in real time. With no
       // line it QUEUES instead of being skipped — see saveScanRecord — so the
       // other phones hear about it when the line returns rather than never.
-      saveScanRecord(a.id, a.al_number, code, typed, { id: pointRef.current.id, name: pointRef.current.name }).catch(() => {});
+      saveScanRecord(a.id, a.al_number, code, typed, { id: pointRef.current.id, name: pointRef.current.name })
+        .then((r) => {
+          if (r !== 'full') return;
+          /* The other place took the last seal first: this one is not on
+             the order, so it comes off this phone too. */
+          setProgress((prev) => {
+            const res = dropSeals(prev[a.id] || defaultProgress(), (c) => c === barcodeKey(code), a.qty);
+            if (!res.dropped.length) return prev;
+            const map = { ...prev, [a.id]: res.progress };
+            saveProgress(map);
+            return map;
+          });
+          if (activeRef.current?.id === a.id) seenRef.current.delete(code);
+          beepAlarm();
+          vibrate([120, 60, 120, 60, 200]);
+          flash(t('scan.orderFull', { code, q: numText(a.qty) }), 'danger');
+        })
+        .catch(() => {});
 
       // Does this seal already belong to a DIFFERENT order? Scanning stays
       // fast/optimistic — this runs in the background and flags the entry
@@ -683,7 +722,9 @@ export default function ScanModule() {
     setIssuing(false);
     // This card's own share of what has gone out -- see cardIssued.
     const issuedQty = cardIssued(consent);
-    const newScans = Math.max(0, consent.unique - issuedQty);
+    /* THIS PHONE'S OWN SEALS, not the order's: the other place issues its
+       own DO for what it scanned. See sealsMineForDO. */
+    const newScans = sealsMineForDO(progressRef.current[consent.id] || defaultProgress(), pointRef.current.id).length;
     const remainingBalance = Math.max(0, consent.qty - issuedQty);
     const suggestQty = newScans > 0 ? newScans : remainingBalance;
     /* WHAT THE SCANNER ACTUALLY COUNTED, which the delivery order is then
@@ -714,7 +755,7 @@ export default function ScanModule() {
   function withSeals(args, consentId) {
     doSealsRef.current = null;
     if (!consentId) return args;
-    const codes = sealsForNextDO(progressRef.current[consentId] || defaultProgress());
+    const codes = sealsMineForDO(progressRef.current[consentId] || defaultProgress(), pointRef.current.id);
     doSealsRef.current = { consentId, codes };
     const seals = codes.filter((c) => sealDigits(c) != null);
     if (!seals.length || !sealFeatureLive()) return args;
@@ -1095,13 +1136,15 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
   const [resetSaid, setResetSaid] = useState(null);
   const [nameDraft, setNameDraft] = useState(null);
   const myCount = (pointCounts.find((p) => p.mine) || {}).n || 0;
-  const earlierCount = (pointCounts.find((p) => p.id === NO_POINT) || {}).n || 0;
+  /* What THIS phone's DO will carry: its own seals not yet on a DO, and the
+     earlier ones that name no point. Never the other place's. */
+  const myToIssue = point ? sealsMineForDO(consent, point.id).length : 0;
   const manyPoints = pointCounts.filter((p) => p.n > 0).length > 1;
   async function doReset(withEarlier) {
     if (resetBusy || !onReset) return;
     setResetBusy(true);
     setResetSaid(null);
-    const r = await onReset(withEarlier);
+    const r = await onReset(false);
     setResetBusy(false);
     if (r && r.ok) setResetOpen(false);
     else setResetSaid((r && r.msg) || null);
@@ -1569,7 +1612,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
           <button
             type="button"
             data-reset-open
-            disabled={!(myCount + earlierCount)}
+            disabled={!myCount}
             onClick={() => { setResetSaid(null); setResetOpen(true); }}
             className="font-mono text-[11px] uppercase tracking-wider text-red-300 border border-red-700/60 disabled:opacity-40 rounded-lg px-3 py-1 hover:bg-red-600 hover:text-white transition-colors"
           >
@@ -1615,12 +1658,6 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                 className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white font-mono text-xs font-bold uppercase tracking-wider rounded-xl py-3">
                 {t('scan.resetMineBtn', { n: numText(myCount) })}
               </button>
-              {earlierCount > 0 && (
-                <button type="button" data-reset-earlier disabled={resetBusy} onClick={() => doReset(true)}
-                  className="w-full border border-red-700/60 text-red-300 font-mono text-xs uppercase tracking-wider rounded-xl py-3 disabled:opacity-40">
-                  {t('scan.resetEarlierBtn', { n: numText(earlierCount) })}
-                </button>
-              )}
               <button type="button" disabled={resetBusy} onClick={() => setResetOpen(false)}
                 className="w-full border border-[#243244] text-slate-300 font-mono text-xs uppercase tracking-wider rounded-xl py-3">
                 {t('common.cancel')}
@@ -1756,6 +1793,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
         className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-mono font-bold text-sm uppercase tracking-wider rounded-xl py-4 mb-3 flex items-center justify-center gap-2"
       >
         <Icon name="clipboard" className="w-4 h-4" /> {issuing ? t('do.saving') : t('scan.issueDO')}
+        {!issuing && myToIssue > 0 && <span className="font-normal normal-case opacity-90">· {t('scan.issueMine', { n: numText(myToIssue) })}</span>}
       </button>
 
       {activeDOs.length > 0 && (

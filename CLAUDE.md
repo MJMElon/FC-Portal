@@ -609,9 +609,16 @@ mine first.
   `reset` on `fcportal_scan:<card>`; the other phones re-read the table
   (also every 20 s) and `reconcileWithServer` takes off another point's
   seals the server no longer has. It needs a line.
-- **Seals with no point are "Earlier scans"** — written before this —
-  and the second Reset button clears them too. That is how an order
-  carrying seals nobody can account for is put right.
+- **Reset clears THIS phone's scans and nothing else** — not another
+  point's, not the "Earlier scans" that name no point (the office asked
+  for that; Imbok's were cleared by the SQL instead).
+- **A DO carries this phone's own seals** (`sealsMineForDO`), plus any
+  earlier seal that names no point, never another place's.
+- **The order quantity is counted over every point** (`orderRoomLeft`): 9
+  ordered and 9 taken at the other place means this phone is refused. The
+  database trigger `fcportal_scan_cap` asks the same per AL, which is what
+  settles two phones taking the last seal in the same second; the phone
+  reads `MJM_ORDER_FULL` and takes the seal back.
 
 ## A DO is sent once, and a queued one is never lost
 

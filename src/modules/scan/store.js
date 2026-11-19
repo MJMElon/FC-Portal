@@ -654,9 +654,22 @@ export async function saveScanRecord(consentId, alNumber, barcode, typed, point)
       await queueJob(SCAN_JOB, { consentId, alNumber, barcode, typed: !!typed, point: point || null });
       return;
     }
+    /* THE ORDER IS FULL: another scan point took the last seal a moment
+       before this one reached the table. The database is the only place
+       that can see both phones at once, so its answer stands and the
+       caller takes the seal back off this phone. */
+    if (isOrderFull(e)) return 'full';
     // The server refused it for a reason of its own; the local progress
     // still holds the scan, which is the behaviour this call always had.
   }
+}
+
+/* The refusal fcportal_scan_cap raises when an order already holds all the
+   seals its consents allow. Matched on the words, never the code alone:
+   P0001 is every RAISE EXCEPTION in the database. */
+export function isOrderFull(e) {
+  const m = String((e && (e.message || e.details || e.hint)) || e || '');
+  return m.indexOf('MJM_ORDER_FULL') >= 0;
 }
 
 export function flushScanRecords() {

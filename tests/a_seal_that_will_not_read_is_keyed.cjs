@@ -93,6 +93,7 @@ function build(card, allocs) {
     seenRef: { current: new Set() },
     progressRef: { current: {} },
     pointRef: { current: { id: 'sp-test', name: 'Test point' } },
+    issuedOfRef: { current: () => 0 },
     flash: (text, kind) => said.push({ text, kind }),
     t: (k, v) => k + (v ? ' ' + JSON.stringify(v) : ''),
     beepDuplicate: () => {}, beepAlarm: () => {}, beepSuccess: () => {}, beepComplete: () => {},
@@ -167,8 +168,10 @@ const ALLOCS = [{ consent_id: 'c1', al_number: 'AL-1', start_no: 35190, end_no: 
   const { rec } = build(CARD, ALLOCS);
   ['0035190', '0035191', '0035192', '0035193', '0035194'].forEach((c) => rec(c, { typed: true }));
   const over = rec('0035195', { typed: true });
-  is(over.ok, true, 'the sixth seal on a card of five is still recorded');
-  is(over.key, 'scan.overItem', 'and comes back saying it is over, not merely added');
+  /* The order is full: a sixth seal on a card of five is refused now, keyed
+     or scanned alike, and never counted (one_order_two_scan_points.cjs). */
+  is(over.ok, false, 'the sixth seal on a card of five is refused');
+  is(over.key, 'scan.orderFull', 'and says the order is full');
 }
 
 /* ── 6. Nothing typed is nothing done ────────────────────────────────── */
