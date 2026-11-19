@@ -65,7 +65,11 @@ const recordSrc = liftArrow(SRC, 'const recordScan = useCallback(', '(rawCode, o
    away and loaded side by side -- store.js leans on sealNo/sealDigits, and
    a stub of those would be a second copy of the very rule under test. */
 const strip = (f) => R(f).replace(/^import .*$/gm, '').replace(/^export /gm, '');
-const store = strip('src/lib/sealRanges.js') + '\n' + strip('src/modules/scan/store.js');
+const store = strip('src/lib/sealRanges.js') + '\n' + strip('src/modules/scan/store.js')
+  /* scanPoints.js rides beside store.js where it exists (the scan point of
+     each seal, see that file) -- recordScan leans on markPoint and
+     pointHolding, and a stub of them would be a second copy. */
+  + (fs.existsSync(require('path').join(__dirname, '..', 'src/modules/scan/scanPoints.js')) ? '\n' + strip('src/modules/scan/scanPoints.js') : '');
 
 const said = [];          // every flash the run put up
 const sent = [];          // every row handed to the server
@@ -88,6 +92,7 @@ function build(card, allocs) {
     lastOverRef: { current: 0 },
     seenRef: { current: new Set() },
     progressRef: { current: {} },
+    pointRef: { current: { id: 'sp-test', name: 'Test point' } },
     flash: (text, kind) => said.push({ text, kind }),
     t: (k, v) => k + (v ? ' ' + JSON.stringify(v) : ''),
     beepDuplicate: () => {}, beepAlarm: () => {}, beepSuccess: () => {}, beepComplete: () => {},

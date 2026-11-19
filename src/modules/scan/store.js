@@ -1,6 +1,6 @@
 import { supabase } from '../../lib/supabase.js';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
-import { PERMANENT, flushOutbox, looksOffline, queueJob } from '../../lib/outbox.js';
+import { PERMANENT, flushOutbox, looksOffline, queueJob, listJobs, removeJob } from '../../lib/outbox.js';
 import { sealNo, rangeHolding } from '../../lib/sealRanges.js';
 
 // The scan list is now driven by SIGNED CONSENTS from the mobile web
@@ -599,17 +599,35 @@ export function markSealsOnDO(p, codes) {
    over a column it has not got, so a refusal that NAMES the column drops it,
    is remembered for the session, and the same row goes again at once -- the
    seal is never lost over the mark. Any other refusal is not that answer. */
-let _noKeyedCol = false;
-const _namesKeyedCol = (e) => !!e && /keyed_by_hand/.test(String(e.message || '') + ' ' + String(e.details || ''))
-  && (e.code === '42703' || e.code === 'PGRST204' || /column/i.test(String(e.message || '')));
+/* Optional columns: keyed_by_hand, and the SCAN POINT pair (scan_point,
+   scan_point_name) that says which phone took the seal -- see scanPoints.js.
+   A database that has not had the SQL run refuses the WHOLE row over a
+   column it has not got, so a refusal that NAMES one of them drops that
+   column, is remembered for the session, and the same row goes again at
+   once. The seal is never lost over a label. Any other refusal is not that
+   answer and disables nothing. */
+const _noCol = new Set();
+const OPTIONAL_COLS = ['keyed_by_hand', 'scan_point', 'scan_point_name'];
+function _namedOptional(e) {
+  if (!e) return null;
+  const text = String(e.message || '') + ' ' + String(e.details || '') + ' ' + String(e.hint || '');
+  if (!(e.code === '42703' || e.code === 'PGRST204' || /column/i.test(text))) return null;
+  return OPTIONAL_COLS.find((c) => text.indexOf(c) >= 0) || null;
+}
+export function scanPointColumnLive() { return !_noCol.has('scan_point'); }
 
-export async function insertScanRecord(consentId, alNumber, barcode, typed) {
+export async function insertScanRecord(consentId, alNumber, barcode, typed, point) {
   const row = { consent_id: consentId, al_number: alNumber, barcode };
-  if (typed && !_noKeyedCol) row.keyed_by_hand = true;
+  if (typed) row.keyed_by_hand = true;
+  if (point && point.id) { row.scan_point = point.id; row.scan_point_name = point.name || null; }
+  _noCol.forEach((c) => { delete row[c]; });
   let { error } = await supabase.from('fcportal_scan_records').insert(row);
-  if (error && row.keyed_by_hand && _namesKeyedCol(error)) {
-    _noKeyedCol = true;
-    delete row.keyed_by_hand;
+  for (let i = 0; error && i < OPTIONAL_COLS.length; i++) {
+    const col = _namedOptional(error);
+    if (!col || !(col in row)) break;
+    _noCol.add(col);
+    if (col === 'scan_point' || col === 'scan_point_name') { delete row.scan_point; delete row.scan_point_name; _noCol.add('scan_point'); _noCol.add('scan_point_name'); }
+    delete row[col];
     ({ error } = await supabase.from('fcportal_scan_records').insert(row));
   }
   if (error && error.code !== '23505') throw error; // 23505 = unique_violation (safe to ignore)
@@ -628,12 +646,12 @@ export async function insertScanRecord(consentId, alNumber, barcode, typed) {
  */
 export const SCAN_JOB = 'scan_record';
 
-export async function saveScanRecord(consentId, alNumber, barcode, typed) {
+export async function saveScanRecord(consentId, alNumber, barcode, typed, point) {
   try {
-    await insertScanRecord(consentId, alNumber, barcode, typed);
+    await insertScanRecord(consentId, alNumber, barcode, typed, point);
   } catch (e) {
     if (looksOffline(e)) {
-      await queueJob(SCAN_JOB, { consentId, alNumber, barcode, typed: !!typed });
+      await queueJob(SCAN_JOB, { consentId, alNumber, barcode, typed: !!typed, point: point || null });
       return;
     }
     // The server refused it for a reason of its own; the local progress
@@ -645,7 +663,7 @@ export function flushScanRecords() {
   return flushOutbox({
     [SCAN_JOB]: async (p) => {
       try {
-        await insertScanRecord(p.consentId, p.alNumber, p.barcode, p.typed);
+        await insertScanRecord(p.consentId, p.alNumber, p.barcode, p.typed, p.point);
       } catch (e) {
         if (looksOffline(e)) throw e;      // try again later
         throw new Error(PERMANENT);        // the server refused the row itself
@@ -659,13 +677,63 @@ export function flushScanRecords() {
 // against any of its member rows, not only the group's anchor.
 export async function fetchScanRecords(consentIds) {
   const ids = Array.isArray(consentIds) ? consentIds : [consentIds];
-  const { data, error } = await supabase
-    .from('fcportal_scan_records')
-    .select('barcode, scanned_at')
-    .in('consent_id', ids)
-    .order('scanned_at', { ascending: true });
+  /* Paged: an order of 1,200 seals is past the 1,000 rows PostgREST hands
+     back in one answer, and a short read here reads as seals another phone
+     reset -- see reconcileWithServer. Ordered on the unique (consent_id, barcode) as well, so
+     a page boundary cannot fall inside a run of rows sharing one timestamp. */
+  const cols = scanPointColumnLive() ? 'barcode, scanned_at, scan_point, scan_point_name' : 'barcode, scanned_at';
+  const all = [];
+  for (let from = 0; from < 50000; from += 1000) {
+    let { data, error } = await supabase
+      .from('fcportal_scan_records')
+      .select(cols)
+      .in('consent_id', ids)
+      .order('scanned_at', { ascending: true })
+      .order('consent_id', { ascending: true })
+      .order('barcode', { ascending: true })
+      .range(from, from + 999);
+    if (error && cols !== 'barcode, scanned_at' && _namedOptional(error)) {
+      _noCol.add('scan_point'); _noCol.add('scan_point_name');
+      return fetchScanRecords(consentIds);
+    }
+    if (error) throw error;
+    all.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return all;
+}
+
+/* RESET A SCAN POINT'S PART of an order. The rows go from the table, so every
+   other phone hears it (the broadcast below, and the next read), and nothing
+   any other point scanned is touched. A seal already on a DO is never
+   cleared: that is a real collection. With includeUnassigned the older rows
+   that name no point go too -- they are nobody's now.
+
+   The table has no delete in this app, so it is one database function that
+   checks all of that itself (shared/RUN_ME_scan_points.sql in the office
+   repository). Needs a line: a reset done offline would be undone by the
+   very next read, the rows still being on the server. Answers the number of
+   rows the server took off. */
+export async function resetScans(consentIds, pointId, includeUnassigned) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  const { data, error } = await supabase.rpc('fcportal_reset_scans', {
+    p_consent_ids: ids,
+    p_scan_point: pointId || '',
+    p_unassigned: !!includeUnassigned,
+  });
   if (error) throw error;
-  return data || [];
+  /* A seal of this point still waiting in the outbox would put the row
+     straight back on the next flush. */
+  try {
+    const jobs = await listJobs();
+    for (const j of jobs) {
+      if (j.kind !== SCAN_JOB || !j.payload) continue;
+      if (!ids.includes(String(j.payload.consentId))) continue;
+      const jp = (j.payload.point && j.payload.point.id) || '';
+      if (jp === pointId || (includeUnassigned && !jp)) await removeJob(j.uid);
+    }
+  } catch (_) { /* the outbox could not be read: the next read heals it */ }
+  return Number(data) || 0;
 }
 
 // Barcodes on these consents that a DO has already carried, on any device
@@ -707,17 +775,29 @@ export async function findBarcodeElsewhere(barcode, excludeConsentIds) {
 // Subscribe to live INSERTs across one or more consent ids. callback(barcode)
 // fires when another device scans a new seal against any of them. Returns
 // the channel — pass to unsubscribeScanRecords().
-export function subscribeScanRecords(consentIds, callback) {
+export function subscribeScanRecords(consentIds, callback, onReset) {
   const ids = Array.isArray(consentIds) ? consentIds : [consentIds];
+  /* The channel is named after the card's ANCHOR only, so every phone on the
+     same order joins the same channel whatever members its list happens to
+     hold -- the reset broadcast has to reach all of them. */
   return supabase
-    .channel('fcportal_scan:' + ids.join(','))
+    .channel('fcportal_scan:' + ids[0])
     .on('postgres_changes', {
       event: 'INSERT',
       schema: 'public',
       table: 'fcportal_scan_records',
       filter: `consent_id=in.(${ids.join(',')})`,
-    }, (payload) => callback(payload.new.barcode))
+    }, (payload) => callback(payload.new.barcode, payload.new))
+    .on('broadcast', { event: 'reset' }, (msg) => { if (onReset) onReset(msg && msg.payload); })
     .subscribe();
+}
+
+/** Tell the other phones on this order that a point was reset. Best effort:
+    a phone that misses it reconciles on its next read anyway. */
+export function broadcastReset(channel, payload) {
+  try {
+    if (channel) channel.send({ type: 'broadcast', event: 'reset', payload: payload || {} });
+  } catch (_) { /* ignore */ }
 }
 
 export function unsubscribeScanRecords(channel) {

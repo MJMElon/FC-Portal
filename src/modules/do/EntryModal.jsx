@@ -3,7 +3,7 @@ import CfSelect from '../../components/CfSelect.jsx';
 import SignaturePad from './SignaturePad.jsx';
 import { useLang } from '../../context/LanguageContext.jsx';
 import { callGemini, compressImage, DO_SCAN_PROMPT } from '../../lib/gemini.js';
-import { generateDONumber, offlineDONumber, loadPlotBreeds, loosePlot } from './data.js';
+import { generateDONumber, offlineDONumber, loadPlotBreeds, loosePlot, newDOPressId } from './data.js';
 import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
 import { rowQty, lineCount, totalQty as sumQty, scanTally, applyScannedQty } from './qty.js';
 import Icon from '../../components/Icon.jsx';
@@ -54,6 +54,15 @@ export default function EntryModal({ al, plots, breeds, batchMap, photoBase64, i
   });
   const [aiState, setAiState] = useState(photoBase64 ? 'loading' : 'manual');
   const [saving, setSaving] = useState(false);
+  /* ONE PRESS OF THIS FORM IS ONE DO. `saving` is React state, so two taps
+     inside one frame both ran save() before the button greyed out -- and each
+     got a fresh client_uid in persistDO, so the database could not tell the
+     second from a new delivery: two DOs for one lorry. The ref stops the
+     second tap at once, and the press id is made ONCE per form, so even a
+     save that is pressed again after a failure is recognised as the same DO. */
+  const savingRef = useRef(false);
+  const pressIdRef = useRef(null);
+  if (!pressIdRef.current) pressIdRef.current = newDOPressId();
   const [capturedPhoto, setCapturedPhoto] = useState(null);
   const sigRef = useRef(null);
   const photoInputRef = useRef(null);
@@ -268,6 +277,7 @@ const MAX_LINES = 5;
   }
 
   async function save() {
+    if (savingRef.current) return;
     const items = expandRows(rows)
       .filter((it) => it.nursery || it.plot || it.batch || it.breed || it.qty > 0);
     if (items.length > MAX_LINES) return alert(t('do.maxRows'));
@@ -282,6 +292,7 @@ const MAX_LINES = 5;
     if (!sigRef.current?.hasSig()) return alert(t('do.pleaseSign'));
 
     const sigDataUrl = sigRef.current.toDataURL();
+    savingRef.current = true;
     setSaving(true);
 
     const payload = {
@@ -291,6 +302,7 @@ const MAX_LINES = 5;
       total_qty: totalQty,
       remark: al.customer_name,
       status: 'Delivered',
+      client_uid: pressIdRef.current,
     };
     // Store plot name in plot_N: prefer explicit plot selection, fall back to nursery name.
     items.slice(0, 5).forEach((it, i) => {
@@ -310,9 +322,11 @@ const MAX_LINES = 5;
     try {
       res = await onSubmit({ payload, photoBase64: capturedPhoto || photoBase64, al, sigDataUrl });
     } catch (e) {
+      savingRef.current = false;
       setSaving(false);
       return alert(t('do.saveError', { msg: e.message }));
     }
+    savingRef.current = false;
     setSaving(false);
     onSaved(res.payload, sigDataUrl, res.queued, capturedPhoto || photoBase64, res.savedRow || null);
   }

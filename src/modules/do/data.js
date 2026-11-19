@@ -421,23 +421,90 @@ function writeDOQueue(arr) {
   }
 }
 // Queue a DO (with its photo as base64) for later sync. Returns the new length.
+// A press already on the queue is not queued twice -- the same press saved
+// again (a second tap, a retry) is the same DO.
 export function queueDO(entry) {
   const q = readDOQueue();
-  q.push({ ...entry, queuedAt: Date.now() });
+  const uid = entry && entry.payload && entry.payload.client_uid;
+  if (uid && q.some((j) => j && j.payload && j.payload.client_uid === uid)) return q.length;
+  q.push({ ...entry, queuedAt: Date.now(), qid: uid || 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) });
   writeDOQueue(q);
   return q.length;
+}
+
+/* What is waiting, for the screen: a DO stuck on a phone is a DO the office
+   cannot see, and nothing said so. */
+export function doQueueSummary() {
+  const q = readDOQueue();
+  const last = q.filter((j) => j && j.lastError).sort((a, b) => (b.lastTriedAt || 0) - (a.lastTriedAt || 0))[0];
+  return { n: q.length, lastError: last ? last.lastError : null };
+}
+
+const _qidOf = (j) => (j && (j.qid || (j.payload && j.payload.client_uid) || j.queuedAt)) || null;
+
+/* Take ONE item off the queue, re-reading it first. The flush used to write
+   back the list it read at the START -- so a DO queued while a flush was
+   running (minutes, on a nursery signal) was wiped off the phone: a DO that
+   never reached the system. */
+function _dropFromQueue(qid) {
+  writeDOQueue(readDOQueue().filter((j) => _qidOf(j) !== qid));
+}
+function _noteQueueFailure(qid, err) {
+  const q = readDOQueue();
+  q.forEach((j) => {
+    if (_qidOf(j) !== qid) return;
+    j.tries = (j.tries || 0) + 1;
+    j.lastTriedAt = Date.now();
+    j.lastError = String((err && (err.message || err.details)) || err || '').slice(0, 200) || null;
+  });
+  writeDOQueue(q);
+}
+
+/* THE SAME DO, FOUND WITHOUT client_uid. On a database where the press id
+   cannot be asked (the column not there), a queued DO whose insert landed
+   and lost its answer would be inserted a second time -- the "many DOs" the
+   office sees. So it is looked for by what it IS: the same order, day,
+   quantity and first line. Only ever asked when client_uid cannot answer. */
+async function _doBySignature(p) {
+  try {
+    let q = supabase.from('shared_do_records').select('*')
+      .eq('al_number', p.al_number)
+      .eq('total_qty', p.total_qty);
+    if (p.delivery_date) q = q.eq('delivery_date', p.delivery_date);
+    if (p.plot_1) q = q.eq('plot_1', p.plot_1);
+    if (p.qty_1 != null) q = q.eq('qty_1', p.qty_1);
+    const { data, error } = await q.limit(1);
+    if (error) return null;
+    return (data && data[0]) || null;
+  } catch (_) { return null; }
 }
 
 // Push every queued DO to Supabase. Offline-placeholder DO numbers (containing
 // "OFF") are replaced with a real sequential number before insert so the
 // running sequence stays clean. Items that fail stay queued for the next
 // attempt. Returns { synced, remaining }.
-export async function flushDOQueue() {
-  let q = readDOQueue();
+//
+// ONE FLUSH AT A TIME. The scan module, the DO module and the reconnect all
+// call this, and two at once read the same queue and both insert it -- a DO
+// twice. A second call joins the one already running, and a second TAB waits
+// on the browser lock where there is one.
+let _flushing = null;
+export function flushDOQueue() {
+  if (_flushing) return _flushing;
+  const run = () => _flushDOQueueOnce();
+  const go = (typeof navigator !== 'undefined' && navigator.locks && navigator.locks.request)
+    ? navigator.locks.request('mjm-do-flush', run)
+    : run();
+  _flushing = Promise.resolve(go).finally(() => { _flushing = null; });
+  return _flushing;
+}
+
+async function _flushDOQueueOnce() {
+  const q = readDOQueue();
   if (!q.length) return { synced: 0, remaining: 0 };
-  const remaining = [];
   let synced = 0;
   for (const item of q) {
+    const qid = _qidOf(item);
     try {
       const payload = { ...item.payload };
       const { data: alRow } = await supabase
@@ -445,23 +512,20 @@ export async function flushDOQueue() {
         .select('*')
         .eq('al_number', payload.al_number)
         .maybeSingle();
-      // Replace offline placeholder numbers with the real per-order running
-      // number now that we are online. The loop is sequential so each DO gets
-      // a unique number.
       // A press already in the table (the save landed, its answer was lost)
       // is retired as synced, whatever number it carries.
-      if (payload.client_uid && await _doByPress(payload.client_uid)) { synced++; continue; }
+      if (payload.client_uid && await _doByPress(payload.client_uid)) { _dropFromQueue(qid); synced++; continue; }
+      if ((!payload.client_uid || _doNoClientUid) && await _doBySignature(payload)) { _dropFromQueue(qid); synced++; continue; }
       if (payload.do_number && /OFF/i.test(payload.do_number)) {
         payload.do_number = await generateDONumber(alRow || { al_number: payload.al_number });
       } else if (payload.do_number) {
         // A queued DO with a REAL number is usually one whose insert landed
-        // and whose acknowledgement was lost — a timeout is not a refusal
-        // (the audit outbox learned this the hard way). Inserting it again is
-        // the second copy the office sees on the DO list. So the table is
-        // asked first: the same DO already there (same number, order, day and
-        // quantity) is retired as synced; a DIFFERENT row wearing this number
-        // means the number was taken while this one waited, and the queued DO
-        // gets the next free number instead of a twin.
+        // and whose acknowledgement was lost — a timeout is not a refusal.
+        // Inserting it again is the second copy the office sees on the DO
+        // list. So the table is asked first: the same DO already there (same
+        // number, order, day and quantity) is retired as synced; a DIFFERENT
+        // row wearing this number means the number was taken while this one
+        // waited, and the queued DO gets the next free number instead.
         const { data: existing } = await supabase
           .from('shared_do_records')
           .select('id, total_qty, delivery_date')
@@ -469,7 +533,7 @@ export async function flushDOQueue() {
           .eq('al_number', payload.al_number);
         const sameRow = (existing || []).some((r) =>
           Number(r.total_qty) === Number(payload.total_qty) && r.delivery_date === payload.delivery_date);
-        if (sameRow) { synced++; continue; }
+        if (sameRow) { _dropFromQueue(qid); synced++; continue; }
         if ((existing || []).length) {
           payload.do_number = await generateDONumber(alRow || { al_number: payload.al_number });
         }
@@ -481,23 +545,27 @@ export async function flushDOQueue() {
         payload.signature_url = await uploadDOSignature(item.sigDataUrl, payload.al_number, payload.do_number);
       }
       let inserted;
-      try { inserted = await insertDORow(payload); } catch (e) { remaining.push(item); continue; }
+      try { inserted = await insertDORow(payload); } catch (e) { _noteQueueFailure(qid, e); continue; }
+      /* In the table now: off the queue BEFORE anything else can fail, so a
+         reload or a blip from here on cannot send it a second time. */
+      _dropFromQueue(qid);
       if (inserted.row && inserted.row.do_number) payload.do_number = inserted.row.do_number;
       if (inserted.existed) { synced++; continue; }
       if (alRow) {
-        await supabase
-          .from('shared_al_orders')
-          .update({ balance_quantity: (alRow.balance_quantity || 0) - (payload.total_qty || 0) })
-          .eq('id', alRow.id);
+        try {
+          await supabase
+            .from('shared_al_orders')
+            .update({ balance_quantity: (alRow.balance_quantity || 0) - (payload.total_qty || 0) })
+            .eq('id', alRow.id);
+        } catch (_) { /* the DO is saved; the balance heals off the DO rows */ }
       }
       await attachDOToOrder({ payload, al: alRow || { al_number: payload.al_number }, staff: item.staff, sigDataUrl: item.sigDataUrl, photoBase64: item.photoBase64 });
       synced++;
     } catch (e) {
-      remaining.push(item);
+      _noteQueueFailure(qid, e);
     }
   }
-  writeDOQueue(remaining);
-  return { synced, remaining: remaining.length };
+  return { synced, remaining: readDOQueue().length };
 }
 
 // ── Who loaded this DO ──────────────────────────────────────────────────

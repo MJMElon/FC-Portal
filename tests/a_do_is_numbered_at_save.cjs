@@ -95,7 +95,9 @@ function makeSupabase(state) {
       state.dos.push(...rows);
       state.inserts.push(...rows);
       if (state.loseAckOnce) { state.loseAckOnce = false; return Promise.reject(new Error('timed out (the row landed)')); }
-      return Promise.resolve({ data: q.single ? rows[0] : rows, error: null });
+      const ans = { data: q.single ? rows[0] : rows, error: null };
+      if (state.slowInsert) return new Promise((r) => setTimeout(() => r(ans), state.slowInsert));
+      return Promise.resolve(ans);
     }
     // select
     let rows = (q.table === 'shared_al_orders' ? state.als : state.dos).slice();
@@ -133,7 +135,7 @@ function build(state) {
   const store = {};
   const ctx = {
     console, Date, JSON, Math, Object, Array, String, Number, Boolean, Promise, parseInt, Error,
-    crypto: require("crypto").webcrypto,
+    crypto: require("crypto").webcrypto, setTimeout,
     navigator: { onLine: true },
     localStorage: {
       getItem: (k) => (k in store ? store[k] : null),
@@ -161,7 +163,13 @@ function build(state) {
     grab('export function ', 'readDOQueue'),
     grab('function ', 'writeDOQueue'),
     grab('export function ', 'queueDO'),
-    grab('export async function ', 'flushDOQueue'),
+    tryLine(/^const _qidOf = .*$/m),
+    tryGrab('function ', '_dropFromQueue'),
+    tryGrab('function ', '_noteQueueFailure'),
+    tryGrab('async function ', '_doBySignature'),
+    tryLine(/^let _flushing = .*$/m),
+    tryGrab('async function ', '_flushDOQueueOnce'),
+    (SRC.includes('export function flushDOQueue') ? grab('export function ', 'flushDOQueue') : grab('export async function ', 'flushDOQueue')),
     ';globalThis.__api = { generateDONumber, persistDO, flushDOQueue, readDOQueue, queueDO };',
   ].join('\n'), ctx);
   return vm.runInContext('__api', ctx);
@@ -283,6 +291,59 @@ const payloadOf = (doNumber, qty) => ({
     const r = await api.persistDO({ payload: payloadOf('DO-MUGJB901', 13), al: AL });
     yes(!r.queued && state.dos.length === 1, 'saved straight in, one row');
     yes(!('client_uid' in (state.dos[0] || {})), 'without the column the database does not have');
+  }
+
+  // ── 8. Two flushes at once insert ONE DO ─────────────────────────────
+  console.log('\n8. The scan module and the DO module flushing at the same moment send a queued DO once');
+  {
+    const state = freshState();
+    state.noUidColumn = true;          // the case where the press id cannot save anybody
+    state.slowInsert = 30;
+    const api = build(state);
+    api.queueDO({ payload: payloadOf('DO-MUGJB9OFFAAA', 20) });
+    await Promise.all([api.flushDOQueue(), api.flushDOQueue(), api.flushDOQueue()]);
+    is(state.dos.length, 1, 'three flushes started together put the DO in the table ONCE');
+    is(api.readDOQueue().length, 0, 'and it has left the queue');
+  }
+
+  // ── 9. A DO queued while a flush runs is not wiped off the phone ─────
+  console.log('\n9. A DO saved offline WHILE a flush is sending another one stays queued');
+  {
+    const state = freshState();
+    state.slowInsert = 40;
+    const api = build(state);
+    api.queueDO({ payload: payloadOf('DO-MUGJB9OFFAAA', 20) });
+    const running = api.flushDOQueue();
+    await new Promise((r) => setTimeout(r, 10));
+    api.queueDO({ payload: { ...payloadOf('DO-MUGJB9OFFBBB', 30), client_uid: 'press-b' } });
+    await running;
+    yes(api.readDOQueue().some((j) => j.payload.total_qty === 30),
+      'the 30 queued mid-flush is still on the phone (it used to be overwritten by the list the flush read at the start)');
+    await api.flushDOQueue();
+    is(state.dos.map((d) => d.total_qty).sort(), [20, 30], 'and the next flush sends it: both DOs reach the system');
+  }
+
+  // ── 10. A lost answer with no client_uid column is not a twin ────────
+  console.log('\n10. With no client_uid column, a save that landed and lost its answer is found by what it is');
+  {
+    const state = freshState();
+    state.noUidColumn = true;
+    const api = build(state);
+    state.loseAckOnce = true;
+    const r = await api.persistDO({ payload: payloadOf('DO-MUGJB901', 47), al: AL });
+    is(r.queued, true, 'the phone heard nothing back and queued it');
+    await api.flushDOQueue();
+    is(state.dos.length, 1, 'the flush found the row already there: ONE DO, not two');
+  }
+
+  // ── 11. A press saved twice is queued once ───────────────────────────
+  console.log('\n11. The same press queued twice is one queue entry');
+  {
+    const state = freshState();
+    const api = build(state);
+    api.queueDO({ payload: { ...payloadOf('DO-MUGJB9OFFAAA', 20), client_uid: 'p1' } });
+    api.queueDO({ payload: { ...payloadOf('DO-MUGJB9OFFAAA', 20), client_uid: 'p1' } });
+    is(api.readDOQueue().length, 1, 'one entry for one press');
   }
 
   console.log('\n' + (failed ? failed + ' FAILED' : 'all checks passed'));
