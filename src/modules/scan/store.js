@@ -716,6 +716,23 @@ export async function fetchScanRecords(consentIds) {
   return all;
 }
 
+/* THE SEALS OF THESE CONSENTS STILL WAITING IN THE OUTBOX, as a Set of
+   barcodes -- or null when the outbox could not be read, which the caller
+   must treat as "anything might be waiting" (see reconcileWithServer). */
+export async function waitingScanCodes(consentIds) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  try {
+    const jobs = await listJobs();
+    const out = new Set();
+    for (const j of jobs) {
+      if (j.kind !== SCAN_JOB || !j.payload) continue;
+      if (!ids.includes(String(j.payload.consentId))) continue;
+      out.add(barcodeKey(j.payload.barcode));
+    }
+    return out;
+  } catch (_) { return null; }
+}
+
 /* RESET A SCAN POINT'S PART of an order. The rows go from the table, so every
    other phone hears it (the broadcast below, and the next read), and nothing
    any other point scanned is touched. A seal already on a DO is never

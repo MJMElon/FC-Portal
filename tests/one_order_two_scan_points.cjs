@@ -218,6 +218,24 @@ console.log('\n5. The reset goes through ONE server function, and drops this poi
   const i18n = R('src/i18n.js');
   ['scan.resetMine', 'scan.pointsTitle', 'scan.duplicateAt', 'do.queueWaiting'].forEach((k) =>
     yes((i18n.match(new RegExp("'" + k.replace('.', '\\.') + "'", 'g')) || []).length === 2, k + ' is in both languages'));
+
+  console.log('\n7. A row deleted in Supabase leaves the phone too');
+  {
+    const L = lib();
+    const base = { ...L.defaultProgress(), seen: ['004187', '004190', '004193', '004200', '004201'], unique: 5,
+      pointOf: { '004200': 'sp-me', '004201': 'sp-other' } };
+    const r = L.reconcileWithServer(base, [], 'sp-me', 9, new L.Set());
+    is([...r.progress.seen], ['004200'], 'the three earlier scans the table no longer has are dropped, as is the other point\'s; this phone\'s own stays');
+    const q = L.reconcileWithServer(base, [], 'sp-me', 9, new L.Set(['004190']));
+    yes(q.progress.seen.includes('004190'), 'an earlier scan still waiting in the outbox is kept');
+    const n = L.reconcileWithServer(base, [], 'sp-me', 9, null);
+    yes(['004187', '004190', '004193'].every((c) => n.progress.seen.includes(c)), 'an outbox that could not be read drops no earlier scan');
+    const k = L.reconcileWithServer(base, [{ barcode: '004187' }], 'sp-me', 9, new L.Set());
+    yes(k.progress.seen.includes('004187'), 'an earlier scan the table still has is kept');
+    const d = L.reconcileWithServer({ ...base, doSeals: ['004187'] }, [], 'sp-me', 9, new L.Set());
+    yes(d.progress.seen.includes('004187'), 'a seal already on a DO is never dropped');
+    yes(/waitingScanCodes\(scanIds\)/.test(SRC) && /reconcileWithServer\([^)]*waiting\)/.test(SRC), 'the scan screen hands the outbox to the reconcile');
+  }
   finish();
 })().catch((e) => { fail('harness died: ' + e.message); finish(); });
 

@@ -168,15 +168,27 @@ export function resetPoint(cur, myId, includeUnassigned, qty) {
 
 /* ANOTHER PHONE RESET ITS PART. Its rows are gone from the table, so a seal
    this phone holds under THAT point and the server no longer has is taken
-   off here too. Only another named point's seals: this phone's own may be
-   waiting in the outbox with no line, and an unassigned seal is nobody's to
-   judge -- both stay until somebody here clears them. */
-export function reconcileWithServer(cur, rows, myId, qty) {
+   off here too.
+
+   AN EARLIER SCAN THAT NAMES NO POINT goes the same way once the server no
+   longer has it AND the outbox holds nothing for it (`waiting`, the codes
+   still queued for this order). It was saved before points existed, so no
+   new scan can be in flight for it: absent from the table and not waiting
+   to be sent means somebody deleted the row, and a phone that went on
+   counting it is a phone disagreeing with the database for ever -- the
+   office deleted three rows in Supabase and the order went on reading 3/9.
+   `waiting` null is an outbox that could not be read: then nothing
+   unassigned is judged, because a queued seal must never be dropped.
+
+   THIS phone's own seals stay: one may be mid-insert with no row yet. */
+export function reconcileWithServer(cur, rows, myId, qty, waiting) {
   const onServer = new Set((rows || []).map((r) => barcodeKey(r && r.barcode)));
   const pointOf = (cur && cur.pointOf) || {};
   return dropSeals(cur, (code) => {
+    if (onServer.has(code)) return false;
     const id = pointOf[code] || NO_POINT;
-    return id !== NO_POINT && id !== myId && !onServer.has(code);
+    if (id === NO_POINT) return !!waiting && !waiting.has(code);
+    return id !== myId;
   }, qty);
 }
 

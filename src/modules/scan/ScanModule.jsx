@@ -30,6 +30,7 @@ import {
   saveScanRecord,
   flushScanRecords,
   fetchScanRecords,
+  waitingScanCodes,
   subscribeScanRecords,
   unsubscribeScanRecords,
   findBarcodeElsewhere,
@@ -354,7 +355,7 @@ export default function ScanModule() {
      another point has since reset is taken off here too. A read that fails
      changes nothing. */
   function pullServerScans(cardId, scanIds) {
-    fetchScanRecords(scanIds).then((rows) => {
+    Promise.all([fetchScanRecords(scanIds), waitingScanCodes(scanIds)]).then(([rows, waiting]) => {
       setProgress((prev) => {
         const cur = prev[cardId] || defaultProgress();
         const qty = (consentsRef.current.find((c) => c.id === cardId) || {}).qty || 0;
@@ -364,7 +365,7 @@ export default function ScanModule() {
            batch against itself as well as against what is held. */
         let next = addBarcodes(cur, rows.map((r) => r.barcode), (code, n) => ({ code, time: '–', over: n > qty }));
         next = notePoints(next, rows);
-        next = reconcileWithServer(next, rows, pointRef.current.id, qty).progress;
+        next = reconcileWithServer(next, rows, pointRef.current.id, qty, waiting).progress;
         if (next === cur) return prev;
         next = { ...next, over: Math.max(0, next.unique - qty) };
         if (activeRef.current?.id === cardId) seenRef.current = new Set(next.seen || []);
