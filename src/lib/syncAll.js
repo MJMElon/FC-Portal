@@ -135,6 +135,12 @@ export function startAutoSync(intervalMs = 30000) {
       await culling.flushCulling();
       const maint = await import('../modules/maintenance/data.js');
       await maint.flushMaintenance();
+      /* A DO goes up the moment there is a line, wherever the app is
+         open -- it was only sent from the scan screen own timer, so a DO
+         queued with no line waited until somebody opened that screen.
+         flushDOQueue is single-flight, so this cannot send one twice. */
+      const dos = await import('../modules/do/data.js');
+      await dos.flushDOQueue().catch(() => {});
       /* NOT the scans. A scan stays on the phone until somebody presses
          Sync, because Reset may take back only what has not been synced --
          a timer sending them would take that choice away without a word.
