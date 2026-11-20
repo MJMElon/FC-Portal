@@ -3,7 +3,9 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import Icon from '../../components/Icon.jsx';
 
 // Touch/mouse signature pad. Exposes { hasSig(), clear(), toDataURL() } via ref.
-const SignaturePad = forwardRef(function SignaturePad({ height = 160 }, ref) {
+const SignaturePad = forwardRef(function SignaturePad({ height = 160, onSigned }, ref) {
+  const signedRef = useRef(onSigned);
+  signedRef.current = onSigned;
   const { t } = useLang();
   const canvasRef = useRef(null);
   const drawing = useRef(false);
@@ -37,6 +39,7 @@ const SignaturePad = forwardRef(function SignaturePad({ height = 160 }, ref) {
       drawing.current = true;
       hasSig.current = true;
       setHintVisible(false);
+      if (signedRef.current) signedRef.current(true);
       const p = pos(e);
       ctx.beginPath();
       ctx.moveTo(p.x, p.y);
@@ -85,6 +88,7 @@ const SignaturePad = forwardRef(function SignaturePad({ height = 160 }, ref) {
       canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
       hasSig.current = false;
       setHintVisible(true);
+      if (signedRef.current) signedRef.current(false);
       setTime('');
     },
   }));

@@ -91,3 +91,31 @@ export function applyScannedQty(rows, scannedQty) {
   });
   return moved ? next : rows;
 }
+
+/* ── WHAT A DO OFF A SCAN STILL NEEDS ────────────────────────────────
+   The office: after the barcodes are scanned, every line names its
+   nursery, its plot and its batch, the car plate is photographed and the
+   customer signs, or the DO cannot be saved. Answered as a LIST rather
+   than a yes or no, because the form greys its one button until the list
+   is empty and has to say what is keeping it grey: a button that will not
+   press and says nothing is reported as a broken app.
+
+   The batch is asked only of a plot that OFFERS batches (`batchesFor`).
+   A Pre Nursery plot, or a balance that could not be read, has none to
+   pick, and demanding one there is a form that can never be finished. */
+export function missingForScanDO({ rows, batchesFor, photo, signed, tallies, totalQty: total }) {
+  const out = [];
+  (rows || []).forEach((r, i) => {
+    const n = i + 1;
+    if (!String(r.nursery || '').trim()) out.push({ key: 'do.needNursery', vars: { n } });
+    if (!String(r.plot || '').trim()) out.push({ key: 'do.needPlot', vars: { n } });
+    else if (batchesFor && batchesFor(r.plot).length > 0 && !(r.picks || []).length) {
+      out.push({ key: 'do.needBatch', vars: { n } });
+    }
+    if (rowQty(r) <= 0) out.push({ key: 'do.needQty', vars: { n } });
+  });
+  if (total != null && total > 0 && tallies === false) out.push({ key: 'do.needTally', vars: {} });
+  if (!photo) out.push({ key: 'do.needPhoto', vars: {} });
+  if (!signed) out.push({ key: 'do.needSign', vars: {} });
+  return out;
+}

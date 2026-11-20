@@ -5,7 +5,7 @@ import { useLang } from '../../context/LanguageContext.jsx';
 import { callGemini, compressImage, DO_SCAN_PROMPT } from '../../lib/gemini.js';
 import { generateDONumber, offlineDONumber, loadPlotBreeds, loosePlot, newDOPressId } from './data.js';
 import { batchKey, batchesIn } from '../maintenance/plotBatches.js';
-import { rowQty, lineCount, totalQty as sumQty, scanTally, applyScannedQty } from './qty.js';
+import { rowQty, lineCount, totalQty as sumQty, scanTally, applyScannedQty, missingForScanDO } from './qty.js';
 import Icon from '../../components/Icon.jsx';
 import { numText } from '../../lib/numberText.js';
 
@@ -66,6 +66,16 @@ export default function EntryModal({ al, plots, breeds, batchMap, photoBase64, i
   const [capturedPhoto, setCapturedPhoto] = useState(null);
   const sigRef = useRef(null);
   const photoInputRef = useRef(null);
+  const [signed, setSigned] = useState(false);
+  /* OPENED OFF A SCAN, the header is the scan's and not the conductor's to
+     change: the DO number is handed out by the database, the day is today
+     (the seedlings are on the lorry now), and the customer is the one on the
+     consent that was scanned. And nothing is optional -- every line names
+     its nursery, plot and batch, the car plate is photographed and the
+     customer signs -- so the one button is greyed until all of it is there,
+     and the line above it says what is still missing. The DO screen own
+     form (a paper DO read by the AI) keeps its old, looser rules. */
+  const fromScan = scannedQty != null;
 
   async function onPhotoPicked(e) {
     const file = e.target.files && e.target.files[0];
@@ -226,6 +236,10 @@ const MAX_LINES = 5;
   const remain = balance - totalQty;
   const customerMatch = customer.trim().toLowerCase() === (al?.customer_name || '').toLowerCase();
 
+  const missing = fromScan ? missingForScanDO({
+    rows, batchesFor, photo: capturedPhoto, signed, tallies: scan.tallies, totalQty,
+  }) : [];
+
   useEffect(() => {
     if (!navigator.onLine) {
       setDoNumber(offlineDONumber(al));
@@ -278,6 +292,7 @@ const MAX_LINES = 5;
 
   async function save() {
     if (savingRef.current) return;
+    if (missing.length) return alert(t('do.stillMissing') + '\n• ' + missing.map((m) => t(m.key, m.vars)).join('\n• '));
     const items = expandRows(rows)
       .filter((it) => it.nursery || it.plot || it.batch || it.breed || it.qty > 0);
     if (items.length > MAX_LINES) return alert(t('do.maxRows'));
@@ -332,7 +347,7 @@ const MAX_LINES = 5;
   }
 
   return (
-    <div className="modal-overlay open" onClick={onClose}>
+    <div className="modal-overlay open" onClick={fromScan ? undefined : onClose}>
       <div className="modal-box" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
         <div className="p-5 rounded-t-[24px] flex justify-between items-start" style={{ background: 'linear-gradient(135deg,#0f172a,#1e293b)' }}>
           <div>
@@ -383,15 +398,15 @@ const MAX_LINES = 5;
                 </div>
                 <div>
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">{t('do.deliveryDate')}</label>
-                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="search-input text-sm w-full" style={{ padding: '9px 12px' }} />
+                  <input type="date" value={date} readOnly={fromScan} onChange={(e) => { if (!fromScan) setDate(e.target.value); }} className={`search-input text-sm w-full ${fromScan ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : ''}`} style={{ padding: '9px 12px' }} />
                 </div>
               </div>
 
               <div>
                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">{t('do.customerNameLabel')}</label>
                 <div className="flex gap-2 items-center">
-                  <input value={customer} onChange={(e) => setCustomer(e.target.value)} className="search-input text-sm flex-1" style={{ padding: '9px 12px' }} />
-                  {customer.trim() && (
+                  <input value={fromScan ? (al?.customer_name || '') : customer} readOnly={fromScan} onChange={(e) => { if (!fromScan) setCustomer(e.target.value); }} className={`search-input text-sm flex-1 ${fromScan ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : ''}`} style={{ padding: '9px 12px' }} />
+                  {!fromScan && customer.trim() && (
                     <div className={`shrink-0 text-[10px] font-black px-3 py-2 rounded-xl border ${customerMatch ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-amber-700 bg-amber-50 border-amber-200'}`}>
                       {customerMatch ? (<><Icon name="check" className="w-3 h-3 inline-block align-[-2px]" /> {t('do.match')}</>) : (<><Icon name="warning" className="w-3 h-3 inline-block align-[-2px]" /> {t('do.mismatch')}</>)}
                     </div>
@@ -610,13 +625,21 @@ const MAX_LINES = 5;
               <div className="border-t border-slate-100 pt-4">
                 <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5"><Icon name="pen" className="w-3.5 h-3.5" /> {t('do.sigTitle')}</div>
                 <p className="text-[10px] font-bold text-slate-300 mb-3">{t('do.sigNote')}</p>
-                <SignaturePad ref={sigRef} height={160} />
+                <SignaturePad ref={sigRef} height={160} onSigned={setSigned} />
               </div>
 
+              {missing.length > 0 && (
+                <div data-do-missing className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+                  <div className="font-black uppercase tracking-widest text-[10px] mb-1">{t('do.stillMissing')}</div>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {missing.map((m, i) => <li key={i}>{t(m.key, m.vars)}</li>)}
+                  </ul>
+                </div>
+              )}
               <div className="flex gap-3 justify-end pt-1 border-t border-slate-100">
                 <button onClick={onClose} className="text-[10px] font-black text-slate-500 hover:text-slate-800 uppercase tracking-widest bg-slate-50 px-5 py-2.5 rounded-full border border-slate-200 cursor-pointer">{t('common.cancel')}</button>
-                <button onClick={save} disabled={saving} className="text-[10px] font-black text-white uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 px-7 py-2.5 rounded-xl border-none cursor-pointer disabled:opacity-60">
-                  {saving ? t('do.saving') : (<><Icon name="save" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('do.saveSign')}</>)}
+                <button data-do-save onClick={save} disabled={saving || missing.length > 0} className="text-[10px] font-black text-white uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 px-7 py-2.5 rounded-xl border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-400">
+                  {saving ? t('do.saving') : (<><Icon name="save" className="w-3.5 h-3.5 inline-block align-[-3px]" /> {t('do.saveContinue')}</>)}
                 </button>
               </div>
             </>

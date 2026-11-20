@@ -683,3 +683,29 @@ Three things in `src/lib/syncAll.js`, `src/modules/palms/sync.js` and
 
 The DO queue is part of the press now too. `tests/sync_reports_what_refused.cjs`
 (8 checks fail on the previous code; `PREV_DIR` runs the comparison half).
+
+## A DO opened off a scan is complete before it saves
+
+The office: after the barcodes are scanned, the DO number, delivery date and
+customer name are fixed; nursery, plot and batch are compulsory on every
+item; the car plate photo and the customer signature are compulsory; and the
+one button is **Save & Continue** (it read Save & Sign DO).
+
+- **`fromScan` is `scannedQty != null`** — the scan screen is the only caller
+  that passes it. The DO screen's own form (a paper DO the AI reads, whose
+  date and customer it may take off the paper) keeps its old rules; only the
+  button wording is shared.
+- **`missingForScanDO` in `do/qty.js` is the rule**, pure, and answers a LIST.
+  The button is greyed until it is empty and the amber box above it says
+  what is still needed — a button that will not press and says nothing is
+  reported as a broken app. `save()` asks it again, because a disabled
+  attribute is a paint, not a gate.
+- **The batch is asked only of a plot that offers batches.** A Pre Nursery
+  plot, or a balance that could not be read, has none to pick, and demanding
+  one there is a form that can never be finished.
+- **`SignaturePad` takes `onSigned`**, because `hasSig()` is a ref and the
+  form could not otherwise redraw when the customer signs.
+- **A tap outside the form does not close it** off a scan: the backdrop
+  closing threw away a signed form. Cancel still closes.
+
+`tests/a_scanned_do_is_complete_before_it_saves.cjs` renders the real form; 12 of its checks fail on the previous code.
