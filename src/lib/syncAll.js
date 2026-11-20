@@ -141,10 +141,12 @@ export function startAutoSync(intervalMs = 30000) {
          flushDOQueue is single-flight, so this cannot send one twice. */
       const dos = await import('../modules/do/data.js');
       await dos.flushDOQueue().catch(() => {});
-      /* NOT the scans. A scan stays on the phone until somebody presses
-         Sync, because Reset may take back only what has not been synced --
-         a timer sending them would take that choice away without a word.
-         See saveScanRecord. */
+      /* The scans whose DO has been issued go up the moment there is a
+         line. A scan with no DO yet is never sent from here -- the flush
+         skips it, so it stays on the phone and can still be reset. See
+         saveScanRecord. */
+      const scan = await import('../modules/scan/store.js');
+      await scan.flushScanRecords();
     } catch (e) { /* next tick tries again */ }
     autoBusy = false;
   };

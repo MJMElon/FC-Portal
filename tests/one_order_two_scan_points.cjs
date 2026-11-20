@@ -187,7 +187,7 @@ if (A && B) {
   yes(!/data-reset-earlier/.test(SRC), 'Reset offers no button for the earlier scans');
 }
 
-console.log('\n5. The reset is the outbox: queued scans of this order, and no server call');
+console.log('\n5. Reset clears only scans with no DO yet, and asks nothing of the server');
 (async () => {
   if (!HAS_POINTS) { fail('no scan points: nothing to reset by'); return finish(); }
   const calls = [];
@@ -195,31 +195,53 @@ console.log('\n5. The reset is the outbox: queued scans of this order, and no se
   const L = lib({
     supabase: { rpc: async (fn, args) => { calls.push({ fn, args }); return { data: 7, error: null }; }, from: () => ({ insert: async () => { calls.push({ fn: 'insert' }); return {}; } }) },
     listJobs: async () => [
-      { uid: 'j1', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035104' } },
-      { uid: 'j2', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035101' } },
-      { uid: 'j3', kind: 'scan_record', payload: { consentId: 'c9', barcode: '0090001' } },
+      { uid: 'j1', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035104', committed: false } },
+      { uid: 'j2', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035101', committed: false } },
+      { uid: 'j3', kind: 'scan_record', payload: { consentId: 'c9', barcode: '0090001', committed: false } },
       { uid: 'j4', kind: 'do_record', payload: { consentId: 'c1' } },
+      { uid: 'j5', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035106', committed: true } },
+      { uid: 'j6', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035107' } },
     ],
     removeJob: async (uid) => { removed.push(uid); },
   });
   const codes = await L.resetUnsynced(['c1'], new L.Set(['0035101']));
-  is(codes, ['0035104'], 'it hands back the unsynced scans of this order');
-  is(removed, ['j1'], 'and takes only those out of the outbox -- not a seal on a DO, not another order, not a DO');
-  is(calls.length, 0, 'nothing is asked of the server: a synced scan is not the phone to take back');
+  is(codes, ['0035104'], 'it hands back the scans of this order that have no DO yet');
+  is(removed, ['j1'], 'and only those leave the outbox -- not a seal on a DO, not a scan whose DO is issued (even unsent), not another order');
+  is(calls.length, 0, 'nothing is asked of the server');
+  is(await L.scanQueueCounts(['c1']), { open: 2, sending: 2 }, 'the order counts 2 still resettable and 2 issued and waiting for a line');
 
-  console.log('\n5b. A scan stays on the phone until Sync');
+  console.log('\n5b. Issue DO is the sync');
   {
     const jobs = [];
-    const S = lib({ queueJob: async (kind, payload) => { jobs.push({ kind, payload }); }, supabase: { from: () => ({ insert: async () => { calls.push({ fn: 'insert' }); return {}; } }) } });
+    const sent = [];
+    const OB = R('src/lib/outbox.js').replace(/^import .*$/gm, '').replace(/^export /gm, '');
+    const S = lib({
+      setTimeout, clearTimeout,
+      queueJob: async (kind, payload) => { jobs.push({ uid: 'q' + jobs.length, kind, payload, createdAt: jobs.length }); },
+      listJobs: async () => jobs.slice(),
+      removeJob: async (uid) => { const k = jobs.findIndex((j) => j.uid === uid); if (k >= 0) jobs.splice(k, 1); },
+      patchJob: async (uid, patch) => { const j = jobs.find((x) => x.uid === uid); if (j) j.payload = { ...j.payload, ...patch }; },
+      supabase: { from: () => ({ insert: async (row) => { sent.push(row.barcode); return {}; } }) },
+    });
+    // the real flushOutbox over the stubbed store
+    vm.runInContext(OB.replace(/function tx\([\s\S]*?\n}\n/, 'function tx(){ throw new Error("no idb"); }\n')
+      .replace(/async function listJobs[\s\S]*?\n}\n/, '').replace(/async function removeJob[\s\S]*?\n}\n/, '')
+      .replace(/async function patchJob[\s\S]*?\n}\n/, '').replace(/async function queueJob[\s\S]*?\n}\n/, '')
+      .replace(/async function noteFailure[\s\S]*?\n}\n/, 'async function noteFailure(){}\n'), S);
     await S.saveScanRecord('c1', 'AL-1', '0035190', false, { id: 'sp', name: 'X' });
-    is(jobs.map((j) => j.kind), ['scan_record'], 'a scan goes into the outbox');
-    is(calls.length, 0, 'and nothing is sent to the server, line or no line');
+    await S.saveScanRecord('c1', 'AL-1', '0035191', false, { id: 'sp', name: 'X' });
+    is(jobs.map((j) => j.payload.committed), [false, false], 'a scan goes into the outbox, not yet committed');
+    await S.flushScanRecords();
+    is(sent, [], 'a flush sends nothing while the DO is not issued');
+    is(jobs.length, 2, 'and both stay on the phone');
+    await S.commitScans(['c1'], ['0035190']);
+    await S.flushScanRecords();
+    is(sent, ['0035190'], 'once its DO is issued the seal is sent');
+    is(jobs.map((j) => j.payload.barcode), ['0035191'], 'and only a sent record leaves the phone');
+    yes(/commitScans\(memberIds, sealsOut\)/.test(SRC), 'the DO being saved commits its seals and flushes');
     const sa = R('src/lib/syncAll.js');
-    const tick = sa.slice(sa.indexOf('export function startAutoSync'));
-    yes(!/flushScanRecords/.test(tick.replace(/\/\*[\s\S]*?\*\//g, '')), 'the 30-second tick does not send scans');
-    yes(/sync\(false\)/.test(SRC), 'opening the scan screen reads the list and sends nothing');
-    yes(/onSync=\{\(\) => sync\(true\)\}/.test(SRC), 'the Sync button sends them');
-    yes(/data-sync-here/.test(SRC), 'and the open order offers Sync beside its unsynced count');
+    const tick = sa.slice(sa.indexOf('export function startAutoSync')).replace(/\/\*[\s\S]*?\*\//g, '');
+    yes(/flushScanRecords/.test(tick), 'the line returning sends the committed scans by itself');
   }
 
   console.log('\n6. The scan screen offers it');

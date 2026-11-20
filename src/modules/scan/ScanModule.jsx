@@ -43,6 +43,8 @@ import {
   markSealsOnDO,
   fetchSealsOnDO,
   resetUnsynced,
+  commitScans,
+  scanQueueCounts,
   sealsAlreadyOnDO,
 } from './store.js';
 import { myScanPoint, setScanPointName, markPoint, notePoints, countsByPoint, pointHolding, resetPoint, reconcileWithServer, sealsMineForDO, orderRoomLeft, dropSeals, NO_POINT } from './scanPoints.js';
@@ -65,10 +67,10 @@ export default function ScanModule() {
   const [progress, setProgress] = useState(() => loadProgress());
   const [activeId, setActiveId] = useState(null);
   const [syncing, setSyncing] = useState(false);
-  /* How many scans of the open order are still on this phone only -- not
-     synced, so Reset may still take them back. null: the outbox could not
-     be read. */
-  const [unsynced, setUnsynced] = useState(0);
+  /* The open order's scans still on this phone: `open` has no DO yet, so
+     Reset may take it back; `sending` has its DO issued and waits for a
+     line. null: the outbox could not be read. */
+  const [queue, setQueue] = useState({ open: 0, sending: 0 });
   const [toast, setToast] = useState(null);
   const [lastInfo, setLastInfo] = useState({ key: 'scan.waitingFirst' });
   /* THIS PHONE'S SCAN POINT -- see scanPoints.js. One order can be scanned
@@ -149,24 +151,22 @@ export default function ScanModule() {
   function refreshUnsynced(card) {
     const c = card || activeRef.current;
     if (!c) return;
-    waitingScanCodes(c.memberIds || [c.id])
-      .then((w) => { if (activeRef.current?.id === c.id) setUnsynced(w ? w.size : null); })
+    scanQueueCounts(c.memberIds || [c.id])
+      .then((q) => { if (activeRef.current?.id === c.id) setQueue(q); })
       .catch(() => {});
   }
 
-  /* SYNC IS THE ONLY THING THAT SENDS A SCAN. `push` false is the read the
-     screen does by itself when it opens: the latest list, and nothing sent --
-     a scan stays on the phone until somebody presses the button. */
-  const sync = useCallback(async (push = true) => {
+  /* SYNC sends what is waiting -- the DOs, and the scans whose DO has been
+     issued (a scan with no DO yet is skipped and stays on the phone) -- and
+     brings the latest back. */
+  const sync = useCallback(async () => {
     setSyncing(true);
     try {
       await flushDOQueue().catch(() => {});
       setDoQueue(doQueueSummary());
-      if (push) {
-        await flushScanRecords().catch(() => {});
-        const a = activeRef.current;
-        if (a) pullServerScans(a.id, a.memberIds || [a.id], true);
-      }
+      await flushScanRecords().catch(() => {});
+      const a = activeRef.current;
+      if (a) pullServerScans(a.id, a.memberIds || [a.id], true);
       const [data, today] = await Promise.all([fetchConsents(), fetchTodayBookingALs().catch(() => null)]);
       setServerConsents(data);
       if (today) setTodayALs(today);
@@ -184,7 +184,7 @@ export default function ScanModule() {
   }, [flash, t]);
 
   useEffect(() => {
-    if (navigator.onLine) sync(false);
+    if (navigator.onLine) sync();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -378,7 +378,6 @@ export default function ScanModule() {
     /* The outbox is read BEFORE the table: a seal sent in between is then
        either still listed as waiting or already in the rows, never neither. */
     waitingScanCodes(scanIds).then((waiting) => fetchScanRecords(scanIds).then((rows) => [rows, waiting])).then(([rows, waiting]) => {
-      if (activeRef.current?.id === cardId) setUnsynced(waiting ? waiting.size : null);
       /* Counted off the ref, outside the updater: React runs an updater when
          it renders, which is after the message below would be decided. */
       const before = (progressRef.current || {})[cardId] || defaultProgress();
@@ -404,6 +403,7 @@ export default function ScanModule() {
          off: refused at Sync, or cleared elsewhere. Said, so a count that
          went down is never a mystery. */
       if (say && gone) flash(t('scan.droppedAtSync', { n: numText(gone) }), 'warn');
+      if (activeRef.current?.id === cardId) refreshUnsynced(activeRef.current);
     }).catch(() => {/* stay with localStorage */});
   }
 
@@ -422,7 +422,7 @@ export default function ScanModule() {
       if (!codes.length) {
         const msg = t('scan.resetNothingUnsynced');
         flash(msg, 'warn');
-        setUnsynced(0);
+        refreshUnsynced(a);
         return { ok: false, msg };
       }
       let dropped = 0;
@@ -434,7 +434,7 @@ export default function ScanModule() {
         saveProgress(map);
         return map;
       });
-      setUnsynced(0);
+      refreshUnsynced(a);
       lastCodeRef.current = '';
       setLastInfo({ key: 'scan.waitingFirst' });
       const total = Math.max(codes.length, dropped);
@@ -793,6 +793,20 @@ export default function ScanModule() {
     const sealsOut = doSealsRef.current && doSealsRef.current.consentId === consentId ? doSealsRef.current.codes : [];
     doSealsRef.current = null;
     setDoEntry(null);
+    /* ISSUE DO IS THE SYNC for these seals: they are committed -- no
+       longer resettable -- and sent now if there is a line. With none they
+       stay on the phone and go up by themselves when the line returns; a
+       record leaves the phone only once the server has taken it. */
+    if (consentId && sealsOut.length) {
+      commitScans(memberIds, sealsOut)
+        .then(() => flushScanRecords().catch(() => {}))
+        .then(() => {
+          const c = consentsRef.current.find((x) => x.id === consentId);
+          refreshUnsynced(c);
+          if (navigator.onLine) pullServerScans(consentId, memberIds);
+        })
+        .catch(() => {});
+    }
     if (consentId) {
       setProgress((prev) => {
         /* Marked as gone whether or not the DO could name them -- they went
@@ -920,9 +934,9 @@ export default function ScanModule() {
           sealAllocs={sealAllocs}
           point={point}
           pointCounts={countsByPoint(progress[active.id], point.id, point.name)}
-          unsynced={unsynced}
+          queue={queue}
           syncing={syncing}
-          onSync={() => sync(true)}
+          onSync={sync}
           onReset={resetMyScans}
           onRenamePoint={renamePoint}
           onScan={recordScan}
@@ -930,7 +944,7 @@ export default function ScanModule() {
           onIssueDO={() => openIssueDO(active)}
         />
       ) : (
-        <ConsentList consents={consents} todayALs={todayALs} loaded={serverConsents !== null} syncing={syncing} onSync={() => sync(true)} onOpen={setActiveId} />
+        <ConsentList consents={consents} todayALs={todayALs} loaded={serverConsents !== null} syncing={syncing} onSync={sync} onOpen={setActiveId} />
       )}
 
       {doEntry && (
@@ -1120,7 +1134,7 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
 }
 
 // ── Scanner view ──────────────────────────────────────
-function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, point, pointCounts = [], unsynced = 0, syncing = false, onSync, onReset, onRenamePoint, onScan, onBack, onIssueDO }) {
+function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, point, pointCounts = [], queue = { open: 0, sending: 0 }, syncing = false, onSync, onReset, onRenamePoint, onScan, onBack, onIssueDO }) {
   const { t } = useLang();
   const [scanning, setScanning] = useState(false);
   const [statusKey, setStatusKey] = useState('ready');
@@ -1161,6 +1175,8 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
      button offers -- not every seal it ever scanned. Unknown (the outbox
      could not be read) still lets it be pressed: the reset reads the outbox
      itself and says so if there is nothing. */
+  const unsynced = queue ? queue.open : null;
+  const sending = queue ? queue.sending : 0;
   const myCount = unsynced === null ? 1 : unsynced;
   /* What THIS phone's DO will carry: its own seals not yet on a DO, and the
      earlier ones that name no point. Never the other place's. */
@@ -1669,8 +1685,11 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
           ))}
         </div>
         <div data-unsynced className={`mt-2 flex items-center justify-between gap-2 font-mono text-[11px] ${unsynced ? 'text-amber-300' : 'text-slate-500'}`}>
-          <span>{unsynced === null ? '' : unsynced ? t('scan.unsyncedCount', { n: numText(unsynced) }) : t('scan.allSynced')}</span>
-          {!!unsynced && onSync && (
+          <span>
+            {unsynced === null ? '' : unsynced ? t('scan.unsyncedCount', { n: numText(unsynced) }) : sending ? '' : t('scan.allSynced')}
+            {!!sending && <span className="block text-sky-300">{t('scan.sendingCount', { n: numText(sending) })}</span>}
+          </span>
+          {!!sending && onSync && (
             <button type="button" data-sync-here disabled={syncing} onClick={onSync}
               className="shrink-0 bg-emerald-500 text-[#0a0f14] font-bold uppercase tracking-wider rounded-lg px-3 py-1 disabled:opacity-60">
               {syncing ? t('scan.syncing') : '⟳ ' + t('scan.sync')}
