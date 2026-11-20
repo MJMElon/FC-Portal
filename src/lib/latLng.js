@@ -44,20 +44,15 @@ export function mapsHref(lat, lng) {
 
 /* OPEN IT IN GAIA GPS, which is the map the nursery walks by.
 
-   On a PHONE this is the app's own link, which opens Gaia GPS on the spot
-   if it is installed and does nothing at all if it is not — which is why
-   the Maps link always stands beside it and is never replaced by it. On a
-   desk there is no app to open, so it is the Gaia web map, where the
-   address is zoom / longitude / latitude, in that order.
-
-   It CENTRES the map on the spot. It does not drop a waypoint: the link
-   has no word for one. */
+   ONE LINK EVERYWHERE: the Gaia web map, whose address is zoom /
+   LONGITUDE / latitude, in that order. On a phone with Gaia GPS the
+   phone hands it to the app, which opens on the spot with a marked
+   location. The office tried ten links on an iPhone and this is the one
+   that showed the pin. The old app link only centred the map. */
 export function gaiaHref(lat, lng) {
   const a = Number(lat);
   const b = Number(lng);
-  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
-  if (/Android|iPhone|iPad|iPod/i.test(ua)) return `gaiagps://map?lat=${a}&lng=${b}&z=17`;
-  return `https://www.gaiagps.com/map/?loc=17.0/${b}/${a}`;
+  return `https://www.gaiagps.com/map/?loc=17/${b}/${a}`;
 }
 
 /* Ask the device once. Resolves { lat, lng, accuracy }; rejects with an
