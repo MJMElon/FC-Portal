@@ -1,6 +1,6 @@
 import { supabase } from '../../lib/supabase.js';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
-import { PERMANENT, flushOutbox, looksOffline, queueJob, listJobs, removeJob } from '../../lib/outbox.js';
+import { PERMANENT, SKIP, flushOutbox, looksOffline, queueJob, listJobs, removeJob, patchJob } from '../../lib/outbox.js';
 import { sealNo, rangeHolding } from '../../lib/sealRanges.js';
 
 // The scan list is now driven by SIGNED CONSENTS from the mobile web
@@ -633,52 +633,51 @@ export async function insertScanRecord(consentId, alNumber, barcode, typed, poin
   if (error && error.code !== '23505') throw error; // 23505 = unique_violation (safe to ignore)
 }
 
-/* A scan made with no line still reaches the server, later.
- *
- * The local progress is what THIS phone counts by, and it never needed the
- * network — but fcportal_scan_records is how OTHER devices hear a barcode
- * has been taken, and a scan made offline used to be skipped rather than
- * queued: the count survived on one phone while every other phone stayed
- * free to accept the same seedling again. Now it queues like everything
- * else in this repository and flushes on sync, on reconnect, and on the
- * 30-second tick. The unique index (23505 ignored above) makes a retry of
- * a row the server already took a no-op rather than a duplicate.
- */
+/* A SCAN STAYS ON THE PHONE UNTIL ITS DO IS ISSUED.
+
+   The office: a scan is kept on the phone, and pressing Issue DO is the
+   sync -- it sends that DO's seals up, and from then on they cannot be
+   reset. With no line they stay on the phone, still unresettable, and go up
+   by themselves the moment there is a line. A record leaves the phone only
+   once the server has taken it.
+
+   So every scan goes into the outbox marked `committed: false`, and the
+   outbox never sends one in that state (flushScanRecords answers SKIP).
+   Issue DO marks the DO's seals committed (`commitScans`) and flushes; the
+   app-wide tick and the line returning flush them too. Reset may clear only
+   what is NOT committed (`resetUnsynced`). A job with no `committed` field
+   was queued by an older build, which meant to send it, so it is sent.
+
+   `_queuing` covers the moment between the scan and the outbox write, so a
+   read of the order in that gap cannot take the seal for one the server
+   refused (see waitingScanCodes). */
 export const SCAN_JOB = 'scan_record';
+const _queuing = new Set();
 
 export async function saveScanRecord(consentId, alNumber, barcode, typed, point) {
+  const key = String(consentId) + '|' + barcodeKey(barcode);
+  _queuing.add(key);
   try {
-    await insertScanRecord(consentId, alNumber, barcode, typed, point);
-  } catch (e) {
-    if (looksOffline(e)) {
-      await queueJob(SCAN_JOB, { consentId, alNumber, barcode, typed: !!typed, point: point || null });
-      return;
-    }
-    /* THE ORDER IS FULL: another scan point took the last seal a moment
-       before this one reached the table. The database is the only place
-       that can see both phones at once, so its answer stands and the
-       caller takes the seal back off this phone. */
-    if (isOrderFull(e)) return 'full';
-    // The server refused it for a reason of its own; the local progress
-    // still holds the scan, which is the behaviour this call always had.
+    await queueJob(SCAN_JOB, { consentId, alNumber, barcode, typed: !!typed, point: point || null, committed: false });
+  } finally {
+    _queuing.delete(key);
   }
 }
 
-/* The refusal fcportal_scan_cap raises when an order already holds all the
-   seals its consents allow. Matched on the words, never the code alone:
-   P0001 is every RAISE EXCEPTION in the database. */
-export function isOrderFull(e) {
-  const m = String((e && (e.message || e.details || e.hint)) || e || '');
-  return m.indexOf('MJM_ORDER_FULL') >= 0;
-}
 
+/* SENDS THE COMMITTED SCANS -- the ones a DO has been issued for -- and
+   leaves the rest queued. A seal the server refuses for good (the order
+   already full across every scan point, a policy) leaves the queue, since
+   keeping it would block everything behind it, and the next read of the
+   order takes it off the phone. */
 export function flushScanRecords() {
   return flushOutbox({
     [SCAN_JOB]: async (p) => {
+      if (p && p.committed === false) return SKIP;   // its DO is not issued yet
       try {
         await insertScanRecord(p.consentId, p.alNumber, p.barcode, p.typed, p.point);
       } catch (e) {
-        if (looksOffline(e)) throw e;      // try again later
+        if (looksOffline(e)) throw e;      // try again when there is a line
         throw new Error(PERMANENT);        // the server refused the row itself
       }
     },
@@ -716,37 +715,78 @@ export async function fetchScanRecords(consentIds) {
   return all;
 }
 
-/* RESET A SCAN POINT'S PART of an order. The rows go from the table, so every
-   other phone hears it (the broadcast below, and the next read), and nothing
-   any other point scanned is touched. A seal already on a DO is never
-   cleared: that is a real collection. With includeUnassigned the older rows
-   that name no point go too -- they are nobody's now.
-
-   The table has no delete in this app, so it is one database function that
-   checks all of that itself (shared/RUN_ME_scan_points.sql in the office
-   repository). Needs a line: a reset done offline would be undone by the
-   very next read, the rows still being on the server. Answers the number of
-   rows the server took off. */
-export async function resetScans(consentIds, pointId, includeUnassigned) {
+/* THE SEALS OF THESE CONSENTS STILL WAITING IN THE OUTBOX, as a Set of
+   barcodes -- or null when the outbox could not be read, which the caller
+   must treat as "anything might be waiting" (see reconcileWithServer). */
+export async function waitingScanCodes(consentIds) {
   const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
-  const { data, error } = await supabase.rpc('fcportal_reset_scans', {
-    p_consent_ids: ids,
-    p_scan_point: pointId || '',
-    p_unassigned: !!includeUnassigned,
-  });
-  if (error) throw error;
-  /* A seal of this point still waiting in the outbox would put the row
-     straight back on the next flush. */
   try {
     const jobs = await listJobs();
+    const out = new Set();
     for (const j of jobs) {
       if (j.kind !== SCAN_JOB || !j.payload) continue;
       if (!ids.includes(String(j.payload.consentId))) continue;
-      const jp = (j.payload.point && j.payload.point.id) || '';
-      if (jp === pointId || (includeUnassigned && !jp)) await removeJob(j.uid);
+      out.add(barcodeKey(j.payload.barcode));
     }
-  } catch (_) { /* the outbox could not be read: the next read heals it */ }
-  return Number(data) || 0;
+    _queuing.forEach((k) => {
+      const at = k.indexOf('|');
+      if (ids.includes(k.slice(0, at))) out.add(k.slice(at + 1));
+    });
+    return out;
+  } catch (_) { return null; }
+}
+
+/* ISSUE DO IS THE SYNC: these seals of these consents are committed --
+   they go up with the next flush and can no longer be reset. */
+export async function commitScans(consentIds, codes) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  const want = new Set((codes || []).map(barcodeKey));
+  const jobs = await listJobs();
+  for (const j of jobs) {
+    if (j.kind !== SCAN_JOB || !j.payload || j.payload.committed !== false) continue;
+    if (!ids.includes(String(j.payload.consentId))) continue;
+    if (want.has(barcodeKey(j.payload.barcode))) await patchJob(j.uid, { committed: true });
+  }
+}
+
+/* What this order still has on the phone: `open` can still be reset (no DO
+   issued), `sending` is committed and waiting for a line. null when the
+   outbox could not be read. */
+export async function scanQueueCounts(consentIds) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  try {
+    const jobs = await listJobs();
+    let open = 0, sending = 0;
+    for (const j of jobs) {
+      if (j.kind !== SCAN_JOB || !j.payload) continue;
+      if (!ids.includes(String(j.payload.consentId))) continue;
+      if (j.payload.committed === false) open++; else sending++;
+    }
+    return { open, sending };
+  } catch (_) { return null; }
+}
+
+/* RESET: TAKE BACK WHAT HAS NO DO YET, and nothing else. Every scan of
+   these consents still queued and not committed leaves the outbox, and the
+   caller drops the same seals off the phone. A committed scan (its DO is
+   issued) stays queued until it is sent, and a seal already on a DO
+   (`keep`) is a real collection. Needs no line -- nothing on the server
+   changes. Answers the barcodes it took out of the queue. */
+export async function resetUnsynced(consentIds, keep) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  const hold = keep || new Set();
+  const out = [];
+  const jobs = await listJobs();
+  for (const j of jobs) {
+    if (j.kind !== SCAN_JOB || !j.payload) continue;
+    if (!ids.includes(String(j.payload.consentId))) continue;
+    if (j.payload.committed !== false) continue;   // its DO is issued: not the phone's to take back
+    const code = barcodeKey(j.payload.barcode);
+    if (hold.has(code)) continue;
+    await removeJob(j.uid);
+    out.push(code);
+  }
+  return out;
 }
 
 // Barcodes on these consents that a DO has already carried, on any device
@@ -803,14 +843,6 @@ export function subscribeScanRecords(consentIds, callback, onReset) {
     }, (payload) => callback(payload.new.barcode, payload.new))
     .on('broadcast', { event: 'reset' }, (msg) => { if (onReset) onReset(msg && msg.payload); })
     .subscribe();
-}
-
-/** Tell the other phones on this order that a point was reset. Best effort:
-    a phone that misses it reconciles on its next read anyway. */
-export function broadcastReset(channel, payload) {
-  try {
-    if (channel) channel.send({ type: 'broadcast', event: 'reset', payload: payload || {} });
-  } catch (_) { /* ignore */ }
 }
 
 export function unsubscribeScanRecords(channel) {

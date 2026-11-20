@@ -602,16 +602,33 @@ mine first.
 - **Overlap was already refused** by the unique (consent_id, barcode) and
   the realtime feed; the refusal now NAMES the place that has the seal
   (`scan.duplicateAt`), scanned or keyed alike.
-- **Reset clears this phone only** — one server function,
-  `fcportal_reset_scans` (`shared/RUN_ME_scan_points.sql` in the office
-  repo), by point ID, never by name. It never deletes a seal already on a
-  DO, drops this point's queued scans from the outbox, and broadcasts
-  `reset` on `fcportal_scan:<card>`; the other phones re-read the table
-  (also every 20 s) and `reconcileWithServer` takes off another point's
-  seals the server no longer has. It needs a line.
-- **Reset clears THIS phone's scans and nothing else** — not another
-  point's, not the "Earlier scans" that name no point (the office asked
-  for that; Imbok's were cleared by the SQL instead).
+- **Issue DO is the sync.** The office: a scan is kept on the phone, and
+  pressing Issue DO sends that DO's seals up; from then on they cannot be
+  reset. With no line they stay on the phone, still unresettable, and go up
+  by themselves when the line returns; a record leaves the phone only once
+  the server has taken it. So `saveScanRecord` queues every scan
+  `committed: false`, `flushScanRecords` SKIPs those (`SKIP` in
+  `outbox.js`), `onDoSaved` marks the DO's seals committed (`commitScans`)
+  and flushes, and the app-wide tick and the `online` event send the
+  committed ones. A job with no `committed` field is an older build's and
+  is sent.
+- **Reset clears only scans with no DO yet** (`resetUnsynced`): the
+  uncommitted queued scans of this order leave the outbox and come off the
+  phone. Nothing on the server is deleted and no line is needed.
+  `fcportal_reset_scans` is no longer called. The open order shows how many
+  can still be reset and how many are on an issued DO waiting for a line
+  (`scanQueueCounts`).
+- **The table is the answer for anything synced**: on every read of the
+  order, a seal the table has not got and the outbox is not holding comes
+  off the phone, whichever point it names (`reconcileWithServer`, the
+  outbox read BEFORE the table). That is a seal refused on upload, reset
+  elsewhere, or deleted in Supabase.
+- **What it costs**: two phones see each other's seals only after each
+  has issued its DO, so the no-overlap guard and the order-quantity cap across
+  points hold only for synced scans. The database still refuses the
+  overlap (unique consent_id, barcode) and the overflow
+  (`fcportal_scan_cap`) on upload, and the refused seal then comes off the
+  phone with a message.
 - **A DO carries this phone's own seals** (`sealsMineForDO`), plus any
   earlier seal that names no point, never another place's.
 - **The order quantity is counted over every point** (`orderRoomLeft`): 9

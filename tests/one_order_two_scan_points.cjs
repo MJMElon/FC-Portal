@@ -76,7 +76,7 @@ function phone(name, card, sent) {
     setProgress: (fn) => { L.progressRef.current = fn(L.progressRef.current); },
     saveScanRecord: async (id, al, code, typed, pt) => { sent.push({ barcode: code, scan_point: pt && pt.id, scan_point_name: pt && pt.name }); return L.__serverSays; },
     findBarcodeElsewhere: async () => null, takeBackScan() {}, labelOfConsent: () => 'another order',
-    sealRangesText: () => '', useCallback: (fn) => fn, numText: (n) => String(n),
+    sealRangesText: () => '', useCallback: (fn) => fn, numText: (n) => String(n), refreshUnsynced() {},
   });
   vm.runInContext('globalThis.__rec = ' + recordSrc + ';', L);
   const rec = L.__rec;
@@ -130,35 +130,31 @@ if (A && B) {
   const r3 = A.rec('0035103', { typed: true });
   is(r3.key, 'scan.duplicate', 'a seal THIS phone took reads as an ordinary duplicate');
 
-  console.log('\n3. Reset clears only this phone, and the other phone follows');
+  console.log('\n3. Reset clears only what this phone has NOT synced');
   // A seal of A's already went out on a DO: a reset must never take it.
   A.L.progressRef.current = { ...A.L.progressRef.current, c1: A.L.markSealsOnDO(A.p(), ['0035101']) };
-  const done = A.L.resetPoint(A.p(), A.point.id, false, CARD.qty);
-  is(done.dropped.sort(), ['0035102', '0035103'], 'A clears its own 2 not-yet-collected seals');
-  yes(!done.dropped.includes('0035101'), 'the seal already on a DO is kept');
+  // A synced 0035101..0035103; then scans two more with no Sync yet.
+  ['0035104', '0035105'].forEach((c) => A.rec(c, { typed: true }));
+  const unsyncedA = ['0035104', '0035105'];               // what the outbox hands back
+  const done = A.L.resetPoint(A.p(), unsyncedA, CARD.qty);
+  is(done.dropped.sort(), ['0035104', '0035105'], 'A clears its 2 unsynced scans');
+  yes(['0035102', '0035103'].every((c) => done.progress.seen.includes(c)), 'the seals A already synced stay');
+  yes(done.progress.seen.includes('0035101'), 'the seal already on a DO stays');
   yes(!done.dropped.some((c) => c.startsWith('00352')), 'B\'s seals are not touched');
   A.L.progressRef.current = { ...A.L.progressRef.current, c1: done.progress };
   A.L.seenRef.current = new Set(done.progress.seen || []);   // what resetMyScans does
-  // the server function deletes A's rows that are on no DO
-  for (let i = server.length - 1; i >= 0; i--) if (done.dropped.includes(server[i].barcode)) server.splice(i, 1);
-  B.hear(server);
-  is(B.counts().map((p) => [p.mine, p.n]), [[true, 2], [false, 1]], 'B, reading the table again, drops A\'s cleared seals: mine 2, other 1');
-  is(B.p().unique, 3, 'and B\'s order total is 3');
-  const back = A.rec('0035102', { typed: true });
+  const back = A.rec('0035104', { typed: true });
   yes(back.ok, 'a cleared seal can be scanned again afterwards');
+  is(A.L.resetPoint(A.p(), [], CARD.qty).dropped.length, 0, 'with nothing unsynced, a reset clears nothing');
 
-  console.log('\n4. Seals from before any of this have no point, and can be cleared');
+  console.log('\n4. Seals from before any of this have no point, and Reset leaves them');
   const L = lib();
   let p = L.addBarcodes(L.defaultProgress(), ['1', '2', '3', '4'], (code) => ({ code, time: '–' }));
-  p = { ...p, completedFired: true, completedAt: 1 };
   if (HAS_POINTS) {
     const me = L.myScanPoint('X');
     const c = L.countsByPoint(p, me.id, me.name);
     is(c.map((x) => [x.id === '', x.n]), [[false, 0], [true, 4]], 'four earlier seals read as "no scan point" beside my 0');
-    is(L.resetPoint(p, me.id, false, 4).dropped.length, 0, 'a reset of my part alone leaves them');
-    const all = L.resetPoint(p, me.id, true, 4);
-    is(all.dropped.length, 4, 'asked to, it clears the earlier ones too');
-    yes(all.progress.unique === 0 && all.progress.completedFired === false, 'and the card is no longer "complete"');
+    is(L.resetPoint(p, [], 4).dropped.length, 0, 'they are not in the outbox, so a reset leaves them');
   }
 }
 
@@ -191,33 +187,90 @@ if (A && B) {
   yes(!/data-reset-earlier/.test(SRC), 'Reset offers no button for the earlier scans');
 }
 
-console.log('\n5. The reset goes through ONE server function, and drops this point\'s queued scans');
+console.log('\n5. Reset clears only scans with no DO yet, and asks nothing of the server');
 (async () => {
   if (!HAS_POINTS) { fail('no scan points: nothing to reset by'); return finish(); }
   const calls = [];
   const removed = [];
   const L = lib({
-    supabase: { rpc: async (fn, args) => { calls.push({ fn, args }); return { data: 7, error: null }; }, from: () => ({}) },
+    supabase: { rpc: async (fn, args) => { calls.push({ fn, args }); return { data: 7, error: null }; }, from: () => ({ insert: async () => { calls.push({ fn: 'insert' }); return {}; } }) },
     listJobs: async () => [
-      { uid: 'j1', kind: 'scan_record', payload: { consentId: 'c1', point: { id: 'sp-me' } } },
-      { uid: 'j2', kind: 'scan_record', payload: { consentId: 'c1', point: { id: 'sp-other' } } },
-      { uid: 'j3', kind: 'scan_record', payload: { consentId: 'c9', point: { id: 'sp-me' } } },
+      { uid: 'j1', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035104', committed: false } },
+      { uid: 'j2', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035101', committed: false } },
+      { uid: 'j3', kind: 'scan_record', payload: { consentId: 'c9', barcode: '0090001', committed: false } },
+      { uid: 'j4', kind: 'do_record', payload: { consentId: 'c1' } },
+      { uid: 'j5', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035106', committed: true } },
+      { uid: 'j6', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035107' } },
     ],
     removeJob: async (uid) => { removed.push(uid); },
   });
-  const n = await L.resetScans(['c1'], 'sp-me', false);
-  is(calls.map((c) => c.fn), ['fcportal_reset_scans'], 'one call to fcportal_reset_scans');
-  is(calls[0] && calls[0].args, { p_consent_ids: ['c1'], p_scan_point: 'sp-me', p_unassigned: false }, 'naming the order and THIS point');
-  is(n, 7, 'answering how many rows the server took off');
-  is(removed, ['j1'], 'only this point\'s queued scan for this order is dropped from the outbox');
+  const codes = await L.resetUnsynced(['c1'], new L.Set(['0035101']));
+  is(codes, ['0035104'], 'it hands back the scans of this order that have no DO yet');
+  is(removed, ['j1'], 'and only those leave the outbox -- not a seal on a DO, not a scan whose DO is issued (even unsent), not another order');
+  is(calls.length, 0, 'nothing is asked of the server');
+  is(await L.scanQueueCounts(['c1']), { open: 2, sending: 2 }, 'the order counts 2 still resettable and 2 issued and waiting for a line');
+
+  console.log('\n5b. Issue DO is the sync');
+  {
+    const jobs = [];
+    const sent = [];
+    const OB = R('src/lib/outbox.js').replace(/^import .*$/gm, '').replace(/^export /gm, '');
+    const S = lib({
+      setTimeout, clearTimeout,
+      queueJob: async (kind, payload) => { jobs.push({ uid: 'q' + jobs.length, kind, payload, createdAt: jobs.length }); },
+      listJobs: async () => jobs.slice(),
+      removeJob: async (uid) => { const k = jobs.findIndex((j) => j.uid === uid); if (k >= 0) jobs.splice(k, 1); },
+      patchJob: async (uid, patch) => { const j = jobs.find((x) => x.uid === uid); if (j) j.payload = { ...j.payload, ...patch }; },
+      supabase: { from: () => ({ insert: async (row) => { sent.push(row.barcode); return {}; } }) },
+    });
+    // the real flushOutbox over the stubbed store
+    vm.runInContext(OB.replace(/function tx\([\s\S]*?\n}\n/, 'function tx(){ throw new Error("no idb"); }\n')
+      .replace(/async function listJobs[\s\S]*?\n}\n/, '').replace(/async function removeJob[\s\S]*?\n}\n/, '')
+      .replace(/async function patchJob[\s\S]*?\n}\n/, '').replace(/async function queueJob[\s\S]*?\n}\n/, '')
+      .replace(/async function noteFailure[\s\S]*?\n}\n/, 'async function noteFailure(){}\n'), S);
+    await S.saveScanRecord('c1', 'AL-1', '0035190', false, { id: 'sp', name: 'X' });
+    await S.saveScanRecord('c1', 'AL-1', '0035191', false, { id: 'sp', name: 'X' });
+    is(jobs.map((j) => j.payload.committed), [false, false], 'a scan goes into the outbox, not yet committed');
+    await S.flushScanRecords();
+    is(sent, [], 'a flush sends nothing while the DO is not issued');
+    is(jobs.length, 2, 'and both stay on the phone');
+    await S.commitScans(['c1'], ['0035190']);
+    await S.flushScanRecords();
+    is(sent, ['0035190'], 'once its DO is issued the seal is sent');
+    is(jobs.map((j) => j.payload.barcode), ['0035191'], 'and only a sent record leaves the phone');
+    yes(/commitScans\(memberIds, sealsOut\)/.test(SRC), 'the DO being saved commits its seals and flushes');
+    const sa = R('src/lib/syncAll.js');
+    const tick = sa.slice(sa.indexOf('export function startAutoSync')).replace(/\/\*[\s\S]*?\*\//g, '');
+    yes(/flushScanRecords/.test(tick), 'the line returning sends the committed scans by itself');
+  }
 
   console.log('\n6. The scan screen offers it');
   yes(/data-scan-points/.test(SRC), 'the scanner draws a count per scan point');
   yes(/data-reset-mine/.test(SRC) && /resetMyScans/.test(SRC), 'and a Reset that clears this phone\'s scans');
-  yes(/broadcastReset\(/.test(SRC), 'which tells the other phones on the order');
+  yes(!/resetScans\(/.test(SRC), 'and it no longer deletes anything on the server');
   const i18n = R('src/i18n.js');
   ['scan.resetMine', 'scan.pointsTitle', 'scan.duplicateAt', 'do.queueWaiting'].forEach((k) =>
     yes((i18n.match(new RegExp("'" + k.replace('.', '\\.') + "'", 'g')) || []).length === 2, k + ' is in both languages'));
+
+  console.log('\n7. A row deleted in Supabase leaves the phone too');
+  {
+    const L = lib();
+    const base = { ...L.defaultProgress(), seen: ['004187', '004190', '004193', '004200', '004201'], unique: 5,
+      pointOf: { '004200': 'sp-me', '004201': 'sp-other' } };
+    const r = L.reconcileWithServer(base, [], 'sp-me', 9, new L.Set());
+    is([...r.progress.seen], [], 'every seal the table no longer has and nothing is waiting to send is dropped -- this phone own too');
+    const w = L.reconcileWithServer(base, [], 'sp-me', 9, new L.Set(['004200']));
+    yes(w.progress.seen.includes('004200'), 'this phone own scan still waiting for Sync is kept');
+    const q = L.reconcileWithServer(base, [], 'sp-me', 9, new L.Set(['004190']));
+    yes(q.progress.seen.includes('004190'), 'an earlier scan still waiting in the outbox is kept');
+    const n = L.reconcileWithServer(base, [], 'sp-me', 9, null);
+    yes(['004187', '004190', '004193', '004200'].every((c) => n.progress.seen.includes(c)), 'an outbox that could not be read drops no earlier scan and none of this phone own');
+    const k = L.reconcileWithServer(base, [{ barcode: '004187' }], 'sp-me', 9, new L.Set());
+    yes(k.progress.seen.includes('004187'), 'an earlier scan the table still has is kept');
+    const d = L.reconcileWithServer({ ...base, doSeals: ['004187'] }, [], 'sp-me', 9, new L.Set());
+    yes(d.progress.seen.includes('004187'), 'a seal already on a DO is never dropped');
+    yes(/waitingScanCodes\(scanIds\)/.test(SRC) && /reconcileWithServer\([^)]*waiting\)/.test(SRC), 'the scan screen hands the outbox to the reconcile');
+  }
   finish();
 })().catch((e) => { fail('harness died: ' + e.message); finish(); });
 

@@ -156,27 +156,38 @@ export function dropSeals(cur, shouldDrop, qty) {
   };
 }
 
-/** The seals a reset of THIS point clears (and the older ones with no
-    point, when asked). */
-export function resetPoint(cur, myId, includeUnassigned, qty) {
-  const pointOf = (cur && cur.pointOf) || {};
-  return dropSeals(cur, (code) => {
-    const id = pointOf[code] || NO_POINT;
-    return id === myId || (includeUnassigned && id === NO_POINT);
-  }, qty);
+/** The seals a reset clears: exactly the ones handed back from the outbox
+    (`codes`) -- what this phone had not synced. A seal on a DO never goes
+    (dropSeals). */
+export function resetPoint(cur, codes, qty) {
+  const gone = new Set((codes || []).map(barcodeKey));
+  return dropSeals(cur, (code) => gone.has(code), qty);
 }
 
-/* ANOTHER PHONE RESET ITS PART. Its rows are gone from the table, so a seal
-   this phone holds under THAT point and the server no longer has is taken
-   off here too. Only another named point's seals: this phone's own may be
-   waiting in the outbox with no line, and an unassigned seal is nobody's to
-   judge -- both stay until somebody here clears them. */
-export function reconcileWithServer(cur, rows, myId, qty) {
+/* THE TABLE IS THE ANSWER FOR EVERYTHING THIS PHONE HAS SYNCED.
+   A scan stays on the phone until Sync (see saveScanRecord), so a seal the
+   phone holds is in one of two states: still waiting in the outbox, or sent.
+   One that is NOT waiting and the table has NOT got was refused by the
+   server, or reset at another place, or deleted in Supabase -- in every case
+   the phone should stop counting it, whichever point it names, this one
+   included. (The office deleted three rows in Supabase and the order went
+   on reading 3/9.)
+
+   `waiting` is the Set of codes still in the outbox for this order, read
+   BEFORE the table was: a seal sent between the two reads is then either
+   still listed as waiting or already in the rows. `waiting` null is an
+   outbox that could not be read, and then only ANOTHER named point's seals
+   are judged -- never this phone's, never an unassigned one, because a
+   queued seal must never be dropped. A seal on a DO is never dropped
+   (dropSeals). */
+export function reconcileWithServer(cur, rows, myId, qty, waiting) {
   const onServer = new Set((rows || []).map((r) => barcodeKey(r && r.barcode)));
   const pointOf = (cur && cur.pointOf) || {};
   return dropSeals(cur, (code) => {
+    if (onServer.has(code)) return false;
+    if (waiting) return !waiting.has(code);
     const id = pointOf[code] || NO_POINT;
-    return id !== NO_POINT && id !== myId && !onServer.has(code);
+    return id !== NO_POINT && id !== myId;
   }, qty);
 }
 

@@ -30,6 +30,7 @@ import {
   saveScanRecord,
   flushScanRecords,
   fetchScanRecords,
+  waitingScanCodes,
   subscribeScanRecords,
   unsubscribeScanRecords,
   findBarcodeElsewhere,
@@ -41,8 +42,10 @@ import {
   barcodeKey,
   markSealsOnDO,
   fetchSealsOnDO,
-  resetScans,
-  broadcastReset,
+  resetUnsynced,
+  commitScans,
+  scanQueueCounts,
+  sealsAlreadyOnDO,
 } from './store.js';
 import { myScanPoint, setScanPointName, markPoint, notePoints, countsByPoint, pointHolding, resetPoint, reconcileWithServer, sealsMineForDO, orderRoomLeft, dropSeals, NO_POINT } from './scanPoints.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
@@ -64,6 +67,10 @@ export default function ScanModule() {
   const [progress, setProgress] = useState(() => loadProgress());
   const [activeId, setActiveId] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  /* The open order's scans still on this phone: `open` has no DO yet, so
+     Reset may take it back; `sending` has its DO issued and waits for a
+     line. null: the outbox could not be read. */
+  const [queue, setQueue] = useState({ open: 0, sending: 0 });
   const [toast, setToast] = useState(null);
   const [lastInfo, setLastInfo] = useState({ key: 'scan.waitingFirst' });
   /* THIS PHONE'S SCAN POINT -- see scanPoints.js. One order can be scanned
@@ -141,12 +148,25 @@ export default function ScanModule() {
      gone out on a DO through this ref and not a stale closure. */
   issuedOfRef.current = cardIssued;
 
+  function refreshUnsynced(card) {
+    const c = card || activeRef.current;
+    if (!c) return;
+    scanQueueCounts(c.memberIds || [c.id])
+      .then((q) => { if (activeRef.current?.id === c.id) setQueue(q); })
+      .catch(() => {});
+  }
+
+  /* SYNC sends what is waiting -- the DOs, and the scans whose DO has been
+     issued (a scan with no DO yet is skipped and stays on the phone) -- and
+     brings the latest back. */
   const sync = useCallback(async () => {
     setSyncing(true);
     try {
       await flushDOQueue().catch(() => {});
       setDoQueue(doQueueSummary());
       await flushScanRecords().catch(() => {});
+      const a = activeRef.current;
+      if (a) pullServerScans(a.id, a.memberIds || [a.id], true);
       const [data, today] = await Promise.all([fetchConsents(), fetchTodayBookingALs().catch(() => null)]);
       setServerConsents(data);
       if (today) setTodayALs(today);
@@ -295,6 +315,7 @@ export default function ScanModule() {
 
     // Pull server records → merge in barcodes scanned by other devices.
     pullServerScans(activeId, scanIds);
+    refreshUnsynced(consentsRef.current.find((c) => c.id === activeId));
 
     /* Seals another device already put on a DO for this card, so the next
        DO here does not name them again. Only once the seal SQL is known to
@@ -353,8 +374,14 @@ export default function ScanModule() {
      took are added, which point holds each is taken off the rows, and a seal
      another point has since reset is taken off here too. A read that fails
      changes nothing. */
-  function pullServerScans(cardId, scanIds) {
-    fetchScanRecords(scanIds).then((rows) => {
+  function pullServerScans(cardId, scanIds, say) {
+    /* The outbox is read BEFORE the table: a seal sent in between is then
+       either still listed as waiting or already in the rows, never neither. */
+    waitingScanCodes(scanIds).then((waiting) => fetchScanRecords(scanIds).then((rows) => [rows, waiting])).then(([rows, waiting]) => {
+      /* Counted off the ref, outside the updater: React runs an updater when
+         it renders, which is after the message below would be decided. */
+      const before = (progressRef.current || {})[cardId] || defaultProgress();
+      const gone = reconcileWithServer(notePoints(before, rows), rows, pointRef.current.id, 0, waiting).dropped.length;
       setProgress((prev) => {
         const cur = prev[cardId] || defaultProgress();
         const qty = (consentsRef.current.find((c) => c.id === cardId) || {}).qty || 0;
@@ -364,7 +391,7 @@ export default function ScanModule() {
            batch against itself as well as against what is held. */
         let next = addBarcodes(cur, rows.map((r) => r.barcode), (code, n) => ({ code, time: '–', over: n > qty }));
         next = notePoints(next, rows);
-        next = reconcileWithServer(next, rows, pointRef.current.id, qty).progress;
+        next = reconcileWithServer(next, rows, pointRef.current.id, qty, waiting).progress;
         if (next === cur) return prev;
         next = { ...next, over: Math.max(0, next.unique - qty) };
         if (activeRef.current?.id === cardId) seenRef.current = new Set(next.seen || []);
@@ -372,37 +399,45 @@ export default function ScanModule() {
         saveProgress(map);
         return map;
       });
+      /* A seal the cloud has not got and nothing is waiting to send came
+         off: refused at Sync, or cleared elsewhere. Said, so a count that
+         went down is never a mystery. */
+      if (say && gone) flash(t('scan.droppedAtSync', { n: numText(gone) }), 'warn');
+      if (activeRef.current?.id === cardId) refreshUnsynced(activeRef.current);
     }).catch(() => {/* stay with localStorage */});
   }
 
-  /* RESET THIS PHONE'S SCANS ON THE OPEN ORDER -- and, when asked, the
-     earlier ones that name no point. Server first: a local reset the server
-     does not know about would come straight back on the next read. */
+  /* RESET TAKES BACK WHAT THIS PHONE HAS NOT SYNCED, and only that.
+     Once Sync has sent a scan it is in the cloud and is not the phone's to
+     take back, so nothing on the server changes here and no line is needed:
+     the queued scans of this order leave the outbox and the same seals come
+     off the phone. A seal on a DO is a real collection and stays. */
   async function resetMyScans() {
-    /* This phone only, never the earlier scans: a seal nobody can name is not
-       this phone to clear. */
-    const includeUnassigned = false;
     const a = activeRef.current;
     if (!a) return { ok: false };
-    if (!navigator.onLine) return { ok: false, msg: t('scan.resetNeedsLine') };
     const me = pointRef.current;
     try {
-      await flushScanRecords().catch(() => {});
-      const n = await resetScans(a.memberIds || [a.id], me.id, includeUnassigned);
+      const keep = new Set(sealsAlreadyOnDO(progressRef.current[a.id] || defaultProgress()).map(barcodeKey));
+      const codes = await resetUnsynced(a.memberIds || [a.id], keep);
+      if (!codes.length) {
+        const msg = t('scan.resetNothingUnsynced');
+        flash(msg, 'warn');
+        refreshUnsynced(a);
+        return { ok: false, msg };
+      }
       let dropped = 0;
       setProgress((prev) => {
-        const res = resetPoint(prev[a.id] || defaultProgress(), me.id, includeUnassigned, a.qty);
+        const res = resetPoint(prev[a.id] || defaultProgress(), codes, a.qty);
         dropped = res.dropped.length;
         const map = { ...prev, [a.id]: res.progress };
         seenRef.current = new Set(res.progress.seen || []);
         saveProgress(map);
         return map;
       });
-      broadcastReset(realtimeChannelRef.current, { point: me.id });
+      refreshUnsynced(a);
       lastCodeRef.current = '';
       setLastInfo({ key: 'scan.waitingFirst' });
-      pullServerScans(a.id, a.memberIds || [a.id]);
-      const total = Math.max(n, dropped);
+      const total = Math.max(codes.length, dropped);
       flash(t('scan.resetDone', { n: numText(total), name: me.name }), 'done');
       return { ok: true, n: total };
     } catch (e) {
@@ -548,26 +583,10 @@ export default function ScanModule() {
 
       seenRef.current.add(code);
 
-      // Write to server so other devices see this scan in real time. With no
-      // line it QUEUES instead of being skipped — see saveScanRecord — so the
-      // other phones hear about it when the line returns rather than never.
+      /* Kept on the phone until Sync -- see saveScanRecord. The count of
+         what is not synced yet is what Reset may clear. */
       saveScanRecord(a.id, a.al_number, code, typed, { id: pointRef.current.id, name: pointRef.current.name })
-        .then((r) => {
-          if (r !== 'full') return;
-          /* The other place took the last seal first: this one is not on
-             the order, so it comes off this phone too. */
-          setProgress((prev) => {
-            const res = dropSeals(prev[a.id] || defaultProgress(), (c) => c === barcodeKey(code), a.qty);
-            if (!res.dropped.length) return prev;
-            const map = { ...prev, [a.id]: res.progress };
-            saveProgress(map);
-            return map;
-          });
-          if (activeRef.current?.id === a.id) seenRef.current.delete(code);
-          beepAlarm();
-          vibrate([120, 60, 120, 60, 200]);
-          flash(t('scan.orderFull', { code, q: numText(a.qty) }), 'danger');
-        })
+        .then(() => refreshUnsynced(a))
         .catch(() => {});
 
       // Does this seal already belong to a DIFFERENT order? Scanning stays
@@ -774,6 +793,20 @@ export default function ScanModule() {
     const sealsOut = doSealsRef.current && doSealsRef.current.consentId === consentId ? doSealsRef.current.codes : [];
     doSealsRef.current = null;
     setDoEntry(null);
+    /* ISSUE DO IS THE SYNC for these seals: they are committed -- no
+       longer resettable -- and sent now if there is a line. With none they
+       stay on the phone and go up by themselves when the line returns; a
+       record leaves the phone only once the server has taken it. */
+    if (consentId && sealsOut.length) {
+      commitScans(memberIds, sealsOut)
+        .then(() => flushScanRecords().catch(() => {}))
+        .then(() => {
+          const c = consentsRef.current.find((x) => x.id === consentId);
+          refreshUnsynced(c);
+          if (navigator.onLine) pullServerScans(consentId, memberIds);
+        })
+        .catch(() => {});
+    }
     if (consentId) {
       setProgress((prev) => {
         /* Marked as gone whether or not the DO could name them -- they went
@@ -901,6 +934,9 @@ export default function ScanModule() {
           sealAllocs={sealAllocs}
           point={point}
           pointCounts={countsByPoint(progress[active.id], point.id, point.name)}
+          queue={queue}
+          syncing={syncing}
+          onSync={sync}
           onReset={resetMyScans}
           onRenamePoint={renamePoint}
           onScan={recordScan}
@@ -1098,7 +1134,7 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
 }
 
 // ── Scanner view ──────────────────────────────────────
-function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, point, pointCounts = [], onReset, onRenamePoint, onScan, onBack, onIssueDO }) {
+function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, point, pointCounts = [], queue = { open: 0, sending: 0 }, syncing = false, onSync, onReset, onRenamePoint, onScan, onBack, onIssueDO }) {
   const { t } = useLang();
   const [scanning, setScanning] = useState(false);
   const [statusKey, setStatusKey] = useState('ready');
@@ -1135,7 +1171,13 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
   const [resetBusy, setResetBusy] = useState(false);
   const [resetSaid, setResetSaid] = useState(null);
   const [nameDraft, setNameDraft] = useState(null);
-  const myCount = (pointCounts.find((p) => p.mine) || {}).n || 0;
+  /* Reset clears what this phone has NOT synced, so that is the figure the
+     button offers -- not every seal it ever scanned. Unknown (the outbox
+     could not be read) still lets it be pressed: the reset reads the outbox
+     itself and says so if there is nothing. */
+  const unsynced = queue ? queue.open : null;
+  const sending = queue ? queue.sending : 0;
+  const myCount = unsynced === null ? 1 : unsynced;
   /* What THIS phone's DO will carry: its own seals not yet on a DO, and the
      earlier ones that name no point. Never the other place's. */
   const myToIssue = point ? sealsMineForDO(consent, point.id).length : 0;
@@ -1642,6 +1684,18 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
             </div>
           ))}
         </div>
+        <div data-unsynced className={`mt-2 flex items-center justify-between gap-2 font-mono text-[11px] ${unsynced ? 'text-amber-300' : 'text-slate-500'}`}>
+          <span>
+            {unsynced === null ? '' : unsynced ? t('scan.unsyncedCount', { n: numText(unsynced) }) : sending ? '' : t('scan.allSynced')}
+            {!!sending && <span className="block text-sky-300">{t('scan.sendingCount', { n: numText(sending) })}</span>}
+          </span>
+          {!!sending && onSync && (
+            <button type="button" data-sync-here disabled={syncing} onClick={onSync}
+              className="shrink-0 bg-emerald-500 text-[#0a0f14] font-bold uppercase tracking-wider rounded-lg px-3 py-1 disabled:opacity-60">
+              {syncing ? t('scan.syncing') : '⟳ ' + t('scan.sync')}
+            </button>
+          )}
+        </div>
         {manyPoints && (
           <div className="mt-2 font-mono text-[10px] text-slate-500 text-right">{t('scan.sealsScanned')}: {numText(consent.unique)}</div>
         )}
@@ -1656,7 +1710,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
             <div className="flex flex-col gap-2">
               <button type="button" data-reset-mine disabled={resetBusy || !myCount} onClick={() => doReset(false)}
                 className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white font-mono text-xs font-bold uppercase tracking-wider rounded-xl py-3">
-                {t('scan.resetMineBtn', { n: numText(myCount) })}
+                {unsynced === null ? t('scan.resetMine') : t('scan.resetMineBtn', { n: numText(myCount) })}
               </button>
               <button type="button" disabled={resetBusy} onClick={() => setResetOpen(false)}
                 className="w-full border border-[#243244] text-slate-300 font-mono text-xs uppercase tracking-wider rounded-xl py-3">
