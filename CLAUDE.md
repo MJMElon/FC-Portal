@@ -656,3 +656,30 @@ Three causes of a twin DO and two of a missing one, all in
 
 `tests/one_order_two_scan_points.cjs` and sections 8 to 11 of
 `tests/a_do_is_numbered_at_save.cjs` hold it.
+
+## The Sync button says WHAT refused, and a dropped packet is not a failure
+
+"My phone sync always fails" came with a screenshot of a red cross and
+nothing else, because that was all the button could say. The failed step
+and its reason lived in the button's `title`, which a phone cannot show.
+Three things in `src/lib/syncAll.js`, `src/modules/palms/sync.js` and
+`SyncButton.jsx`:
+
+- **`runStep`**: each step has a 60s ceiling and ONE retry when the error
+  looks like the line. A refusal from the server is not retried. Seven
+  network steps each one packet from a red cross is a button that "always
+  fails" while all seven work.
+- **PALMS sends what differs.** `push()` upserted every entry on the phone,
+  and a phone that has pulled holds the whole estate, so each press was
+  thousands of rows in one statement: the step that times out, and one
+  refused row sank the lot every press. `pull()` now records the server's
+  copy beside the DB (a WeakMap, never saved) and `entriesToSend` /
+  `historyToSend` send only what is dirty, new or different. With no
+  snapshot it sends everything, as before. Upserts go in chunks of 300.
+- **The reason is on the screen.** `syncPalms` records why it answered null
+  (`palmsSyncError()`), and a panel under the header names every failed step
+  with its error for 20 seconds or until tapped. If a sync still fails, that
+  panel is what to ask for.
+
+The DO queue is part of the press now too. `tests/sync_reports_what_refused.cjs`
+(8 checks fail on the previous code; `PREV_DIR` runs the comparison half).

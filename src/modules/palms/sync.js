@@ -77,45 +77,88 @@ const rowOf = (unitKey, e) => ({
  * Run the other way round, "what the phone holds" overwrites a correction
  * the office made while this phone was not looking.
  */
-export async function push(db) {
-  const rows = [];
-  const sentEntries = [];
+/* WHAT THE SERVER ALREADY HOLDS, as the last pull saw it. Kept beside the
+   DB rather than inside it, so it is never saved to the phone: it is only
+   true for the length of one sync. push() reads it to send what actually
+   differs, and with no snapshot (push called on its own) sends everything,
+   which is what it always did. */
+const _seen = new WeakMap();
+
+const _same = (a, b) => (a == null ? null : a) === (b == null ? null : b);
+
+/* The entries worth sending: changed here (dirty), never seen by the
+   server, or holding something the server's copy does not.
+
+   It used to be EVERY entry on the phone, every sync -- and a phone that
+   has pulled the whole estate holds the whole estate, so each press sent
+   thousands of rows in ONE statement. On a nursery signal that is the
+   step that times out, and one row the database refuses (a policy, a
+   trigger) sinks the lot: the sync then fails on every press, for ever,
+   over a row nobody touched. Sending only what differs makes the push a
+   handful of rows, and the server already holds the rest by definition. */
+export function entriesToSend(db, seen) {
+  const out = [];
   Object.keys(db.logs || {}).forEach((key) => {
-    // e.demo is the sample data a fresh install seeds itself with. It exists
-    // so an empty phone has something to look at; sending it would show the
-    // office 52 plots of activity that never happened.
     (db.logs[key] || []).forEach((e) => {
-      if (e.uid && !e.demo) { rows.push(rowOf(key, e)); sentEntries.push(e); }
+      if (!e.uid || e.demo) return;
+      const s = seen && seen.logs && seen.logs.get(e.uid);
+      if (!seen || e.dirty || !s
+          || s.key !== key || Number(s.actN) !== Number(e.actN)
+          || !_same(s.start, e.start) || !_same(s.end, e.end || null)) {
+        out.push({ key, e });
+      }
     });
   });
-  if (rows.length) {
-    const { error } = await supabase.from(LOGS).upsert(rows, { onConflict: 'client_uid' });
+  return out;
+}
+
+/* The daily reports worth sending, by the same rule. A unit counts only if
+   it holds a real entry, so a demo plot never carries its invented days up. */
+export function historyToSend(db, seen) {
+  const real = new Set();
+  Object.keys(db.logs || {}).forEach((key) => {
+    if ((db.logs[key] || []).some((e) => e.uid && !e.demo)) real.add(key);
+  });
+  return (db.history || []).filter((h) => {
+    if (!h || !h.key || !h.at || h.demo || !real.has(h.key)) return false;
+    if (!seen || !seen.history) return true;
+    const s = seen.history.get(h.key + '|' + h.at);
+    return !s || s !== JSON.stringify([(h.acts || []).map(Number).sort(), h.by || null]);
+  });
+}
+
+/* One upsert of a few hundred rows at most. A first push of a phone with a
+   year of history is several statements, each small enough to arrive. */
+const CHUNK = 300;
+async function upsertChunks(table, rows, onConflict) {
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const { error } = await supabase.from(table).upsert(rows.slice(i, i + CHUNK), { onConflict });
     if (error) throw error;
+  }
+}
+
+export async function push(db) {
+  const seen = _seen.get(db) || null;
+  const picked = entriesToSend(db, seen);
+  const rows = picked.map(({ key, e }) => rowOf(key, e));
+  if (rows.length) {
+    await upsertChunks(LOGS, rows, 'client_uid');
     // Delivered. Only now do these stop counting as local unsent changes —
     // a failed push keeps the mark, and the next sync protects and resends
     // them. (On failure the throw above skips this line.)
-    sentEntries.forEach((e) => { if (e.dirty) delete e.dirty; });
+    picked.forEach(({ e }) => { if (e.dirty) delete e.dirty; });
   }
 
   // The daily report: one row per unit per day, so a nursery saved twice in
   // an afternoon is a correction rather than a second report.
-  // Same two rules as the entries: nothing generated, and nothing for a unit
-  // whose entries were all generated. A demo plot that later took a real
-  // entry must still not carry its invented days up with it.
-  const sentKeys = new Set(rows.map((r) => r.plot_name));
-  const hist = (db.history || [])
-    .filter((h) => h && h.key && h.at && !h.demo && sentKeys.has(h.key))
-    .map((h) => ({
-      unit_key: h.key,
-      at_date: h.at,
-      acts: h.acts || [],
-      recorded_by: h.by || null,
-      updated_at: new Date().toISOString(),
-    }));
-  if (hist.length) {
-    const { error } = await supabase.from(HISTORY).upsert(hist, { onConflict: 'unit_key,at_date' });
-    if (error) throw error;
-  }
+  const hist = historyToSend(db, seen).map((h) => ({
+    unit_key: h.key,
+    at_date: h.at,
+    acts: h.acts || [],
+    recorded_by: h.by || null,
+    updated_at: new Date().toISOString(),
+  }));
+  if (hist.length) await upsertChunks(HISTORY, hist, 'unit_key,at_date');
   return { logs: rows.length, history: hist.length };
 }
 
@@ -135,6 +178,10 @@ export async function pull(db) {
     .select('client_uid, plot_name, act_n, start_date, end_date, ideal_days, recorded_by, seq_no')
     .order('id', { ascending: true }));
   if (error) throw error;
+  const seenLogs = new Map();
+  (data || []).forEach((r) => seenLogs.set(r.client_uid, {
+    key: r.plot_name, actN: r.act_n, start: r.start_date, end: r.end_date || null,
+  }));
 
   /* Rows the office deleted ON PURPOSE. "The server has not got it" used to
      mean only one thing — this phone keyed it and has not sent it yet — so
@@ -206,7 +253,11 @@ export async function pull(db) {
 
   const hist = await fetchAllRows(() => supabase
     .from(HISTORY).select('unit_key, at_date, acts, recorded_by').order('at_date', { ascending: true }));
+  let seenHist = null;
   if (!hist.error) {
+    seenHist = new Map();
+    (hist.data || []).forEach((h) => seenHist.set(h.unit_key + '|' + h.at_date,
+      JSON.stringify([(h.acts || []).map(Number).sort(), h.recorded_by || null])));
     db.history = db.history || [];
     for (const h of hist.data || []) {
       const row = { at: h.at_date, key: h.unit_key, acts: h.acts || [], by: h.recorded_by || undefined };
@@ -216,6 +267,7 @@ export async function pull(db) {
     }
   }
 
+  _seen.set(db, { logs: seenLogs, history: seenHist });
   const settled = settleAgainstLatestReport(db);
   return { added, updated, buried, settled };
 }
@@ -298,7 +350,15 @@ function settleAgainstLatestReport(db) {
  * that follows sends back what it was just told. The office is the record;
  * the phone is a copy of it that can also add to it.
  */
+/* Why the last sync answered null. syncPalms swallows its error on purpose
+   (the module screens treat "no server" as nothing worth showing), so the
+   Sync button used to report "could not reach the server" over a refusal
+   that had a perfectly good sentence of its own. */
+let lastPalmsError = null;
+export const palmsSyncError = () => lastPalmsError;
+
 export async function syncPalms(target) {
+  lastPalmsError = null;
   const db = target || loadDB();
   try {
     if (ensureUids(db)) saveDB(db);
@@ -307,7 +367,10 @@ export async function syncPalms(target) {
     saveDB(db);
     return { ...sent, ...got };
   } catch (e) {
-    console.warn('[palms] sync skipped:', (e && e.message) || e);
+    lastPalmsError = String((e && (e.message || e.details || e.code)) || e).slice(0, 200);
+    console.warn('[palms] sync skipped:', lastPalmsError);
     return null;
+  } finally {
+    _seen.delete(db);
   }
 }
