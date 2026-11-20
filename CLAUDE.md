@@ -602,16 +602,29 @@ mine first.
 - **Overlap was already refused** by the unique (consent_id, barcode) and
   the realtime feed; the refusal now NAMES the place that has the seal
   (`scan.duplicateAt`), scanned or keyed alike.
-- **Reset clears this phone only** — one server function,
-  `fcportal_reset_scans` (`shared/RUN_ME_scan_points.sql` in the office
-  repo), by point ID, never by name. It never deletes a seal already on a
-  DO, drops this point's queued scans from the outbox, and broadcasts
-  `reset` on `fcportal_scan:<card>`; the other phones re-read the table
-  (also every 20 s) and `reconcileWithServer` takes off another point's
-  seals the server no longer has. It needs a line.
-- **Reset clears THIS phone's scans and nothing else** — not another
-  point's, not the "Earlier scans" that name no point (the office asked
-  for that; Imbok's were cleared by the SQL instead).
+- **A scan stays on the phone until Sync.** The office: the app is used
+  with no line, so every scan is kept on the phone until the Sync button is
+  pressed, and Sync sends it and brings the latest back. `saveScanRecord`
+  only QUEUES; the outbox is emptied by Sync (the scan list, the open
+  order, or the dashboard) and by nothing else -- not the 30-second tick,
+  not the line returning, not opening the screen (`sync(false)`).
+- **Reset clears only what has NOT been synced** (`resetUnsynced`): the
+  queued scans of this order leave the outbox and come off the phone. A
+  synced scan is in the cloud and is not the phone's to take back, so
+  nothing on the server is deleted and no line is needed. A seal on a DO
+  stays. `fcportal_reset_scans` is no longer called.
+- **The table is the answer for anything synced**: on every read of the
+  order, a seal the table has not got and the outbox is not holding comes
+  off the phone, whichever point it names (`reconcileWithServer`, the
+  outbox read BEFORE the table). That is a seal refused at Sync, reset
+  elsewhere, or deleted in Supabase. The open order says how many scans
+  are unsynced and offers Sync beside them.
+- **What it costs**: two phones see each other's seals only after each
+  has synced, so the no-overlap guard and the order-quantity cap across
+  points hold only for synced scans. The database still refuses the
+  overlap (unique consent_id, barcode) and the overflow
+  (`fcportal_scan_cap`) at Sync, and the refused seal then comes off the
+  phone with a message.
 - **A DO carries this phone's own seals** (`sealsMineForDO`), plus any
   earlier seal that names no point, never another place's.
 - **The order quantity is counted over every point** (`orderRoomLeft`): 9

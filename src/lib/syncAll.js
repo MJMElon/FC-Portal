@@ -135,8 +135,10 @@ export function startAutoSync(intervalMs = 30000) {
       await culling.flushCulling();
       const maint = await import('../modules/maintenance/data.js');
       await maint.flushMaintenance();
-      const scan = await import('../modules/scan/store.js');
-      await scan.flushScanRecords();
+      /* NOT the scans. A scan stays on the phone until somebody presses
+         Sync, because Reset may take back only what has not been synced --
+         a timer sending them would take that choice away without a word.
+         See saveScanRecord. */
     } catch (e) { /* next tick tries again */ }
     autoBusy = false;
   };
