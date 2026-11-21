@@ -793,15 +793,29 @@ export async function resetUnsynced(consentIds, keep) {
 // -- the database fills fcportal_scan_records.do_number from each DO's
 // seal_ranges. Asked only once the seal SQL is known to be in, since the
 // column does not exist before it; and best effort, like every read here.
+/* PAGED, like fetchScanRecords: PostgREST hands back at most 1,000 rows,
+   and a short answer here reads as seals still waiting for a DO. BB0RS8
+   had 1,470 on its DOs; the first 1,000 came back, the other 470 counted
+   as pending, and the order read as full with 299 still to collect.
+   Ordered on the unique (consent_id, barcode) so a page boundary is
+   stable. */
 export async function fetchSealsOnDO(consentIds) {
   const ids = Array.isArray(consentIds) ? consentIds : [consentIds];
-  const { data, error } = await supabase
-    .from('fcportal_scan_records')
-    .select('barcode')
-    .in('consent_id', ids)
-    .not('do_number', 'is', null);
-  if (error) throw error;
-  return (data || []).map((r) => r.barcode);
+  const all = [];
+  for (let from = 0; from < 50000; from += 1000) {
+    const { data, error } = await supabase
+      .from('fcportal_scan_records')
+      .select('barcode')
+      .in('consent_id', ids)
+      .not('do_number', 'is', null)
+      .order('consent_id', { ascending: true })
+      .order('barcode', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw error;
+    all.push(...(data || []).map((r) => r.barcode));
+    if (!data || data.length < 1000) break;
+  }
+  return all;
 }
 
 // Has this barcode already been scanned under a DIFFERENT order? The

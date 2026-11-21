@@ -271,6 +271,31 @@ console.log('\n5. Reset clears only scans with no DO yet, and asks nothing of th
     yes(d.progress.seen.includes('004187'), 'a seal already on a DO is never dropped');
     yes(/waitingScanCodes\(scanIds\)/.test(SRC) && /reconcileWithServer\([^)]*waiting\)/.test(SRC), 'the scan screen hands the outbox to the reconcile');
   }
+
+  console.log('\n8. BB0RS8: every scanned seal already on a DO, 299 still to collect');
+  {
+    const ROWS = Array.from({ length: 1470 }, (_, i) => ({ barcode: '0' + String(36000 + i) }));
+    const pages = [];
+    const q = () => {
+      const st = { from: 0, to: 0 };
+      const b = {
+        select: () => b, in: () => b, not: () => b, order: () => b,
+        range: (f, t) => { st.from = f; st.to = t; pages.push(f); return Promise.resolve({ data: ROWS.slice(f, t + 1).slice(0, 1000), error: null }); },
+      };
+      return b;
+    };
+    const L = lib({ supabase: { from: q } });
+    const onDO = await L.fetchSealsOnDO(['bb']);
+    is(onDO.length, 1470, 'all 1,470 seals on a DO come back, past the 1,000-row page (pages at ' + pages.join(', ') + ')');
+    let p = L.addBarcodes(L.defaultProgress(), ROWS.map((r) => r.barcode), (code) => ({ code, time: '-' }));
+    p = L.markSealsOnDO(p, onDO);
+    is(L.sealsForNextDO(p).length, 0, 'none of them is counted as waiting for a DO');
+    is(L.orderRoomLeft(p, 3000, 2701), 299, 'so the order still takes 299 more seals');
+    const half = L.markSealsOnDO(L.addBarcodes(L.defaultProgress(), ROWS.map((r) => r.barcode), (code) => ({ code, time: '-' })), onDO.slice(0, 1000));
+    is(L.orderRoomLeft(half, 3000, 2701), 0, '(a read cut at 1,000 is what left it at nought)');
+    yes(/sealsForNextDO\(consent\)\.length/.test(SRC), 'the scanner counts what is waiting off the DO list, not issued minus scanned');
+    yes(!/if \(sealFeatureLive\(\)\) \{\s*fetchSealsOnDO/.test(SRC), 'and reads which seals are on a DO on every phone');
+  }
   finish();
 })().catch((e) => { fail('harness died: ' + e.message); finish(); });
 
