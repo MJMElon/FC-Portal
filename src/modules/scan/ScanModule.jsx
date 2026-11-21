@@ -37,6 +37,7 @@ import {
   cachedSealAllocations,
   fetchSealAllocations,
   sealFeatureLive,
+  sealsForNextDO,
   allocationsOf,
   sealVerdict,
   barcodeKey,
@@ -317,22 +318,15 @@ export default function ScanModule() {
     pullServerScans(activeId, scanIds);
     refreshUnsynced(consentsRef.current.find((c) => c.id === activeId));
 
-    /* Seals another device already put on a DO for this card, so the next
-       DO here does not name them again. Only once the seal SQL is known to
-       be in -- the column it asks about does not exist before that. */
-    if (sealFeatureLive()) {
-      fetchSealsOnDO(scanIds).then((codes) => {
-        if (!codes.length) return;
-        setProgress((prev) => {
-          const cur = prev[activeId] || defaultProgress();
-          const next = markSealsOnDO(cur, codes);
-          if ((next.doSeals || []).length === (cur.doSeals || []).length && Array.isArray(cur.doSeals)) return prev;
-          const map = { ...prev, [activeId]: next };
-          saveProgress(map);
-          return map;
-        });
-      }).catch(() => {});
-    }
+    /* Seals any phone already put on a DO for this card, so they are not
+       counted as waiting for one. It used to wait until this phone had read
+       seal_allocations once (proof the do_number column exists), so a phone
+       that never had took every seal another phone sent as still waiting:
+       BB0RS8 read 1,470 scanned against a balance of 299 and would take no
+       more, though all 1,470 were on DO-BB0RS801..803. The column is in;
+       a database without it simply refuses this read, which changes
+       nothing. Asked again on every read of the order (pullServerScans). */
+    markServerDOSeals(activeId, scanIds);
 
     // Subscribe to live INSERTs from other devices scanning the same consent.
     realtimeChannelRef.current = subscribeScanRecords(scanIds, (barcode, row) => {
@@ -374,7 +368,22 @@ export default function ScanModule() {
      took are added, which point holds each is taken off the rows, and a seal
      another point has since reset is taken off here too. A read that fails
      changes nothing. */
+  function markServerDOSeals(cardId, scanIds) {
+    fetchSealsOnDO(scanIds).then((codes) => {
+      if (!codes.length) return;
+      setProgress((prev) => {
+        const cur = prev[cardId] || defaultProgress();
+        const next = markSealsOnDO(cur, codes);
+        if ((next.doSeals || []).length === (cur.doSeals || []).length && Array.isArray(cur.doSeals)) return prev;
+        const map = { ...prev, [cardId]: next };
+        saveProgress(map);
+        return map;
+      });
+    }).catch(() => {});
+  }
+
   function pullServerScans(cardId, scanIds, say) {
+    markServerDOSeals(cardId, scanIds);
     /* The outbox is read BEFORE the table: a seal sent in between is then
        either still listed as waiting or already in the rows, never neither. */
     waitingScanCodes(scanIds).then((waiting) => fetchScanRecords(scanIds).then((rows) => [rows, waiting])).then(([rows, waiting]) => {
@@ -1213,9 +1222,17 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
   // When issuedQty > consent.unique the DO was issued before any scanning (e.g. via
   // the AI system). In that case every scan in this module counts toward the current
   // balance, so use consent.unique directly rather than subtracting issuedQty.
-  const sessionUnique = issuedQty > consent.unique
-    ? consent.unique
-    : Math.max(0, consent.unique - issuedQty);
+  /* WHAT IS SCANNED AND NOT YET ON A DO -- the figure set against the
+     balance. Where the card knows which seals went out (`doSeals`) it is
+     counted off that list, whatever else the DOs carried: BB0RS8 had 2,701
+     collected, 1,231 of it on paper DOs with no scans, and the old sum read
+     its 1,470 scanned seals (all on DOs) as 1,470 still to go. The older
+     arithmetic stays only for a card with no list. */
+  const sessionUnique = Array.isArray(consent.doSeals)
+    ? sealsForNextDO(consent).length
+    : issuedQty > consent.unique
+      ? consent.unique
+      : Math.max(0, consent.unique - issuedQty);
   const remain = Math.max(0, sessionQty - sessionUnique);
   const st = statusOf(consent);
   /* The seals the customer was given on the consent, so the conductor
