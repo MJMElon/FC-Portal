@@ -30,7 +30,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
-import { allowedNurseries, canCulling, canDo, canMaintain, canPalms, nurseryKey } from '../lib/access.js';
+import { allowedNurseries, canCulling, canDo, canMaintain, canPalms } from '../lib/access.js';
 import { NURSERIES } from '../modules/palms/data.js';
 import { applyCachedOfficeConfig, refreshOfficeConfig } from '../modules/palms/officeConfig.js';
 import { visibleNurseries } from '../lib/access.js';
@@ -42,8 +42,6 @@ import PalmsWindow from './PalmsWindow.jsx';
 import NelosWindow from './NelosWindow.jsx';
 import VerifyWindow from './VerifyWindow.jsx';
 import CullingWindow from './CullingWindow.jsx';
-import Cull2Window from './Cull2Window.jsx';
-import { secondCullPending } from '../modules/maintenance/SecondCullCard.jsx';
 import { Train, todayProgress } from './PalmsDock.jsx';
 
 const POS_KEY = 'mjm_dock_pos_v1';
@@ -103,16 +101,6 @@ function CullingMark() {
   return <Icon name="calculator" className="w-[22px] h-[22px] text-rose-700" />;
 }
 
-/* The 2nd cull's mark: the letters PP, blue like its ring. Pusing Polibeg is
-   the place the job is done, so it is named the way the office names it. */
-function Cull2Mark() {
-  return (
-    <span className="grid place-items-center leading-none">
-      <span className="text-[14px] font-black tracking-tight text-blue-700">PP</span>
-    </span>
-  );
-}
-
 /* The trigger's own face — neither module's. It used to wear the train,
    which is PALMS's engine and stays there, in the fan, as PALMS's own
    button below. What opens the fan belongs to both, so it wears the MJM
@@ -138,10 +126,6 @@ export default function FloatingDock() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [cases, setCases] = useState(null);      // null until the first read
   const [verifyCount, setVerifyCount] = useState(null); // null until the first read
-  /* Nurseries still owing their 2nd cull Done press this month. While it is
-     above nothing, the PP mark and the trigger blink — the FC's signal that
-     work is waiting, which stops only when they press Done. */
-  const [cull2Pending, setCull2Pending] = useState(0);
   const drag = useRef(null);
   /* The tap handler runs before the render that decides this, so it is read
      through a ref rather than closing over a stale value. */
@@ -186,21 +170,6 @@ export default function FloatingDock() {
     [verifySig]
   );
 
-  /* Same scope the card itself uses — the nurseries this login maintains.
-     A failed read is NO blink, not a blink: a signal that cannot be read must
-     not tell the FC there is work when it cannot say so. */
-  const cull2Sig = `${canMaintain(permissions, 'view') ? 1 : 0}|` +
-    (allowedNurseries(permissions, 'maintenance') === null
-      ? '*'
-      : (allowedNurseries(permissions, 'maintenance') || []).map(nurseryKey).join(','));
-  const refreshCull2 = useCallback(async () => {
-    if (!canMaintain(permissions, 'view')) { setCull2Pending(0); return; }
-    const list = allowedNurseries(permissions, 'maintenance');
-    const keys = list === null ? null : new Set((list || []).map(nurseryKey));
-    try { setCull2Pending(await secondCullPending(keys)); } catch (e) { setCull2Pending(0); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cull2Sig]);
-
   /* The office's plot list. Without it the button counts the built-in 52 and
      would say "5 left" on a nursery that has 40 plots. */
   useEffect(() => {
@@ -230,18 +199,18 @@ export default function FloatingDock() {
      DO or a transplant plot being answered. Re-read on every navigation,
      and again when the tab comes back to the front — a phone that was in a
      pocket over midnight is looking at yesterday. */
-  useEffect(() => { refreshPalms(); refreshCases(); refreshVerify(); refreshCull2(); },
-    [location.pathname, refreshPalms, refreshCases, refreshVerify, refreshCull2]);
+  useEffect(() => { refreshPalms(); refreshCases(); refreshVerify(); },
+    [location.pathname, refreshPalms, refreshCases, refreshVerify]);
 
   useEffect(() => {
-    const onWake = () => { if (!document.hidden) { refreshPalms(); refreshCases(); refreshVerify(); refreshCull2(); } };
+    const onWake = () => { if (!document.hidden) { refreshPalms(); refreshCases(); refreshVerify(); } };
     document.addEventListener('visibilitychange', onWake);
     window.addEventListener('focus', onWake);
     return () => {
       document.removeEventListener('visibilitychange', onWake);
       window.removeEventListener('focus', onWake);
     };
-  }, [refreshPalms, refreshCases, refreshVerify, refreshCull2]);
+  }, [refreshPalms, refreshCases, refreshVerify]);
 
   // Escape folds the fan, as it would any transient thing.
   useEffect(() => {
@@ -308,9 +277,6 @@ export default function FloatingDock() {
   if (mayPalms) actions.push('palms');
   actions.push('nelos');
   if (mayVerify) actions.push('verify');
-  // The 2nd cull sits just above the calculator it used to be a card beside.
-  const mayCull2 = canMaintain(permissions, 'view');
-  if (mayCull2) actions.push('cull2');
   if (mayCulling) actions.push('culling');
   // One thing behind it is not a fan. Tapping opens that one thing.
   soloRef.current = actions.length === 1 ? actions[0] : null;
@@ -351,7 +317,6 @@ export default function FloatingDock() {
     if (open === 'palms') refreshPalms();
     else if (open === 'nelos') refreshCases();
     else if (open === 'verify') refreshVerify();
-    else if (open === 'cull2') refreshCull2();
     setOpen(null);
   }
 
@@ -368,8 +333,6 @@ export default function FloatingDock() {
               n: plotsLeft },
     nelos:  { label: 'Nelos', cls: 'bg-[#efc7e2] border-[#cf6eaf]', icon: <NelosMark />, n: casesLeft },
     verify: { label: t('vrf.title'), cls: 'bg-amber-100 border-amber-400', icon: <VerifyMark />, n: verifyLeft },
-    cull2:  { label: '2nd Cull · PP', cls: 'bg-blue-50 border-blue-600', icon: <Cull2Mark />,
-              n: 0, blink: cull2Pending > 0 },
     culling: { label: t('cull.title'), cls: 'bg-rose-100 border-rose-400', icon: <CullingMark />, n: 0 },
   };
 
@@ -390,7 +353,7 @@ export default function FloatingDock() {
             title={face.label}
             aria-label={face.label}
             style={{ left: p.left, top: p.top, width: MINI, height: MINI, zIndex: 41 }}
-            className={`${miniCls} ${face.cls} ${face.blink ? 'dock-blink' : ''}`}
+            className={`${miniCls} ${face.cls}`}
           >
             {face.icon}
             {face.n > 0 && (
@@ -435,12 +398,6 @@ export default function FloatingDock() {
             ring. It stops turning while it is being dragged: a thumb moving
             it across the screen is doing something, and the coin should not
             look like it is doing something else at the same time. */}
-        {/* Work waiting for a Done press: a blue ring that blinks round the
-            coin, so it is seen with the fan shut. Gone once every nursery
-            has been pressed done. */}
-        {!fan && cull2Pending > 0 && (
-          <span aria-hidden="true" className="dock-blink pointer-events-none absolute -inset-1.5 rounded-full border-[3px] border-blue-600" />
-        )}
         {fan
           ? <span className="text-[26px] leading-none font-black text-slate-500">×</span>
           : <Coin size={SIZE} spin={!dragging} />}
@@ -469,10 +426,6 @@ export default function FloatingDock() {
       )}
       {open === 'verify' && (
         <VerifyWindow onClose={() => { setOpen(null); refreshVerify(); }} onCount={setVerifyCount}
-          anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
-      )}
-      {open === 'cull2' && (
-        <Cull2Window onClose={() => { setOpen(null); refreshCull2(); }} onPending={setCull2Pending}
           anchor={{ x: pos.x, y: pos.y, size: SIZE }} />
       )}
       {open === 'culling' && (
