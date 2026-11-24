@@ -138,8 +138,8 @@ if (/scannedQty=\{doEntry\.scannedQty\}/.test(SM)) {
 } else {
   fail('ScanModule does not pass scannedQty — the form has no count to hold anything to');
 }
-if (/const scannedQty = newScans > 0 \? newScans : 0;/.test(SM)) {
-  ok('and it is newScans alone, never the balance fallback beside it');
+if (/const scannedQty = newScans;/.test(SM) && /const suggestQty = newScans;/.test(SM) && /flash\(t\('scan\.scanBeforeDO'\)/.test(SM)) {
+  ok('and it is newScans alone, never the balance -- with nothing scanned the DO is refused');
 } else {
   fail('scannedQty is not derived from newScans alone — a figure no scanner saw must not bind a delivery order');
 }

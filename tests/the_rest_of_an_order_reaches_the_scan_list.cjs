@@ -143,7 +143,7 @@ function oldRule(prev, cards, byAL) {
 {
   is((scan.match(/activeDOs\.reduce\(/g) || []).length, 0, 'nothing adds up the whole AL against one card any more');
   is(/issuedQty=\{cardIssued\(active\)\}/.test(scan), true, 'the scan screen is handed this card\'s share');
-  is(/const issuedQty = cardIssued\(consent\);/.test(scan), true, 'and so is the Issue DO form');
+  is(/const scannedQty = newScans;/.test(scan) && !/remainingBalance/.test(scan), true, 'and the Issue DO form asks only what was scanned, never the balance');
   const cards = S.mergeConsents([second, first], progress);
   const share = S.issuedShares(cards.filter((c) => c.al_number === AL), D.issuedQtyByAL(doRows)).c2;
   const card = cards.find((c) => c.id === 'c2');

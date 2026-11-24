@@ -109,8 +109,8 @@ try {
 if (A && B) {
   console.log('1. Each place keeps its own count of the same order');
   yes(A.point.id !== B.point.id, 'the two phones are two scan points');
-  ['0035101', '0035102', '0035103'].forEach((c) => A.rec(c, { typed: true }));
-  ['0035201', '0035202'].forEach((c) => B.rec(c, { typed: true }));
+  ['035101', '035102', '035103'].forEach((c) => A.rec(c, { typed: true }));
+  ['035201', '035202'].forEach((c) => B.rec(c, { typed: true }));
   take(sentA); take(sentB);
   A.hear(server); B.hear(server);
   const ca = A.counts(), cb = B.counts();
@@ -121,29 +121,29 @@ if (A && B) {
   yes(sentA.every((r) => r.scan_point === A.point.id), 'every row A sent carries A as its scan point');
 
   console.log('\n2. The two places cannot overlap -- scanned or keyed');
-  const r1 = B.rec('0035101');
+  const r1 = B.rec('035101');
   yes(!r1.ok && r1.key === 'scan.duplicateAt', 'B scanning a seal A took is refused (' + r1.key + ')');
   yes(JSON.stringify(r1.vars || {}).includes('UNN1 loading'), 'and the refusal says it is at UNN1 loading');
-  const r2 = B.rec('0035102', { typed: true });
+  const r2 = B.rec('035102', { typed: true });
   yes(!r2.ok && r2.key === 'scan.duplicateAt', 'keyed by hand the same seal is refused too');
   is(B.p().unique, 5, 'B still counts 5, nothing doubled');
-  const r3 = A.rec('0035103', { typed: true });
+  const r3 = A.rec('035103', { typed: true });
   is(r3.key, 'scan.duplicate', 'a seal THIS phone took reads as an ordinary duplicate');
 
   console.log('\n3. Reset clears only what this phone has NOT synced');
   // A seal of A's already went out on a DO: a reset must never take it.
-  A.L.progressRef.current = { ...A.L.progressRef.current, c1: A.L.markSealsOnDO(A.p(), ['0035101']) };
-  // A synced 0035101..0035103; then scans two more with no Sync yet.
-  ['0035104', '0035105'].forEach((c) => A.rec(c, { typed: true }));
-  const unsyncedA = ['0035104', '0035105'];               // what the outbox hands back
+  A.L.progressRef.current = { ...A.L.progressRef.current, c1: A.L.markSealsOnDO(A.p(), ['035101']) };
+  // A synced 035101..035103; then scans two more with no Sync yet.
+  ['035104', '035105'].forEach((c) => A.rec(c, { typed: true }));
+  const unsyncedA = ['035104', '035105'];               // what the outbox hands back
   const done = A.L.resetPoint(A.p(), unsyncedA, CARD.qty);
-  is(done.dropped.sort(), ['0035104', '0035105'], 'A clears its 2 unsynced scans');
-  yes(['0035102', '0035103'].every((c) => done.progress.seen.includes(c)), 'the seals A already synced stay');
-  yes(done.progress.seen.includes('0035101'), 'the seal already on a DO stays');
+  is(done.dropped.sort(), ['035104', '035105'], 'A clears its 2 unsynced scans');
+  yes(['035102', '035103'].every((c) => done.progress.seen.includes(c)), 'the seals A already synced stay');
+  yes(done.progress.seen.includes('035101'), 'the seal already on a DO stays');
   yes(!done.dropped.some((c) => c.startsWith('00352')), 'B\'s seals are not touched');
   A.L.progressRef.current = { ...A.L.progressRef.current, c1: done.progress };
   A.L.seenRef.current = new Set(done.progress.seen || []);   // what resetMyScans does
-  const back = A.rec('0035104', { typed: true });
+  const back = A.rec('035104', { typed: true });
   yes(back.ok, 'a cleared seal can be scanned again afterwards');
   is(A.L.resetPoint(A.p(), [], CARD.qty).dropped.length, 0, 'with nothing unsynced, a reset clears nothing');
 
@@ -163,24 +163,24 @@ if (A && B) {
   const C9 = { id: 'c9', al_number: 'AL-9', customer: 'Nine', qty: 9, memberIds: ['c9'] };
   const srv = [], sA = [], sB = [];
   const X = phone('Place X', C9, sA), Y = phone('Place Y', C9, sB);
-  for (let i = 1; i <= 9; i++) Y.rec('00900' + String(i).padStart(2, '0'), { typed: true });
+  for (let i = 1; i <= 9; i++) Y.rec('0900' + String(i).padStart(2, '0'), { typed: true });
   sB.forEach((r) => srv.push(r)); X.hear(srv);
-  const r = X.rec('0090099', { typed: true });
+  const r = X.rec('090099', { typed: true });
   yes(!r.ok && r.key === 'scan.orderFull', 'with 9 ordered and 9 taken at the other place, this phone cannot take one more (' + r.key + ')');
   is(X.p().unique, 9, 'and the order still counts 9');
-  const ry = Y.rec('0090098', { typed: true });
+  const ry = Y.rec('090098', { typed: true });
   yes(!ry.ok && ry.key === 'scan.orderFull', 'the place that took the nine cannot take a tenth either');
 
   console.log('\n4c. A DO carries THIS phone own seals and the earlier ones, never the other place');
   const C = { id: 'c5', al_number: 'AL-5', customer: 'Five', qty: 10, memberIds: ['c5'] };
   const s2 = [], sx = [], sy = [];
   const P = phone('P', C, sx), Q = phone('Q', C, sy);
-  ['0050001', '0050002'].forEach((c) => P.rec(c, { typed: true }));
-  ['0050003', '0050004', '0050005'].forEach((c) => Q.rec(c, { typed: true }));
+  ['050001', '050002'].forEach((c) => P.rec(c, { typed: true }));
+  ['050003', '050004', '050005'].forEach((c) => Q.rec(c, { typed: true }));
   sx.concat(sy).forEach((x) => s2.push(x));
-  s2.push({ barcode: '0050006' });   // an earlier scan, no point
+  s2.push({ barcode: '050006' });   // an earlier scan, no point
   P.hear(s2);
-  is(P.L.sealsMineForDO(P.p(), P.point.id).sort(), ['0050001', '0050002', '0050006'], 'P issues its own 2 and the 1 earlier seal, not Q 3');
+  is(P.L.sealsMineForDO(P.p(), P.point.id).sort(), ['050001', '050002', '050006'], 'P issues its own 2 and the 1 earlier seal, not Q 3');
   const doCodes = /sealsMineForDO\(progressRef\.current\[consentId\]/.test(SRC);
   yes(doCodes, 'the DO seals are picked by sealsMineForDO');
   yes(/const newScans = sealsMineForDO\(/.test(SRC), 'and the DO quantity is this phone own count');
@@ -195,17 +195,17 @@ console.log('\n5. Reset clears only scans with no DO yet, and asks nothing of th
   const L = lib({
     supabase: { rpc: async (fn, args) => { calls.push({ fn, args }); return { data: 7, error: null }; }, from: () => ({ insert: async () => { calls.push({ fn: 'insert' }); return {}; } }) },
     listJobs: async () => [
-      { uid: 'j1', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035104', committed: false } },
-      { uid: 'j2', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035101', committed: false } },
-      { uid: 'j3', kind: 'scan_record', payload: { consentId: 'c9', barcode: '0090001', committed: false } },
+      { uid: 'j1', kind: 'scan_record', payload: { consentId: 'c1', barcode: '035104', committed: false } },
+      { uid: 'j2', kind: 'scan_record', payload: { consentId: 'c1', barcode: '035101', committed: false } },
+      { uid: 'j3', kind: 'scan_record', payload: { consentId: 'c9', barcode: '090001', committed: false } },
       { uid: 'j4', kind: 'do_record', payload: { consentId: 'c1' } },
-      { uid: 'j5', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035106', committed: true } },
-      { uid: 'j6', kind: 'scan_record', payload: { consentId: 'c1', barcode: '0035107' } },
+      { uid: 'j5', kind: 'scan_record', payload: { consentId: 'c1', barcode: '035106', committed: true } },
+      { uid: 'j6', kind: 'scan_record', payload: { consentId: 'c1', barcode: '035107' } },
     ],
     removeJob: async (uid) => { removed.push(uid); },
   });
-  const codes = await L.resetUnsynced(['c1'], new L.Set(['0035101']));
-  is(codes, ['0035104'], 'it hands back the scans of this order that have no DO yet');
+  const codes = await L.resetUnsynced(['c1'], new L.Set(['035101']));
+  is(codes, ['035104'], 'it hands back the scans of this order that have no DO yet');
   is(removed, ['j1'], 'and only those leave the outbox -- not a seal on a DO, not a scan whose DO is issued (even unsent), not another order');
   is(calls.length, 0, 'nothing is asked of the server');
   is(await L.scanQueueCounts(['c1']), { open: 2, sending: 2 }, 'the order counts 2 still resettable and 2 issued and waiting for a line');
@@ -228,16 +228,16 @@ console.log('\n5. Reset clears only scans with no DO yet, and asks nothing of th
       .replace(/async function listJobs[\s\S]*?\n}\n/, '').replace(/async function removeJob[\s\S]*?\n}\n/, '')
       .replace(/async function patchJob[\s\S]*?\n}\n/, '').replace(/async function queueJob[\s\S]*?\n}\n/, '')
       .replace(/async function noteFailure[\s\S]*?\n}\n/, 'async function noteFailure(){}\n'), S);
-    await S.saveScanRecord('c1', 'AL-1', '0035190', false, { id: 'sp', name: 'X' });
-    await S.saveScanRecord('c1', 'AL-1', '0035191', false, { id: 'sp', name: 'X' });
+    await S.saveScanRecord('c1', 'AL-1', '035190', false, { id: 'sp', name: 'X' });
+    await S.saveScanRecord('c1', 'AL-1', '035191', false, { id: 'sp', name: 'X' });
     is(jobs.map((j) => j.payload.committed), [false, false], 'a scan goes into the outbox, not yet committed');
     await S.flushScanRecords();
     is(sent, [], 'a flush sends nothing while the DO is not issued');
     is(jobs.length, 2, 'and both stay on the phone');
-    await S.commitScans(['c1'], ['0035190']);
+    await S.commitScans(['c1'], ['035190']);
     await S.flushScanRecords();
-    is(sent, ['0035190'], 'once its DO is issued the seal is sent');
-    is(jobs.map((j) => j.payload.barcode), ['0035191'], 'and only a sent record leaves the phone');
+    is(sent, ['035190'], 'once its DO is issued the seal is sent');
+    is(jobs.map((j) => j.payload.barcode), ['035191'], 'and only a sent record leaves the phone');
     yes(/commitScans\(memberIds, sealsOut\)/.test(SRC), 'the DO being saved commits its seals and flushes');
     const sa = R('src/lib/syncAll.js');
     const tick = sa.slice(sa.indexOf('export function startAutoSync')).replace(/\/\*[\s\S]*?\*\//g, '');

@@ -487,6 +487,18 @@ export default function ScanModule() {
       if (!a) return { ok: false };
       const code = String(rawCode).trim();
       if (!code) return { ok: false, key: 'scan.manualEmpty' };
+      /* A SEAL NUMBER IS SIX DIGITS, read or typed. The camera and the gun
+         also read the other barcodes on a bag -- 12 and 13 digit product
+         codes went into the table as seals -- so a reading that is not
+         exactly six digits is not a seal and is not counted. */
+      if (!/^[0-9]{6}$/.test(code)) {
+        const vars = { code };
+        beepAlarm();
+        vibrate([120, 60, 120]);
+        setLastInfo({ key: 'scan.notASeal', vars });
+        flash(t('scan.notASeal', vars), 'danger');
+        return { ok: false, key: 'scan.notASeal', vars };
+      }
       const now = Date.now();
       if (!typed && code === lastCodeRef.current && now - lastTimeRef.current < DEDUPE_DEBOUNCE_MS) {
         return { ok: false };
@@ -708,6 +720,15 @@ export default function ScanModule() {
 
   async function openIssueDO(consent) {
     if (!consent || issuing) return;
+    /* A DO FROM THE SCANNER IS ISSUED FOR WHAT WAS SCANNED, and for nothing
+       else. With no seal scanned here it is refused: the form used to offer
+       the order balance instead, so DO-BB0RS804 went out for 299 and
+       DO-P4P0M108 for 100 with not one seal behind either. A DO with no
+       scan is the DO module's own manual entry, not this screen's. */
+    if (!sealsMineForDO(progressRef.current[consent.id] || defaultProgress(), pointRef.current.id).length) {
+      flash(t('scan.scanBeforeDO'), 'warn');
+      return;
+    }
     setIssuing(true);
     let al = null;
     try {
@@ -748,22 +769,14 @@ export default function ScanModule() {
       loadBatchData().then(({ batchMap }) => setDoBatchMap(batchMap), () => {});
     }
     setIssuing(false);
-    // This card's own share of what has gone out -- see cardIssued.
-    const issuedQty = cardIssued(consent);
     /* THIS PHONE'S OWN SEALS, not the order's: the other place issues its
-       own DO for what it scanned. See sealsMineForDO. */
+       own DO for what it scanned. See sealsMineForDO. The DO is issued for
+       exactly that many -- the form fills it on one batch and makes several
+       batches tally to it (see do/qty.js) -- and the refusal at the top of
+       this function means there is always at least one. */
     const newScans = sealsMineForDO(progressRef.current[consent.id] || defaultProgress(), pointRef.current.id).length;
-    const remainingBalance = Math.max(0, consent.qty - issuedQty);
-    const suggestQty = newScans > 0 ? newScans : remainingBalance;
-    /* WHAT THE SCANNER ACTUALLY COUNTED, which the delivery order is then
-       issued for -- the form fills it in on one batch and makes several
-       batches tally to it (see do/qty.js).
-
-       Only newScans, never the balance fallback beside it. With nothing
-       newly scanned the form is offered the remaining balance as a
-       SUGGESTION the conductor may key over, and binding a delivery order
-       to a figure no scanner ever saw would be the opposite of the rule. */
-    const scannedQty = newScans > 0 ? newScans : 0;
+    const suggestQty = newScans;
+    const scannedQty = newScans;
     setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, consentQty: consent.qty || 0, memberIds: consent.memberIds || [consent.id] });
   }
 
@@ -1856,7 +1869,8 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       )}
 
       <button
-        disabled={issuing || fullyCollected}
+        disabled={issuing || fullyCollected || myToIssue === 0}
+        title={myToIssue === 0 ? t('scan.scanBeforeDO') : undefined}
         onClick={async () => {
           await stopCamera();
           onIssueDO();
