@@ -46,7 +46,6 @@ import HistoryDialog from './HistoryDialog.jsx';
 import PhotoSlots from './PhotoSlots.jsx';
 import VerifyHub from './VerifyHub.jsx';
 import WeekBoard from './WeekBoard.jsx';
-import SecondCullCard from './SecondCullCard.jsx';
 import WorkIcon from './WorkIcons.jsx';
 import WhoDidIt from './WhoDidIt.jsx';
 import WorkSheet from './WorkSheet.jsx';
@@ -739,16 +738,6 @@ export default function MaintenanceModule({
               </button>
             )}
           </div>
-        )}
-
-        {/* 2nd cull (Pusing Polibeg). The Field Conductor's own card, not a
-            work type on the schedule: its list comes from the ledger, and its
-            one button marks a nursery done. Workers do not see it. */}
-        {!identity && (
-          <SecondCullCard
-            allowed={allowed === null ? null : new Set((allowed || []).map(nurseryKey))}
-            online={online}
-          />
         )}
 
         {/* One week at a time, at full width, and any week — a Field

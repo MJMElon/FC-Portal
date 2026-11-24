@@ -87,7 +87,28 @@ function monthLabel(ym) {
   return new Date(y, m - 1, 1).toLocaleString('en-GB', { month: 'long', year: 'numeric' });
 }
 
-export default function SecondCullCard({ allowed, online }) {
+/**
+ * How many of the given nurseries still owe their Done press this month, and
+ * 0 once the month's case is open. The dock reads this to decide whether its
+ * 2nd Cull mark blinks, so it has to answer the same question the card does:
+ * the card shows a block for every visible nursery NOT yet done, and nothing
+ * else. Two small reads, no ledger scan. Throws on a failed read — the caller
+ * decides what a failure looks like (the dock: no blink).
+ */
+export async function secondCullPending(allowed) {
+  const month = monthKeyOf();
+  const [doneRes, caseRes] = await Promise.all([
+    supabase.from('nops_2nd_cull_nursery').select('*').eq('month', month),
+    supabase.from('nops_2nd_cull_case').select('*').eq('month', month).maybeSingle(),
+  ]);
+  if (doneRes.error) throw doneRes.error;
+  if (caseRes.error) throw caseRes.error;
+  if (caseRes.data) return 0;
+  const done = doneByNursery(doneRes.data);
+  return SECOND_CULL_NURSERIES.filter((n) => (!allowed || allowed.has(n)) && !done[n]).length;
+}
+
+export default function SecondCullCard({ allowed, online, onPending }) {
   const { session, staffName } = useAuth();
   const userId = session?.user?.id || null;
   const month = monthKeyOf();
@@ -108,13 +129,19 @@ export default function SecondCullCard({ allowed, online }) {
       ]);
       if (doneRes.error) throw doneRes.error;
       if (caseRes.error) throw caseRes.error;
+      const done = doneByNursery(doneRes.data);
       setDue(dueItems(rows, month));
-      setDoneRows(doneByNursery(doneRes.data));
+      setDoneRows(done);
       setCaseRow(caseRes.data || null);
+      if (onPending) {
+        const owed = caseRes.data ? 0
+          : SECOND_CULL_NURSERIES.filter((n) => (!allowed || allowed.has(n)) && !done[n]).length;
+        onPending(owed);
+      }
     } catch (e) {
       setError(String(e?.message || e));
     }
-  }, [month]);
+  }, [month, allowed, onPending]);
 
   useEffect(() => { load(); }, [load]);
 
