@@ -43,6 +43,7 @@ import NelosWindow from './NelosWindow.jsx';
 import VerifyWindow from './VerifyWindow.jsx';
 import CullingWindow from './CullingWindow.jsx';
 import { Train, todayProgress } from './PalmsDock.jsx';
+import { DropIcon, openSiramGo, siramGoOn } from './SiramGo.jsx';
 
 const POS_KEY = 'mjm_dock_pos_v1';
 const SIZE = 62;      // the trigger, in px
@@ -115,7 +116,7 @@ function CullingMark() {
    from index.css with it rather than being left behind unused. */
 
 export default function FloatingDock() {
-  const { mayEnter, permissions } = useAuth();
+  const { mayEnter, permissions, company } = useAuth();
   const { t } = useLang();
   const location = useLocation();
 
@@ -245,6 +246,7 @@ export default function FloatingDock() {
       // One thing behind the button is not a fan — tapping opens it, and
       // tapping it again is how you pop it back in, now that there is no
       // backdrop behind the window to tap instead.
+      if (soloRef.current === 'siram') { openSiramGo(); return; }
       if (soloRef.current) {
         if (open === soloRef.current) closeCurrent(); else setOpen(soloRef.current);
         return;
@@ -278,6 +280,11 @@ export default function FloatingDock() {
   actions.push('nelos');
   if (mayVerify) actions.push('verify');
   if (mayCulling) actions.push('culling');
+  /* Siram Go, the watering log. A LINK and not a window: it opens the form
+     in a new tab and nothing on this screen changes. Shown unless the FC
+     Portal column of System Setting, Portal View & Function, switches it
+     off (SiramGo.jsx). Last, so it fans out furthest from the thumb. */
+  if (siramGoOn(company)) actions.push('siram');
   // One thing behind it is not a fan. Tapping opens that one thing.
   soloRef.current = actions.length === 1 ? actions[0] : null;
 
@@ -322,6 +329,7 @@ export default function FloatingDock() {
 
   function choose(which) {
     setFan(false);
+    if (which === 'siram') { openSiramGo(); return; }
     if (open === which) closeCurrent(); else setOpen(which);
   }
 
@@ -334,6 +342,8 @@ export default function FloatingDock() {
     nelos:  { label: 'Nelos', cls: 'bg-[#efc7e2] border-[#cf6eaf]', icon: <NelosMark />, n: casesLeft },
     verify: { label: t('vrf.title'), cls: 'bg-amber-100 border-amber-400', icon: <VerifyMark />, n: verifyLeft },
     culling: { label: t('cull.title'), cls: 'bg-rose-100 border-rose-400', icon: <CullingMark />, n: 0 },
+    siram:  { label: 'Siram Go', cls: 'bg-sky-100 border-sky-400',
+              icon: <span className="text-sky-700"><DropIcon size={22} /></span>, n: 0 },
   };
 
   return (
