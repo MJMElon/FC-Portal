@@ -487,6 +487,18 @@ export default function ScanModule() {
       if (!a) return { ok: false };
       const code = String(rawCode).trim();
       if (!code) return { ok: false, key: 'scan.manualEmpty' };
+      /* A SEAL NUMBER IS SIX DIGITS, read or typed. The camera and the gun
+         also read the other barcodes on a bag -- 12 and 13 digit product
+         codes went into the table as seals -- so a reading that is not
+         exactly six digits is not a seal and is not counted. */
+      if (!/^[0-9]{6}$/.test(code)) {
+        const vars = { code };
+        beepAlarm();
+        vibrate([120, 60, 120]);
+        setLastInfo({ key: 'scan.notASeal', vars });
+        flash(t('scan.notASeal', vars), 'danger');
+        return { ok: false, key: 'scan.notASeal', vars };
+      }
       const now = Date.now();
       if (!typed && code === lastCodeRef.current && now - lastTimeRef.current < DEDUPE_DEBOUNCE_MS) {
         return { ok: false };
