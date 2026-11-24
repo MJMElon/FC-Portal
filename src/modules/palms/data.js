@@ -1,4 +1,5 @@
 import { newUid } from '../../lib/outbox.js';
+import { isReplantPlot } from '../maintenance/plotBatches.js';
 import { loadSettings } from './settings.js';
 
 // PALMS — Plot Activity Log Monitoring System, data layer.
@@ -177,10 +178,21 @@ export function saveDB(db) {
  * shared/shared_palms.js. Change one, change the other. A trailing number is
  * allowed for, so B4-R and B4-R2 both go; a split area ("B4-R#A") is judged
  * by its plot.
+ *
+ * THE RULE ITSELF MOVED to modules/maintenance/plotBatches.js, beside
+ * plotKey, and this is a re-export so the PALMS screens that have always
+ * read it here go on doing so. It moved because the Worker Portal needed
+ * the OTHER half of the same regex — which plot a -R plot is the replant of
+ * — and pulling this file in for it would have dragged the whole PALMS
+ * module into the worker's bundle. plotBatches.js imports nothing, which is
+ * what makes it the right home for a rule about the shape of a plot name.
+ *
+ * It is IMPORTED and then exported rather than re-exported in one line,
+ * because plotsOf() below calls it: `export … from` publishes the name
+ * without binding it in this module, so the one-liner leaves every caller
+ * in this file reading an undefined.
  */
-export function isReplantPlot(plot) {
-  return /-R\d*$/i.test(String(plot == null ? '' : plot).split('#')[0].trim());
-}
+export { isReplantPlot };
 
 export function plotsOf(nk) {
   const n = NURSERIES[nk];

@@ -492,6 +492,74 @@ the answer is to put a door back — a module tile is the cheap one.
 button, the sheet and the state behind them are all gone from Maintenance —
 a half-removal that leaves the import is the kind that comes back.
 
+## A WORKER'S BOUNDARY CARRIES THE PLOT'S REPLANT, and the boundary is not the gate
+
+The office, and the second half is the whole of why it matters: *"如果worker
+做工的那天某plot-R有在 要show出来 … 月头 没有B3-R 结果15号那天B3-R出现 所以
+worker那边要live update B3-R 出现 如果有做B3-R就按B3-R 如果两边都有做 B3 和
+B3-R都要按 是为了避免可能B3已经没有苗了 要cull了 但是B3-R没出现 他们就会按B3
+结果B3的balance其实是要被cull的"*.
+
+**A -R PLOT IS MADE MID-MONTH**, by a 3rd-culling transfer landing on ground
+that was not a plot the day before — so a boundary keyed on the 1st cannot
+possibly name it, and the office would have to re-key every bounded worker
+the morning one appears. **`plotKey` KEEPS THE DASH**, deliberately, because
+B3 and B3-R are two plots with two balances; so `B3` and `B3-R` are two keys
+and the replant was silently outside the boundary for ever. The cost is the
+office's own sentence: the replant is where the seedlings now are, the parent
+is the ground about to be culled, and a worker handed only the parent records
+their morning against a balance on its way out.
+
+**THE BOUNDARY ON THIS PHONE IS NOT THE GATE, and that is the thing to know
+before changing anything here.** `worker_plots()` in the database is — the
+list is what it returns, and `worker_submit_maint` refuses a save against
+anything it does not, raising 42501. So `workerPlotFilter` widening and the
+SQL not would show the plot and then refuse the save **after the walk**, and
+the SQL widening and this not would filter it off the list the database had
+already allowed. `shared/RUN_ME_worker_boundary_carries_the_replant.sql` in
+the office repository is the other half and **ships with this one**.
+
+**`isReplantPlot` AND `replantParent` LIVE IN `plotBatches.js`**, not in
+`palms/data.js` where the first of them used to be: that file imports
+nothing, where `palms/data.js` pulls in supabase, so it is the only place a
+plot-name rule can live without dragging a module in behind it. **ONE REGEX
+ANSWERS BOTH QUESTIONS** — whether a plot is a replant, and whose — because a
+second copy of that shape is a second thing to get wrong. `palms/data.js`
+re-exports **the same function object** through a real `import`, never
+`export … from`, which would publish the name without binding it in the
+module and `plotsOf()` calls it.
+
+Three things in the rule:
+
+- **IT TRAVELS ONE WAY ONLY** — parent to replant, never back. A boundary
+  naming B3-R does NOT open B3: the office put that worker on the replant,
+  and the parent is other seedlings and somebody else's morning. The widening
+  is safe in the direction it goes because the replant IS the parent's own
+  ground, moved.
+- **`replantParent` ANSWERS IN `plotKey` SPELLING**, which is the one thing a
+  caller cannot check for itself: every caller compares against keys, and a
+  parent worked out in one spelling and compared in another matches nothing
+  while looking exactly as though it should.
+- **A bare `-R` has no parent and so widens nothing**, although
+  `isReplantPlot` does call it a replant (its head matches empty). The
+  implication that has to hold is one-way — anything with a parent is a plot
+  PALMS also calls a replant — and the test asserts that direction rather
+  than the equivalence, which would force a change to the shipped PALMS rule
+  and move which plots that module hides.
+
+**TWO THINGS OUTSIDE THIS CODE have to be true before B3-R reaches a worker**,
+and neither is a bug when it is not: `shared_plots` must carry the B3-R row
+(added in Seedling Stock → System Settings → Add Plot, the one door), and the
+office must press **Save Schedule** — `seedReplantRounds` writes a DRAFT and
+does not publish. Without either there is no B3-R task for anybody to tick.
+
+`tests/a_boundary_carries_the_replant.cjs` is 33 checks and **7 fail on the
+previous code**, the headline one in the office's own terms. It **lifts
+`workerPlotFilter` out of the shipped file** — that module imports supabase
+and the outbox, and stubbing a dozen modules to reach one pure function is a
+thicker fixture than the function — and its section 4 reads the office SQL,
+so a release that ships one half fails here.
+
 ## `ROLES` in `maintenance/helpers.js` is the office list, copied
 
 It is what `isKnownRole` asks, and `isGeneralWorker` reads that to decide
