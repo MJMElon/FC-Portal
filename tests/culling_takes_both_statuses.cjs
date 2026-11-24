@@ -56,6 +56,7 @@ const STAGES = [
   { name: 'Saringan Anak Bibit', sort_order: 2 },
   { name: 'Pengambilan',         sort_order: 3 },
   { name: 'Up-keep',             sort_order: 4 },
+  { name: 'Tunggu buat culling', sort_order: 5 },
 ];
 
 async function run(logRows, stages = STAGES) {
@@ -78,6 +79,7 @@ async function run(logRows, stages = STAGES) {
     { plot_name: 'U6#A',  act_n: 2, end_date: null },  // a split area, screening
     { plot_name: 'P01',   act_n: 1, end_date: null },  // Penanaman — not collecting
     { plot_name: 'Z99',   act_n: 4, end_date: null },  // Up-keep — not collecting
+    { plot_name: 'N12#B', act_n: 5, end_date: null },  // Tunggu buat culling
   ]);
   const have = [...got].sort().join(',');
 
@@ -86,6 +88,9 @@ async function run(logRows, stages = STAGES) {
 
   if (got.has('B4')) pass('a plot at Saringan Anak Bibit is offered');
   else fail('a plot at Saringan Anak Bibit is still missing from the calculator');
+
+  if (got.has('N12')) pass('a plot at Tunggu buat culling is offered');
+  else fail('a plot at Tunggu buat culling is missing from the calculator');
 
   if (got.has('U6')) pass('a split area (U6#A) puts its PLOT on the screen, not the area');
   else fail('a split area at a collecting status did not reach the screen');

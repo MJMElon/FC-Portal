@@ -51,6 +51,7 @@ export default function SyncButton({ dark }) {
   const [stamp, setStamp] = useState(lastSync);
   const [note, setNote] = useState(null); // transient error / offline line
   const [flash, setFlash] = useState(null); // 'ok' | 'fail' — the big tick/cross
+  const [failedSteps, setFailedSteps] = useState([]); // what refused, and why
   const flashTimer = useRef(null);
 
   useEffect(() => () => clearTimeout(flashTimer.current), []);
@@ -65,6 +66,7 @@ export default function SyncButton({ dark }) {
     if (busy) return;
     setBusy(true);
     setNote(null);
+    setFailedSteps([]);
     // Guarded end to end: an unexpected throw here used to leave the
     // button stuck mid-spin forever — the same trap as an unguarded save
     // handler anywhere else in this system — and would have read exactly
@@ -90,12 +92,14 @@ export default function SyncButton({ dark }) {
           ? t('dash.syncFailedStep', { step: failed[0].name })
           : t('dash.syncFailed')
       );
+      setFailedSteps(failed);
       clearTimeout(syncNoteTimer);
-      syncNoteTimer = setTimeout(() => setNote(null), 6000);
+      syncNoteTimer = setTimeout(() => { setNote(null); setFailedSteps([]); }, 20000);
       showFlash('fail', 3000);
     } catch (e) {
       console.error('[sync] threw:', e);
       setNote(t('dash.syncFailed'));
+      setFailedSteps([{ name: 'sync', ok: false, error: String((e && e.message) || e).slice(0, 200) }]);
       clearTimeout(syncNoteTimer);
       syncNoteTimer = setTimeout(() => setNote(null), 6000);
       showFlash('fail', 3000);
@@ -133,6 +137,34 @@ export default function SyncButton({ dark }) {
         <Icon name="refresh" className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />
       </button>
       {flash && <SyncFlash kind={flash} />}
+      {/* THE REASON, ON THE SCREEN. It used to live only in the button's
+          title, which a phone has no way to show: a red cross and nothing
+          else, press after press, so "sync always fails" was all anybody
+          could report. Each step that refused is named with what it said,
+          and the panel stays until it is tapped or twenty seconds pass. */}
+      {note && (
+        <div
+          role="alert"
+          data-sync-note
+          onClick={() => { setNote(null); setFailedSteps([]); }}
+          className="fixed left-3 right-3 top-16 z-[96] mx-auto max-w-md rounded-xl border border-amber-300 bg-amber-50 text-amber-900 shadow-xl p-3 text-[13px] leading-snug cursor-pointer"
+        >
+          <div className="font-semibold">{note}</div>
+          {failedSteps.length > 0 && (
+            <ul className="mt-1.5 space-y-1">
+              {failedSteps.map((s) => (
+                <li key={s.name} data-sync-step={s.name} className="text-[12px]">
+                  <span className="font-semibold">{s.name}</span>
+                  {s.error ? <span className="text-amber-800"> — {s.error}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          {failedSteps.length > 0 && (
+            <div className="mt-1.5 text-[11px] text-amber-700">{t('dash.syncTapToClose')}</div>
+          )}
+        </div>
+      )}
     </>
   );
 }

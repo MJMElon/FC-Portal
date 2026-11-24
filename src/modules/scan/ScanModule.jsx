@@ -7,7 +7,7 @@ import { cacheGet, cacheSet } from '../../lib/cache.js';
 import { printDO } from '../../lib/pdf.js';
 import { compressSeals, formatSealRanges, sealDigits, rangeQty, rangeHolding, SHOW_SEALS_ON_DO } from '../../lib/sealRanges.js';
 import EntryModal from '../do/EntryModal.jsx';
-import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs, issuedQtyByAL, readDOQueue } from '../do/data.js';
+import { loadALByNumber, loadDropdownData, loadBatchData, loadDOWorkers, persistDO, flushDOQueue, loadDOsForAL, loadConsentsForAL, loadIssuedQtyByALs, issuedQtyByAL, readDOQueue, doQueueSummary } from '../do/data.js';
 import { useWorkerTick } from '../do/useWorkerTick.js';
 import WorkerTickModal from '../do/WorkerTickModal.jsx';
 import {
@@ -30,21 +30,31 @@ import {
   saveScanRecord,
   flushScanRecords,
   fetchScanRecords,
+  waitingScanCodes,
   subscribeScanRecords,
   unsubscribeScanRecords,
   findBarcodeElsewhere,
   cachedSealAllocations,
   fetchSealAllocations,
   sealFeatureLive,
+  sealsForNextDO,
   allocationsOf,
   sealVerdict,
-  sealsForNextDO,
+  barcodeKey,
   markSealsOnDO,
   fetchSealsOnDO,
+  resetUnsynced,
+  commitScans,
+  scanQueueCounts,
+  sealsAlreadyOnDO,
 } from './store.js';
+import { myScanPoint, setScanPointName, markPoint, notePoints, countsByPoint, pointHolding, resetPoint, reconcileWithServer, sealsMineForDO, orderRoomLeft, dropSeals, NO_POINT } from './scanPoints.js';
 import { ensureAudio, beepSuccess, beepDuplicate, beepComplete, beepAlarm, vibrate } from './audio.js';
 import Icon from '../../components/Icon.jsx';
 import { numText } from '../../lib/numberText.js';
+
+/* A seal number keyed by hand on the Add dialog is exactly this many digits. */
+const MANUAL_SEAL_DIGITS = 6;
 
 const DEDUPE_DEBOUNCE_MS = 800;
 const OVER_REPEAT_MS = 1200;
@@ -58,8 +68,19 @@ export default function ScanModule() {
   const [progress, setProgress] = useState(() => loadProgress());
   const [activeId, setActiveId] = useState(null);
   const [syncing, setSyncing] = useState(false);
+  /* The open order's scans still on this phone: `open` has no DO yet, so
+     Reset may take it back; `sending` has its DO issued and waits for a
+     line. null: the outbox could not be read. */
+  const [queue, setQueue] = useState({ open: 0, sending: 0 });
   const [toast, setToast] = useState(null);
   const [lastInfo, setLastInfo] = useState({ key: 'scan.waitingFirst' });
+  /* THIS PHONE'S SCAN POINT -- see scanPoints.js. One order can be scanned
+     at two places at once, and each phone keeps its own count of it. */
+  const [point, setPoint] = useState(() => myScanPoint(staffName));
+  const pointRef = useRef(point);
+  pointRef.current = point;
+  useEffect(() => { setPoint(myScanPoint(staffName)); }, [staffName]);
+  const [doQueue, setDoQueue] = useState(() => doQueueSummary());
   /* The seal ranges handed to each customer (see fetchSealAllocations).
      null = never read, which is "no seal feature" everywhere it is asked. */
   const [sealAllocs, setSealAllocs] = useState(() => cachedSealAllocations());
@@ -68,6 +89,7 @@ export default function ScanModule() {
   /* The seals the DO being saved right now carries, so onDoSaved can mark
      them as gone once the save (or the queue) has taken it. */
   const doSealsRef = useRef(null);
+  const issuedOfRef = useRef(() => 0);
 
   // Issue DO popup state (opens the DO entry form in-place, no navigation).
   const [doEntry, setDoEntry] = useState(null); // { al, suggestQty, scannedQty, consentId }
@@ -123,12 +145,29 @@ export default function ScanModule() {
     return queuedDOALs().has(card.al_number) ? Math.max(local, share) : share;
   }
   activeRef.current = active;
+  /* recordScan is a callback that outlives renders, so it reads what has
+     gone out on a DO through this ref and not a stale closure. */
+  issuedOfRef.current = cardIssued;
 
+  function refreshUnsynced(card) {
+    const c = card || activeRef.current;
+    if (!c) return;
+    scanQueueCounts(c.memberIds || [c.id])
+      .then((q) => { if (activeRef.current?.id === c.id) setQueue(q); })
+      .catch(() => {});
+  }
+
+  /* SYNC sends what is waiting -- the DOs, and the scans whose DO has been
+     issued (a scan with no DO yet is skipped and stays on the phone) -- and
+     brings the latest back. */
   const sync = useCallback(async () => {
     setSyncing(true);
     try {
       await flushDOQueue().catch(() => {});
+      setDoQueue(doQueueSummary());
       await flushScanRecords().catch(() => {});
+      const a = activeRef.current;
+      if (a) pullServerScans(a.id, a.memberIds || [a.id], true);
       const [data, today] = await Promise.all([fetchConsents(), fetchTodayBookingALs().catch(() => null)]);
       setServerConsents(data);
       if (today) setTodayALs(today);
@@ -149,6 +188,21 @@ export default function ScanModule() {
     if (navigator.onLine) sync();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* A DO waiting on this phone is a DO the office cannot see. It is said on
+     the screen, with the reason the server last gave, and sent again on a
+     timer as well as on Sync. */
+  useEffect(() => {
+    const tick = setInterval(async () => {
+      if (navigator.onLine && doQueueSummary().n) await flushDOQueue().catch(() => {});
+      setDoQueue(doQueueSummary());
+    }, 30000);
+    return () => clearInterval(tick);
+  }, []);
+  async function sendDOQueueNow() {
+    await flushDOQueue().catch(() => {});
+    setDoQueue(doQueueSummary());
+  }
 
   // The "Who Loaded This DO" roster and the plot→nursery map it groups by —
   // same lists the DO module loads, cached the same way, loaded up front so
@@ -261,61 +315,150 @@ export default function ScanModule() {
     const scanIds = activeRef.current?.memberIds || [activeId];
 
     // Pull server records → merge in barcodes scanned by other devices.
-    fetchScanRecords(scanIds).then((rows) => {
-      /* A merged card is several consent rows, and the scan table is
-         unique on (consent_id, barcode) -- so ONE seal filed against two
-         of its members comes back as two rows. addBarcodes filters the
-         batch against itself as well as against what is held, which is
-         the thing that was missing. */
-      const incoming = rows.map((r) => r.barcode);
-      if (!incoming.length) return;
-      setProgress((prev) => {
-        const cur = prev[activeId] || defaultProgress();
-        const qty = activeRef.current?.qty || 0;
-        const added = addBarcodes(cur, incoming, (code, n) => ({ code, time: '–', over: n > qty }));
-        if (added === cur) return prev;
-        const next = { ...added, over: Math.max(0, added.unique - qty) };
-        next.seen.forEach((b) => seenRef.current.add(b));
-        const map = { ...prev, [activeId]: next };
-        saveProgress(map);
-        return map;
-      });
-    }).catch(() => {/* stay with localStorage */});
+    pullServerScans(activeId, scanIds);
+    refreshUnsynced(consentsRef.current.find((c) => c.id === activeId));
 
-    /* Seals another device already put on a DO for this card, so the next
-       DO here does not name them again. Only once the seal SQL is known to
-       be in -- the column it asks about does not exist before that. */
-    if (sealFeatureLive()) {
-      fetchSealsOnDO(scanIds).then((codes) => {
-        if (!codes.length) return;
-        setProgress((prev) => {
-          const cur = prev[activeId] || defaultProgress();
-          const next = markSealsOnDO(cur, codes);
-          if ((next.doSeals || []).length === (cur.doSeals || []).length && Array.isArray(cur.doSeals)) return prev;
-          const map = { ...prev, [activeId]: next };
-          saveProgress(map);
-          return map;
-        });
-      }).catch(() => {});
-    }
+    /* Seals any phone already put on a DO for this card, so they are not
+       counted as waiting for one. It used to wait until this phone had read
+       seal_allocations once (proof the do_number column exists), so a phone
+       that never had took every seal another phone sent as still waiting:
+       BB0RS8 read 1,470 scanned against a balance of 299 and would take no
+       more, though all 1,470 were on DO-BB0RS801..803. The column is in;
+       a database without it simply refuses this read, which changes
+       nothing. Asked again on every read of the order (pullServerScans). */
+    markServerDOSeals(activeId, scanIds);
 
     // Subscribe to live INSERTs from other devices scanning the same consent.
-    realtimeChannelRef.current = subscribeScanRecords(scanIds, (barcode) => {
-      if (seenRef.current.has(barcode)) return;
+    realtimeChannelRef.current = subscribeScanRecords(scanIds, (barcode, row) => {
+      const fresh = !seenRef.current.has(barcode);
       seenRef.current.add(barcode);
       setProgress((prev) => {
         const cur = prev[activeId] || defaultProgress();
         const qty = activeRef.current?.qty || 0;
         const time = new Date().toLocaleTimeString();
-        const added = addBarcodes(cur, [barcode], (code, n) => ({ code, time, over: n > qty }));
-        if (added === cur) return prev;
-        const next = { ...added, over: Math.max(0, added.unique - qty) };
+        let next = fresh ? addBarcodes(cur, [barcode], (code, n) => ({ code, time, over: n > qty })) : cur;
+        /* The row says which point took it -- the server's answer, so a
+           seal two phones both took with no line goes to whichever reached
+           the table first. */
+        next = notePoints(next, [row || { barcode }]);
+        if (next === cur) return prev;
+        next = { ...next, over: Math.max(0, next.unique - qty) };
         const map = { ...prev, [activeId]: next };
         saveProgress(map);
         return map;
       });
+    }, (msg) => {
+      /* Another point reset its part: read the order again, which takes
+         its seals off here (reconcileWithServer). */
+      if (msg && msg.point === pointRef.current.id) return;
+      pullServerScans(activeId, scanIds);
+      flash(t('scan.resetByOther'), 'warn');
     });
+
+    /* A phone that missed the broadcast (asleep, a dropped socket) still
+       hears a reset: the order is read again every 20 seconds while it is
+       open. */
+    const tick = setInterval(() => {
+      if (navigator.onLine) pullServerScans(activeId, scanIds);
+    }, 20000);
+    return () => clearInterval(tick);
   }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* THE SERVER'S LIST OF THIS ORDER'S SEALS, merged in: seals other phones
+     took are added, which point holds each is taken off the rows, and a seal
+     another point has since reset is taken off here too. A read that fails
+     changes nothing. */
+  function markServerDOSeals(cardId, scanIds) {
+    fetchSealsOnDO(scanIds).then((codes) => {
+      if (!codes.length) return;
+      setProgress((prev) => {
+        const cur = prev[cardId] || defaultProgress();
+        const next = markSealsOnDO(cur, codes);
+        if ((next.doSeals || []).length === (cur.doSeals || []).length && Array.isArray(cur.doSeals)) return prev;
+        const map = { ...prev, [cardId]: next };
+        saveProgress(map);
+        return map;
+      });
+    }).catch(() => {});
+  }
+
+  function pullServerScans(cardId, scanIds, say) {
+    markServerDOSeals(cardId, scanIds);
+    /* The outbox is read BEFORE the table: a seal sent in between is then
+       either still listed as waiting or already in the rows, never neither. */
+    waitingScanCodes(scanIds).then((waiting) => fetchScanRecords(scanIds).then((rows) => [rows, waiting])).then(([rows, waiting]) => {
+      /* Counted off the ref, outside the updater: React runs an updater when
+         it renders, which is after the message below would be decided. */
+      const before = (progressRef.current || {})[cardId] || defaultProgress();
+      const gone = reconcileWithServer(notePoints(before, rows), rows, pointRef.current.id, 0, waiting).dropped.length;
+      setProgress((prev) => {
+        const cur = prev[cardId] || defaultProgress();
+        const qty = (consentsRef.current.find((c) => c.id === cardId) || {}).qty || 0;
+        /* A merged card is several consent rows, and the scan table is
+           unique on (consent_id, barcode) -- so ONE seal filed against two
+           of its members comes back as two rows. addBarcodes filters the
+           batch against itself as well as against what is held. */
+        let next = addBarcodes(cur, rows.map((r) => r.barcode), (code, n) => ({ code, time: '–', over: n > qty }));
+        next = notePoints(next, rows);
+        next = reconcileWithServer(next, rows, pointRef.current.id, qty, waiting).progress;
+        if (next === cur) return prev;
+        next = { ...next, over: Math.max(0, next.unique - qty) };
+        if (activeRef.current?.id === cardId) seenRef.current = new Set(next.seen || []);
+        const map = { ...prev, [cardId]: next };
+        saveProgress(map);
+        return map;
+      });
+      /* A seal the cloud has not got and nothing is waiting to send came
+         off: refused at Sync, or cleared elsewhere. Said, so a count that
+         went down is never a mystery. */
+      if (say && gone) flash(t('scan.droppedAtSync', { n: numText(gone) }), 'warn');
+      if (activeRef.current?.id === cardId) refreshUnsynced(activeRef.current);
+    }).catch(() => {/* stay with localStorage */});
+  }
+
+  /* RESET TAKES BACK WHAT THIS PHONE HAS NOT SYNCED, and only that.
+     Once Sync has sent a scan it is in the cloud and is not the phone's to
+     take back, so nothing on the server changes here and no line is needed:
+     the queued scans of this order leave the outbox and the same seals come
+     off the phone. A seal on a DO is a real collection and stays. */
+  async function resetMyScans() {
+    const a = activeRef.current;
+    if (!a) return { ok: false };
+    const me = pointRef.current;
+    try {
+      const keep = new Set(sealsAlreadyOnDO(progressRef.current[a.id] || defaultProgress()).map(barcodeKey));
+      const codes = await resetUnsynced(a.memberIds || [a.id], keep);
+      if (!codes.length) {
+        const msg = t('scan.resetNothingUnsynced');
+        flash(msg, 'warn');
+        refreshUnsynced(a);
+        return { ok: false, msg };
+      }
+      let dropped = 0;
+      setProgress((prev) => {
+        const res = resetPoint(prev[a.id] || defaultProgress(), codes, a.qty);
+        dropped = res.dropped.length;
+        const map = { ...prev, [a.id]: res.progress };
+        seenRef.current = new Set(res.progress.seen || []);
+        saveProgress(map);
+        return map;
+      });
+      refreshUnsynced(a);
+      lastCodeRef.current = '';
+      setLastInfo({ key: 'scan.waitingFirst' });
+      const total = Math.max(codes.length, dropped);
+      flash(t('scan.resetDone', { n: numText(total), name: me.name }), 'done');
+      return { ok: true, n: total };
+    } catch (e) {
+      const msg = t('scan.resetFailed', { msg: e.message || String(e) });
+      flash(msg, 'danger');
+      return { ok: false, msg };
+    }
+  }
+
+  function renamePoint(name) {
+    setPoint(setScanPointName(name));
+  }
 
   /* ONE DOOR, and a seal keyed by hand comes through it too.
      `opts.typed` is the Add button on the scan log -- the seal whose
@@ -344,6 +487,18 @@ export default function ScanModule() {
       if (!a) return { ok: false };
       const code = String(rawCode).trim();
       if (!code) return { ok: false, key: 'scan.manualEmpty' };
+      /* A SEAL NUMBER IS SIX DIGITS, read or typed. The camera and the gun
+         also read the other barcodes on a bag -- 12 and 13 digit product
+         codes went into the table as seals -- so a reading that is not
+         exactly six digits is not a seal and is not counted. */
+      if (!/^[0-9]{6}$/.test(code)) {
+        const vars = { code };
+        beepAlarm();
+        vibrate([120, 60, 120]);
+        setLastInfo({ key: 'scan.notASeal', vars });
+        flash(t('scan.notASeal', vars), 'danger');
+        return { ok: false, key: 'scan.notASeal', vars };
+      }
       const now = Date.now();
       if (!typed && code === lastCodeRef.current && now - lastTimeRef.current < DEDUPE_DEBOUNCE_MS) {
         return { ok: false };
@@ -354,8 +509,31 @@ export default function ScanModule() {
       if (seenRef.current.has(code)) {
         beepDuplicate();
         vibrate([20, 40, 20]);
+        /* Two points on one order cannot overlap: a seal another phone
+           already took is refused here, and the message says where it is. */
+        const at = pointHolding(progressRef.current[a.id], code);
+        if (at && at.id !== NO_POINT && at.id !== pointRef.current.id) {
+          const vars = { code, who: at.name || t('scan.pointOther') };
+          flash(t('scan.duplicateAt', vars), 'warn');
+          return { ok: false, key: 'scan.duplicateAt', vars };
+        }
         flash(t('scan.duplicate', { code }), 'warn');
         return { ok: false, key: 'scan.duplicate', vars: { code } };
+      }
+
+      /* THE ORDER IS FULL, COUNTED OVER EVERY SCAN POINT. Two places can
+         scan one order, and the seals they take together may not pass the
+         order quantity: with 9 ordered and 9 taken at the other place,
+         this phone cannot take a 10th, though it has scanned none. The
+         database asks the same question as the row arrives, which is what
+         settles two phones taking the last seal in the same second. */
+      if (orderRoomLeft(progressRef.current[a.id], a.qty, issuedOfRef.current(a)) <= 0) {
+        const vars = { code, q: numText(a.qty) };
+        beepAlarm();
+        vibrate([120, 60, 120, 60, 200]);
+        setLastInfo({ key: 'scan.orderFull', vars });
+        flash(t('scan.orderFull', vars), 'danger');
+        return { ok: false, key: 'scan.orderFull', vars };
       }
 
       /* A seal counted onto an earlier customer's lorry is spoken for, so
@@ -426,10 +604,11 @@ export default function ScanModule() {
 
       seenRef.current.add(code);
 
-      // Write to server so other devices see this scan in real time. With no
-      // line it QUEUES instead of being skipped — see saveScanRecord — so the
-      // other phones hear about it when the line returns rather than never.
-      saveScanRecord(a.id, a.al_number, code).catch(() => {});
+      /* Kept on the phone until Sync -- see saveScanRecord. The count of
+         what is not synced yet is what Reset may clear. */
+      saveScanRecord(a.id, a.al_number, code, typed, { id: pointRef.current.id, name: pointRef.current.name })
+        .then(() => refreshUnsynced(a))
+        .catch(() => {});
 
       // Does this seal already belong to a DIFFERENT order? Scanning stays
       // fast/optimistic — this runs in the background and flags the entry
@@ -458,7 +637,10 @@ export default function ScanModule() {
       /* The seenRef guard above has already turned a repeat away, so this
          is a seal the card has not had. It goes on through the one door
          all the same, because that is where `unique` comes from. */
-      const added = addBarcodes(cur, [code], (c, n) => ({ code: c, time, over: n > a.qty }));
+      const added = markPoint(
+        addBarcodes(cur, [code], (c, n) => ({ code: c, time, over: n > a.qty })),
+        [code], pointRef.current.id, pointRef.current.name
+      );
       const unique = added.unique;
       const willBeOver = unique > a.qty;
       const next = { ...added, over: Math.max(0, unique - a.qty) };
@@ -538,6 +720,15 @@ export default function ScanModule() {
 
   async function openIssueDO(consent) {
     if (!consent || issuing) return;
+    /* A DO FROM THE SCANNER IS ISSUED FOR WHAT WAS SCANNED, and for nothing
+       else. With no seal scanned here it is refused: the form used to offer
+       the order balance instead, so DO-BB0RS804 went out for 299 and
+       DO-P4P0M108 for 100 with not one seal behind either. A DO with no
+       scan is the DO module's own manual entry, not this screen's. */
+    if (!sealsMineForDO(progressRef.current[consent.id] || defaultProgress(), pointRef.current.id).length) {
+      flash(t('scan.scanBeforeDO'), 'warn');
+      return;
+    }
     setIssuing(true);
     let al = null;
     try {
@@ -578,21 +769,15 @@ export default function ScanModule() {
       loadBatchData().then(({ batchMap }) => setDoBatchMap(batchMap), () => {});
     }
     setIssuing(false);
-    // This card's own share of what has gone out -- see cardIssued.
-    const issuedQty = cardIssued(consent);
-    const newScans = Math.max(0, consent.unique - issuedQty);
-    const remainingBalance = Math.max(0, consent.qty - issuedQty);
-    const suggestQty = newScans > 0 ? newScans : remainingBalance;
-    /* WHAT THE SCANNER ACTUALLY COUNTED, which the delivery order is then
-       issued for -- the form fills it in on one batch and makes several
-       batches tally to it (see do/qty.js).
-
-       Only newScans, never the balance fallback beside it. With nothing
-       newly scanned the form is offered the remaining balance as a
-       SUGGESTION the conductor may key over, and binding a delivery order
-       to a figure no scanner ever saw would be the opposite of the rule. */
-    const scannedQty = newScans > 0 ? newScans : 0;
-    setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, memberIds: consent.memberIds || [consent.id] });
+    /* THIS PHONE'S OWN SEALS, not the order's: the other place issues its
+       own DO for what it scanned. See sealsMineForDO. The DO is issued for
+       exactly that many -- the form fills it on one batch and makes several
+       batches tally to it (see do/qty.js) -- and the refusal at the top of
+       this function means there is always at least one. */
+    const newScans = sealsMineForDO(progressRef.current[consent.id] || defaultProgress(), pointRef.current.id).length;
+    const suggestQty = newScans;
+    const scannedQty = newScans;
+    setDoEntry({ al, suggestQty, scannedQty, consentId: consent.id, consentQty: consent.qty || 0, memberIds: consent.memberIds || [consent.id] });
   }
 
   /* THE SEALS THAT WENT OUT ON THIS DO: everything scanned on the card
@@ -611,7 +796,7 @@ export default function ScanModule() {
   function withSeals(args, consentId) {
     doSealsRef.current = null;
     if (!consentId) return args;
-    const codes = sealsForNextDO(progressRef.current[consentId] || defaultProgress());
+    const codes = sealsMineForDO(progressRef.current[consentId] || defaultProgress(), pointRef.current.id);
     doSealsRef.current = { consentId, codes };
     const seals = codes.filter((c) => sealDigits(c) != null);
     if (!seals.length || !sealFeatureLive()) return args;
@@ -625,36 +810,68 @@ export default function ScanModule() {
   function onDoSaved(payload, sigDataUrl, queued, photoBase64, savedRow) {
     const al = doEntry?.al || {};
     const consentId = doEntry?.consentId;
+    const consentQty = doEntry?.consentQty || 0;
     const memberIds = doEntry?.memberIds || (consentId ? [consentId] : []);
     const sealsOut = doSealsRef.current && doSealsRef.current.consentId === consentId ? doSealsRef.current.codes : [];
     doSealsRef.current = null;
     setDoEntry(null);
+    /* ISSUE DO IS THE SYNC for these seals: they are committed -- no
+       longer resettable -- and sent now if there is a line. With none they
+       stay on the phone and go up by themselves when the line returns; a
+       record leaves the phone only once the server has taken it. */
+    if (consentId && sealsOut.length) {
+      commitScans(memberIds, sealsOut)
+        .then(() => flushScanRecords().catch(() => {}))
+        .then(() => {
+          const c = consentsRef.current.find((x) => x.id === consentId);
+          refreshUnsynced(c);
+          if (navigator.onLine) pullServerScans(consentId, memberIds);
+        })
+        .catch(() => {});
+    }
     if (consentId) {
       setProgress((prev) => {
         /* Marked as gone whether or not the DO could name them -- they went
            out on this lorry either way, and must not reappear on the next. */
         const cur = markSealsOnDO(prev[consentId] || defaultProgress(), sealsOut);
+        const issuedQty = (cur.issuedQty || 0) + (payload.total_qty || 0);
+        /* doIssued means FINISHED — every bit of this card's own qty has
+           gone out — not merely "something has". A DO for PART of a card
+           (450 of its own 600, say) used to mark it doIssued:true all the
+           same, which is exactly what mergeConsents reads as "a genuinely
+           separate, finished collection" and excludes from grouping — so a
+           second consent signed for the rest of the order could never
+           rejoin this one, and the 150 still owed on this card alone was
+           the only thing anyone could scan for. See the long comment in
+           mergeConsents. */
+        const fullyIssued = consentQty > 0 && issuedQty >= consentQty;
         const map = {
           ...prev,
           [consentId]: {
             ...cur,
-            doIssued: true,
-            issuedQty: (cur.issuedQty || 0) + (payload.total_qty || 0),
+            doIssued: fullyIssued,
+            issuedQty,
           },
         };
         // A merged card's OTHER member rows carry no progress of their own
         // (all scans and the issuedQty live under the anchor id above) — but
         // they still need doIssued so mergeConsents stops treating them as
-        // open and folding them back into a fresh group next load.
-        memberIds.forEach((id) => {
-          if (id === consentId) return;
-          map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
-        });
+        // open and folding them back into a fresh group next load, once the
+        // WHOLE group (not just this one DO) is actually finished. Stamped
+        // with the GROUP's own qty, not a share of it this function has no
+        // way to know — see the matching comment in applyIssuedShares.
+        if (fullyIssued) {
+          memberIds.forEach((id) => {
+            if (id === consentId) return;
+            map[id] = { ...(map[id] || defaultProgress()), doIssued: true, issuedQty: consentQty };
+          });
+        }
         saveProgress(map);
         return map;
       });
     }
     setActiveId(null);
+    setDoQueue(doQueueSummary());
     flash(queued ? t('do.savedOffline') : t('do.doSavedToast', { do: payload.do_number }), 'done');
     const printJob = { payload, sigDataUrl, al, plots: doPlots, photoBase64 };
     // Same rule as the DO module: a queued (offline) save has no server row
@@ -714,6 +931,21 @@ export default function ScanModule() {
   return (
     <div className="min-h-screen bg-[#0a0f14] text-[#e6edf3]">
       <TopNav title="MJM // SCAN" back={active ? undefined : '/dashboard'} user={staffName} theme="dark" />
+      {doQueue.n > 0 && (
+        <div className="max-w-[560px] mx-auto px-4 pt-3" data-do-queue>
+          <div className="bg-amber-500/10 border border-amber-500 text-amber-300 rounded-xl px-4 py-3 font-mono text-xs flex items-center gap-3">
+            <Icon name="warning" className="w-4 h-4 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="font-bold">{t('do.queueWaiting', { n: doQueue.n })}</div>
+              {doQueue.lastError && <div className="text-[10px] text-amber-200/80 break-words">{t('do.queueError', { msg: doQueue.lastError })}</div>}
+            </div>
+            <button type="button" onClick={sendDOQueueNow}
+              className="shrink-0 border border-amber-500 rounded-lg px-3 py-1 uppercase tracking-wider text-[10px] hover:bg-amber-500 hover:text-[#0a0f14]">
+              {t('do.queueSendNow')}
+            </button>
+          </div>
+        </div>
+      )}
       {active ? (
         <Scanner
           consent={active}
@@ -722,6 +954,13 @@ export default function ScanModule() {
           activeDOs={activeDOs}
           issuedQty={cardIssued(active)}
           sealAllocs={sealAllocs}
+          point={point}
+          pointCounts={countsByPoint(progress[active.id], point.id, point.name)}
+          queue={queue}
+          syncing={syncing}
+          onSync={sync}
+          onReset={resetMyScans}
+          onRenamePoint={renamePoint}
           onScan={recordScan}
           onBack={() => setActiveId(null)}
           onIssueDO={() => openIssueDO(active)}
@@ -917,7 +1156,7 @@ function ConsentList({ consents, todayALs = {}, loaded, syncing, onSync, onOpen 
 }
 
 // ── Scanner view ──────────────────────────────────────
-function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, onScan, onBack, onIssueDO }) {
+function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs, point, pointCounts = [], queue = { open: 0, sending: 0 }, syncing = false, onSync, onReset, onRenamePoint, onScan, onBack, onIssueDO }) {
   const { t } = useLang();
   const [scanning, setScanning] = useState(false);
   const [statusKey, setStatusKey] = useState('ready');
@@ -950,6 +1189,30 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
      reason a sticker is unreadable -- a wet roll, a bad print run -- is
      usually true of the next one too, and reopening it per seal is the
      work done twice. */
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetSaid, setResetSaid] = useState(null);
+  const [nameDraft, setNameDraft] = useState(null);
+  /* Reset clears what this phone has NOT synced, so that is the figure the
+     button offers -- not every seal it ever scanned. Unknown (the outbox
+     could not be read) still lets it be pressed: the reset reads the outbox
+     itself and says so if there is nothing. */
+  const unsynced = queue ? queue.open : null;
+  const sending = queue ? queue.sending : 0;
+  const myCount = unsynced === null ? 1 : unsynced;
+  /* What THIS phone's DO will carry: its own seals not yet on a DO, and the
+     earlier ones that name no point. Never the other place's. */
+  const myToIssue = point ? sealsMineForDO(consent, point.id).length : 0;
+  const manyPoints = pointCounts.filter((p) => p.n > 0).length > 1;
+  async function doReset(withEarlier) {
+    if (resetBusy || !onReset) return;
+    setResetBusy(true);
+    setResetSaid(null);
+    const r = await onReset(false);
+    setResetBusy(false);
+    if (r && r.ok) setResetOpen(false);
+    else setResetSaid((r && r.msg) || null);
+  }
   const [manualOpen, setManualOpen] = useState(false);
   const [manualCode, setManualCode] = useState('');
   const [manualSaid, setManualSaid] = useState(null);   // { ok, key, vars }
@@ -972,9 +1235,17 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
   // When issuedQty > consent.unique the DO was issued before any scanning (e.g. via
   // the AI system). In that case every scan in this module counts toward the current
   // balance, so use consent.unique directly rather than subtracting issuedQty.
-  const sessionUnique = issuedQty > consent.unique
-    ? consent.unique
-    : Math.max(0, consent.unique - issuedQty);
+  /* WHAT IS SCANNED AND NOT YET ON A DO -- the figure set against the
+     balance. Where the card knows which seals went out (`doSeals`) it is
+     counted off that list, whatever else the DOs carried: BB0RS8 had 2,701
+     collected, 1,231 of it on paper DOs with no scans, and the old sum read
+     its 1,470 scanned seals (all on DOs) as 1,470 still to go. The older
+     arithmetic stays only for a card with no list. */
+  const sessionUnique = Array.isArray(consent.doSeals)
+    ? sealsForNextDO(consent).length
+    : issuedQty > consent.unique
+      ? consent.unique
+      : Math.max(0, consent.unique - issuedQty);
   const remain = Math.max(0, sessionQty - sessionUnique);
   const st = statusOf(consent);
   /* The seals the customer was given on the consent, so the conductor
@@ -1257,6 +1528,16 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       setManualSaid({ ok: false, key: 'scan.manualEmpty' });
       return;
     }
+    /* A seal number is SIX digits, and a typed one has to be all six. The
+       office asked for it outright: a seal keyed short or long is refused
+       here, before it reaches recordScan, rather than saved as a different
+       seal -- 3320 and 003320 are the same number, but a thumb that dropped
+       a digit has keyed a seal nobody issued. The camera and the gun are
+       untouched: what they read is what is printed on the sticker. */
+    if (code.length !== MANUAL_SEAL_DIGITS) {
+      setManualSaid({ ok: false, key: 'scan.manualSix', vars: { n: code.length } });
+      return;
+    }
     const said = onScanRef.current(code, { typed: true }) || { ok: false };
     setManualSaid(said);
     if (said.ok) {
@@ -1394,6 +1675,82 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
         <div className={`mt-2 font-mono text-xs break-all ${st === 'over' ? 'text-red-400' : 'text-slate-400'}`}>{t(lastInfo.key, lastInfo.vars)}</div>
       </div>
 
+      {/* ONE ORDER, SEVERAL SCAN POINTS: how many each phone has taken.
+          Always drawn, so the person at each place can see their own
+          figure; the reset clears only this phone's part. */}
+      <div className="bg-[#0f1620] border border-[#1f2a38] rounded-2xl p-4 mb-3" data-scan-points>
+        <div className="flex justify-between items-center mb-2">
+          <div className="font-mono text-[11px] tracking-[0.3em] text-slate-400 uppercase">{t('scan.pointsTitle')}</div>
+          <button
+            type="button"
+            data-reset-open
+            disabled={!myCount}
+            onClick={() => { setResetSaid(null); setResetOpen(true); }}
+            className="font-mono text-[11px] uppercase tracking-wider text-red-300 border border-red-700/60 disabled:opacity-40 rounded-lg px-3 py-1 hover:bg-red-600 hover:text-white transition-colors"
+          >
+            {t('scan.resetMine')}
+          </button>
+        </div>
+        <div className="space-y-1.5">
+          {pointCounts.map((p) => (
+            <div key={p.id || 'none'} data-point={p.mine ? 'mine' : (p.id || 'none')}
+              className={`flex justify-between items-center rounded-lg px-3 py-2 border ${p.mine ? 'border-emerald-700/60 bg-emerald-500/5' : 'border-[#1f2a38] bg-[#0a0f14]'}`}>
+              {p.mine && nameDraft !== null ? (
+                <form className="flex gap-2 flex-1 mr-2" onSubmit={(e) => { e.preventDefault(); onRenamePoint && onRenamePoint(nameDraft); setNameDraft(null); }}>
+                  <input autoFocus value={nameDraft} maxLength={40} onChange={(e) => setNameDraft(e.target.value)}
+                    aria-label={t('scan.pointRename')}
+                    className="flex-1 min-w-0 bg-[#0b1118] border border-[#243244] rounded-lg px-2 py-1 font-mono text-xs text-slate-100" />
+                  <button type="submit" className="font-mono text-[10px] uppercase text-emerald-400">OK</button>
+                </form>
+              ) : (
+                <button type="button" disabled={!p.mine}
+                  onClick={() => p.mine && setNameDraft(point ? point.name : '')}
+                  title={p.mine ? t('scan.pointRename') : undefined}
+                  className={`font-mono text-xs text-left truncate ${p.mine ? 'text-emerald-300 underline decoration-dotted' : 'text-slate-300'}`}>
+                  {p.mine ? t('scan.pointMine', { name: p.name }) : p.id === NO_POINT ? t('scan.pointEarlier') : (p.name || t('scan.pointOther'))}
+                </button>
+              )}
+              <span className={`font-mono text-sm font-bold ${p.mine ? 'text-emerald-400' : 'text-slate-100'}`}>{numText(p.n)}</span>
+            </div>
+          ))}
+        </div>
+        <div data-unsynced className={`mt-2 flex items-center justify-between gap-2 font-mono text-[11px] ${unsynced ? 'text-amber-300' : 'text-slate-500'}`}>
+          <span>
+            {unsynced === null ? '' : unsynced ? t('scan.unsyncedCount', { n: numText(unsynced) }) : sending ? '' : t('scan.allSynced')}
+            {!!sending && <span className="block text-sky-300">{t('scan.sendingCount', { n: numText(sending) })}</span>}
+          </span>
+          {!!sending && onSync && (
+            <button type="button" data-sync-here disabled={syncing} onClick={onSync}
+              className="shrink-0 bg-emerald-500 text-[#0a0f14] font-bold uppercase tracking-wider rounded-lg px-3 py-1 disabled:opacity-60">
+              {syncing ? t('scan.syncing') : '⟳ ' + t('scan.sync')}
+            </button>
+          )}
+        </div>
+        {manyPoints && (
+          <div className="mt-2 font-mono text-[10px] text-slate-500 text-right">{t('scan.sealsScanned')}: {numText(consent.unique)}</div>
+        )}
+      </div>
+
+      {resetOpen && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => !resetBusy && setResetOpen(false)}>
+          <div className="bg-[#0f1620] border border-red-700/60 rounded-3xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()} data-reset-dialog>
+            <div className="font-mono text-[11px] tracking-[0.3em] text-red-300 uppercase mb-1">{t('scan.resetTitle')}</div>
+            <div className="text-xs text-slate-400 mb-4">{t('scan.resetHint')}</div>
+            {resetSaid && <div className="mb-3 font-mono text-xs text-red-400">{resetSaid}</div>}
+            <div className="flex flex-col gap-2">
+              <button type="button" data-reset-mine disabled={resetBusy || !myCount} onClick={() => doReset(false)}
+                className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white font-mono text-xs font-bold uppercase tracking-wider rounded-xl py-3">
+                {unsynced === null ? t('scan.resetMine') : t('scan.resetMineBtn', { n: numText(myCount) })}
+              </button>
+              <button type="button" disabled={resetBusy} onClick={() => setResetOpen(false)}
+                className="w-full border border-[#243244] text-slate-300 font-mono text-xs uppercase tracking-wider rounded-xl py-3">
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-[#0f1620] border border-[#1f2a38] rounded-2xl p-5 mb-3">
         <div className="flex justify-between items-center mb-3">
           <div className="font-mono text-[11px] tracking-[0.3em] text-slate-400 uppercase">{t('scan.scanLog')}</div>
@@ -1475,8 +1832,9 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
               <input
                 ref={manualInputRef}
                 value={manualCode}
-                onChange={(e) => setManualCode(e.target.value)}
+                onChange={(e) => setManualCode(String(e.target.value).replace(/\D+/g, '').slice(0, MANUAL_SEAL_DIGITS))}
                 inputMode="numeric"
+                maxLength={MANUAL_SEAL_DIGITS}
                 autoComplete="off"
                 autoFocus
                 placeholder={t('scan.manualPlaceholder')}
@@ -1499,7 +1857,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
                 </button>
                 <button
                   type="submit"
-                  disabled={!manualCode.trim()}
+                  disabled={sealDigits(manualCode) == null || sealDigits(manualCode).length !== MANUAL_SEAL_DIGITS}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-mono text-xs font-bold uppercase tracking-wider rounded-xl py-3"
                 >
                   {t('scan.manualAdd')}
@@ -1511,7 +1869,8 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
       )}
 
       <button
-        disabled={issuing || fullyCollected}
+        disabled={issuing || fullyCollected || myToIssue === 0}
+        title={myToIssue === 0 ? t('scan.scanBeforeDO') : undefined}
         onClick={async () => {
           await stopCamera();
           onIssueDO();
@@ -1519,6 +1878,7 @@ function Scanner({ consent, lastInfo, issuing, activeDOs, issuedQty, sealAllocs,
         className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-mono font-bold text-sm uppercase tracking-wider rounded-xl py-4 mb-3 flex items-center justify-center gap-2"
       >
         <Icon name="clipboard" className="w-4 h-4" /> {issuing ? t('do.saving') : t('scan.issueDO')}
+        {!issuing && myToIssue > 0 && <span className="font-normal normal-case opacity-90">· {t('scan.issueMine', { n: numText(myToIssue) })}</span>}
       </button>
 
       {activeDOs.length > 0 && (

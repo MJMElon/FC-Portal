@@ -28,6 +28,7 @@ import { isOverdue, pendingCases } from '../lib/nelos.js';
 import { compressImage, dataUrlToBlob } from '../lib/image.js';
 import { useLang } from '../context/LanguageContext.jsx';
 import NelosNewCase from './NelosNewCase.jsx';
+import { fmtLatLng, gaiaHref } from '../lib/latLng.js';
 
 const MODULE = 'scan';                 // this portal's key in nelos_modules
 
@@ -270,6 +271,24 @@ function CaseView({ caseId, me, onBack, onChanged }) {
         <div className="min-w-0"><div className={kk}>{t('nel.pic')}</div>
           <div className={vv}>{c.assignee_name || <span className="text-slate-400 font-semibold">{t('nel.unassigned')}</span>}</div></div>
       </div>
+
+      {/* WHERE, as a coordinate, when the person raising it said. Optional
+          on the form, so absent on most cases and then not drawn at all.
+          TWO doors and never one: Gaia is the map the nursery walks by, and
+          The coordinate itself is the only link, to Gaia GPS: the office
+          asked for no buttons beside it. Plain navigation, never a new tab,
+          because an app link in a new tab leaves an empty tab behind. */}
+      {fmtLatLng(c.location_lat, c.location_lng) && (
+        <div className="mt-2 px-3.5 py-[11px] bg-slate-50 border border-[#eef2f7] rounded-xl">
+          <div className={kk}>{t('nel.location')}</div>
+          {/* The coordinate itself opens Gaia, and the press copies it:
+              Gaia has no link that drops a pin, so pasting it into Gaia
+              search is what marks the spot. */}
+          <a href={gaiaHref(c.location_lat, c.location_lng)}
+            onClick={() => { try { navigator.clipboard.writeText(fmtLatLng(c.location_lat, c.location_lng)); } catch { /* best effort */ } }}
+            className={vv + ' block underline text-[#1b4332]'}>📍 {fmtLatLng(c.location_lat, c.location_lng)}</a>
+        </div>
+      )}
 
       {/* What was written about it — the one field saying what is actually
           wrong, and this window never showed it. */}

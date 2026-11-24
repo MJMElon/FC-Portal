@@ -507,3 +507,205 @@ the Team Board grew a row for each, along with Gardener and Driver, which
 were roles with no row and whose people sat in **Other** — the row that
 means *a role nobody recognises*, over roles the list names perfectly well.
 Change one, change the other.
+
+## A DO number on the form is a preview
+
+The database hands out the real one (`shared/RUN_ME_do_number_never_repeats.sql`
+in the office repo moves a number already taken to the next free one), so
+`persistDO` and `flushDOQueue` take the number off the inserted ROW, and a
+retry is recognised by `client_uid` (one id per press of Save), never by the
+number. `insertDORow` in `src/modules/do/data.js` and `sendDO` in the Admin
+Portal's `src/lib/mobileQueue.js` are the two copies. Change one, change the
+other.
+
+## The plots come from Seedling Stock, and the Nelos form was the last holdout
+
+A plot is added in ONE place — **Seedling Stock Management → System
+Settings → Add Plot**, which inserts a row into `shared_plots`. Nearly all
+of this portal already reads it: PALMS (`modules/palms/data.js`,
+`modules/palms/officeConfig.js`), the maintenance board
+(`modules/maintenance/data.js`) and the DO module (`modules/do/data.js`).
+
+**`src/components/NelosNewCase.jsx` did not.** It carried the four ranges
+written out — P01-P52, B01-B14, U01-U18, N01-N20 — with a comment saying the
+list was copied from the hub's dock, which copied it from the audit module.
+So a plot the office added could not be named on a case at all, and **the
+live case is the transfer plots**: a `-R` plot is made by a 3rd-culling
+transfer and is in no hardcoded range anywhere, so the one plot a Field
+Conductor most needs to raise a case about was the one plot the form would
+not offer him.
+
+`src/lib/nurseryPlots.js` is the read. Four rules, and the first two are why
+it is shaped that way:
+
+- **THE RANGES ARE THE FALLBACK, and they were the FLOOR for a day.** The
+  office asked for the other half the same afternoon — *"i deleted a plot,
+  make it remove from all modules too. i added a plot, make it add for all
+  modules too"* — and the floor was exactly what stopped the ✕ on the
+  settings page doing anything. So the LIST is what Seedling Stock holds
+  where the office has keyed something, and the range answers where they
+  have not.
+- **A READ THAT FAILS CHANGES NOTHING**, which is the fail-open rule
+  everything here follows: an empty plot picker is a form nobody can fill in.
+  So `mergePlots` takes an **`ok`** beside the plots and only a reply that
+  really ARRIVED narrows anything — an empty object cannot be told from a
+  refusal, which is the shape that would have emptied every picker in the
+  company at once. It is also asked **PER NURSERY**, because the Pre Nursery
+  is counted in trays and may have no row at all, so a global test would wipe
+  P01–P52 off every form. **What it costs:** if `shared_plots` is short of a
+  row, a plot nobody deleted stops being offered —
+  `shared/CHECK_which_plots_each_module_offers.sql` in the office repository,
+  section 4, names every one of them.
+- **THE NURSERY IS MATCHED ON LETTERS AND DIGITS** — `shared_plots` says
+  "UNN 1" with the space where this form keys `UNN1`, the same `nurseryKey`
+  rule as everywhere else. A plot under a FIFTH nursery is left out: there
+  is no option on the form to put it under.
+- **AND THEN THE LEADING ZEROS OFF THE NUMBER**, which letters-and-digits
+  alone does not do and which took a test to see. These ranges are PADDED
+  (`B01`) and the office types `B1`, so on letters and digits those are two
+  keys: the office's plot was added BESIDE the range's and the picker offered
+  one plot twice under two spellings. `B04-R` and `B4-R` go the same way.
+
+**`Mobile/src/lib/nurseryPlots.js` IS THIS FILE, word for word**, and
+`shared/shared_maint_plots.js` + `audit/audit_plots.js` + `loadPlots()` in
+`shared/shared_nelos_dock.js` are the office repository's copies. Different
+repositories cannot import from each other, so the only thing keeping the two
+phone copies in step is a check — section 5 of
+`mjm-ai-system/tests/a_plot_added_in_the_office_reaches_every_module.cjs`
+compares them with the comments stripped. Change one, change the other.
+
+That test is where the whole of this is held, office side and phone side
+together, because the question it answers is whether a plot added once
+reaches every module — and that cannot be asked one repository at a time.
+
+## The Nelos raise form takes an optional location
+
+`src/lib/latLng.js` is the parser, the Detect call and the column probe, and
+it is the SAME FILE in `Barcode_Counter` and `Mobile`, word for word;
+`parseLatLng` is also in the office repository twice (`shared_nelos.js` and
+`shared_nelos_dock.js`). Change one, change the others. The box is not drawn
+until the database has `nelos_cases.location_lat` / `location_lng`
+(`shared/RUN_ME_nelos_case_location.sql` in the office repository), empty is
+allowed, and something typed that is not a coordinate is refused before
+anything is sent. `mjm-ai-system/CLAUDE.md` has the whole of it, and
+`tests/a_case_can_carry_a_location.cjs` there compares the copies.
+
+## One order, two scan points, and a reset that clears one phone
+
+An order is often loaded from two places at once. **A scan point is a
+phone**: `myScanPoint()` in `src/modules/scan/scanPoints.js` makes an id
+once and keeps it in localStorage (`mjm.scan.point.v1`); the name is what
+the screen says and defaults to the person signed in. Every scan row carries
+`scan_point` / `scan_point_name`, and the card shows a count per point,
+mine first.
+
+- **Overlap was already refused** by the unique (consent_id, barcode) and
+  the realtime feed; the refusal now NAMES the place that has the seal
+  (`scan.duplicateAt`), scanned or keyed alike.
+- **Issue DO is the sync.** The office: a scan is kept on the phone, and
+  pressing Issue DO sends that DO's seals up; from then on they cannot be
+  reset. With no line they stay on the phone, still unresettable, and go up
+  by themselves when the line returns; a record leaves the phone only once
+  the server has taken it. So `saveScanRecord` queues every scan
+  `committed: false`, `flushScanRecords` SKIPs those (`SKIP` in
+  `outbox.js`), `onDoSaved` marks the DO's seals committed (`commitScans`)
+  and flushes, and the app-wide tick and the `online` event send the
+  committed ones. A job with no `committed` field is an older build's and
+  is sent.
+- **Reset clears only scans with no DO yet** (`resetUnsynced`): the
+  uncommitted queued scans of this order leave the outbox and come off the
+  phone. Nothing on the server is deleted and no line is needed.
+  `fcportal_reset_scans` is no longer called. The open order shows how many
+  can still be reset and how many are on an issued DO waiting for a line
+  (`scanQueueCounts`).
+- **The table is the answer for anything synced**: on every read of the
+  order, a seal the table has not got and the outbox is not holding comes
+  off the phone, whichever point it names (`reconcileWithServer`, the
+  outbox read BEFORE the table). That is a seal refused on upload, reset
+  elsewhere, or deleted in Supabase.
+- **What it costs**: two phones see each other's seals only after each
+  has issued its DO, so the no-overlap guard and the order-quantity cap across
+  points hold only for synced scans. The database still refuses the
+  overlap (unique consent_id, barcode) and the overflow
+  (`fcportal_scan_cap`) on upload, and the refused seal then comes off the
+  phone with a message.
+- **A DO carries this phone's own seals** (`sealsMineForDO`), plus any
+  earlier seal that names no point, never another place's.
+- **The order quantity is counted over every point** (`orderRoomLeft`): 9
+  ordered and 9 taken at the other place means this phone is refused. The
+  database trigger `fcportal_scan_cap` asks the same per AL, which is what
+  settles two phones taking the last seal in the same second; the phone
+  reads `MJM_ORDER_FULL` and takes the seal back.
+
+## A DO is sent once, and a queued one is never lost
+
+Three causes of a twin DO and two of a missing one, all in
+`src/modules/do/data.js` / `EntryModal.jsx`:
+
+- **One press id per FORM** (`pressIdRef`), and a double tap is refused
+  (`savingRef`), so two taps are one `client_uid`.
+- **`flushDOQueue` is single-flight** — a module promise plus
+  `navigator.locks` across tabs. Two sweeps used to send the same queue.
+- **An item leaves the queue the moment its insert lands**, re-reading the
+  queue each time. The old flush wrote back the list it read at the START,
+  which threw away any DO queued while it ran.
+- **A database without `client_uid`** finds a lost ack by signature
+  (order, day, total, first line) before inserting again.
+- **A stuck item is SAID**: the amber banner on the scan screen counts the
+  queue, shows the last error and offers Send now.
+
+`tests/one_order_two_scan_points.cjs` and sections 8 to 11 of
+`tests/a_do_is_numbered_at_save.cjs` hold it.
+
+## The Sync button says WHAT refused, and a dropped packet is not a failure
+
+"My phone sync always fails" came with a screenshot of a red cross and
+nothing else, because that was all the button could say. The failed step
+and its reason lived in the button's `title`, which a phone cannot show.
+Three things in `src/lib/syncAll.js`, `src/modules/palms/sync.js` and
+`SyncButton.jsx`:
+
+- **`runStep`**: each step has a 60s ceiling and ONE retry when the error
+  looks like the line. A refusal from the server is not retried. Seven
+  network steps each one packet from a red cross is a button that "always
+  fails" while all seven work.
+- **PALMS sends what differs.** `push()` upserted every entry on the phone,
+  and a phone that has pulled holds the whole estate, so each press was
+  thousands of rows in one statement: the step that times out, and one
+  refused row sank the lot every press. `pull()` now records the server's
+  copy beside the DB (a WeakMap, never saved) and `entriesToSend` /
+  `historyToSend` send only what is dirty, new or different. With no
+  snapshot it sends everything, as before. Upserts go in chunks of 300.
+- **The reason is on the screen.** `syncPalms` records why it answered null
+  (`palmsSyncError()`), and a panel under the header names every failed step
+  with its error for 20 seconds or until tapped. If a sync still fails, that
+  panel is what to ask for.
+
+The DO queue is part of the press now too. `tests/sync_reports_what_refused.cjs`
+(8 checks fail on the previous code; `PREV_DIR` runs the comparison half).
+
+## A DO opened off a scan is complete before it saves
+
+The office: after the barcodes are scanned, the DO number, delivery date and
+customer name are fixed; nursery, plot and batch are compulsory on every
+item; the car plate photo and the customer signature are compulsory; and the
+one button is **Save & Continue** (it read Save & Sign DO).
+
+- **`fromScan` is `scannedQty != null`** — the scan screen is the only caller
+  that passes it. The DO screen's own form (a paper DO the AI reads, whose
+  date and customer it may take off the paper) keeps its old rules; only the
+  button wording is shared.
+- **`missingForScanDO` in `do/qty.js` is the rule**, pure, and answers a LIST.
+  The button is greyed until it is empty and the amber box above it says
+  what is still needed — a button that will not press and says nothing is
+  reported as a broken app. `save()` asks it again, because a disabled
+  attribute is a paint, not a gate.
+- **The batch is asked only of a plot that offers batches.** A Pre Nursery
+  plot, or a balance that could not be read, has none to pick, and demanding
+  one there is a form that can never be finished.
+- **`SignaturePad` takes `onSigned`**, because `hasSig()` is a ref and the
+  form could not otherwise redraw when the customer signs.
+- **A tap outside the form does not close it** off a scan: the backdrop
+  closing threw away a signed form. Cancel still closes.
+
+`tests/a_scanned_do_is_complete_before_it_saves.cjs` renders the real form; 12 of its checks fail on the previous code.

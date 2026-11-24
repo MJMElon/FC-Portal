@@ -35,18 +35,57 @@ export function lastSync() {
   }
 }
 
+/* ONE STEP, with a ceiling and a second chance.
+
+   A step that never answers used to hold the whole button on a spinner,
+   and a step that failed once on a nursery signal failed the press: seven
+   reads and writes, each of them one dropped packet from a red cross, is a
+   button that "always fails" while every one of the seven works. So each
+   step gets STEP_TIMEOUT_MS, and a failure that looks like the line gets
+   ONE more try after a short pause. A refusal from the server is not
+   retried -- it would only refuse again, and the second wait is time the
+   person stands there for nothing. */
+export const STEP_TIMEOUT_MS = 60000;
+const RETRY_PAUSE_MS = 1500;
+
+function within(promise, ms, name) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`timeout after ${Math.round(ms / 1000)}s (${name})`)), ms);
+    }),
+  ]);
+}
+
+const looksLikeTheLine = (msg) =>
+  /Failed to fetch|NetworkError|Network request failed|load failed|timeout|ETIMEDOUT|ENOTFOUND|ERR_|fetch|abort|503|502|504|could not reach/i.test(String(msg || ''));
+
+const messageOf = (e) =>
+  String((e && (e.message || e.details || e.hint || e.code)) || e || 'unknown error').slice(0, 200);
+
+export async function runStep(name, fn, opts = {}) {
+  const ms = opts.timeoutMs || STEP_TIMEOUT_MS;
+  const pause = opts.pauseMs == null ? RETRY_PAUSE_MS : opts.pauseMs;
+  let last = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await within(fn(), ms, name);
+      return { name, ok: true, tries: attempt };
+    } catch (e) {
+      last = messageOf(e);
+      if (attempt === 2 || !looksLikeTheLine(last)) break;
+      await new Promise((r) => setTimeout(r, pause));
+    }
+  }
+  return { name, ok: false, error: last };
+}
+
 export async function syncAll() {
   if (!isOnline()) return { ok: false, offline: true, steps: [] };
 
   const steps = [];
-  const run = async (name, fn) => {
-    try {
-      await fn();
-      steps.push({ name, ok: true });
-    } catch (e) {
-      steps.push({ name, ok: false, error: String((e && e.message) || e).slice(0, 200) });
-    }
-  };
+  const run = async (name, fn) => { steps.push(await runStep(name, fn)); };
 
   // ── PUSH: everything this phone has queued ──
   await run('culling queue', async () => {
@@ -57,6 +96,14 @@ export async function syncAll() {
     const m = await import('../modules/maintenance/data.js');
     await m.flushMaintenance();
   });
+  /* A DO queued with no line was sent only by the scan screen and the
+     30-second tick; the one press that promises "everything queued went up"
+     did not include it. flushDOQueue is single-flight, so this cannot send
+     one twice. */
+  await run('delivery orders', async () => {
+    const m = await import('../modules/do/data.js');
+    await m.flushDOQueue();
+  });
   await run('scan records', async () => {
     const m = await import('../modules/scan/store.js');
     await m.flushScanRecords();
@@ -66,7 +113,9 @@ export async function syncAll() {
     const m = await import('../modules/palms/sync.js');
     const r = await m.syncPalms();
     // syncPalms answers null when it could not reach the server at all.
-    if (r === null) throw new Error('PALMS could not reach the server');
+    // The reason it gave is the useful half -- a refusal reads very
+    // differently from a dropped line.
+    if (r === null) throw new Error(m.palmsSyncError() || 'PALMS could not reach the server');
   });
 
   // ── PULL: refresh what the offline caches hold ──
@@ -135,6 +184,16 @@ export function startAutoSync(intervalMs = 30000) {
       await culling.flushCulling();
       const maint = await import('../modules/maintenance/data.js');
       await maint.flushMaintenance();
+      /* A DO goes up the moment there is a line, wherever the app is
+         open -- it was only sent from the scan screen own timer, so a DO
+         queued with no line waited until somebody opened that screen.
+         flushDOQueue is single-flight, so this cannot send one twice. */
+      const dos = await import('../modules/do/data.js');
+      await dos.flushDOQueue().catch(() => {});
+      /* The scans whose DO has been issued go up the moment there is a
+         line. A scan with no DO yet is never sent from here -- the flush
+         skips it, so it stays on the phone and can still be reset. See
+         saveScanRecord. */
       const scan = await import('../modules/scan/store.js');
       await scan.flushScanRecords();
     } catch (e) { /* next tick tries again */ }

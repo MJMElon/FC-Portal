@@ -50,18 +50,20 @@ import { useEffect, useRef, useState } from 'react';
 import CfSelect from './CfSelect.jsx';
 import { supabase } from '../lib/supabase.js';
 import { raiseCase } from '../lib/nelos.js';
+import { NURSERY_RANGES, loadNurseryPlots } from '../lib/nurseryPlots.js';
+import { parseLatLng, fmtLatLng, detectLatLng, hasLocationColumns } from '../lib/latLng.js';
 import { useLang } from '../context/LanguageContext.jsx';
 
 /* The four nurseries and the plots each one has, the same list the hub's
    dock and the Admin Portal's form offer, so all three raise forms ask the
    same question. PALMS' own NURSERIES has only the three this portal logs
-   plots in; a case can be about any of them, PN included. */
-const NURSERY_PLOTS = {
-  PN: Array.from({ length: 52 }, (_, i) => `P${String(i + 1).padStart(2, '0')}`),
-  BNN: Array.from({ length: 14 }, (_, i) => `B${String(i + 1).padStart(2, '0')}`),
-  UNN1: Array.from({ length: 18 }, (_, i) => `U${String(i + 1).padStart(2, '0')}`),
-  UNN2: Array.from({ length: 20 }, (_, i) => `N${String(i + 1).padStart(2, '0')}`),
-};
+   plots in; a case can be about any of them, PN included.
+
+   THE PLOTS COME FROM SEEDLING STOCK. `NURSERY_RANGES` is only the floor —
+   lib/nurseryPlots.js is the whole of why, and it is what the rest of this
+   portal already does. A plot the office adds on System Settings is on this
+   form; a read that fails leaves the four ranges, which is where this form
+   was. */
 const NURSERY_LABEL = { PN: 'Pre Nursery', BNN: 'BNN', UNN1: 'UNN1', UNN2: 'UNN2' };
 
 /* Shown only if nelos_modules cannot be read. The five systems as they
@@ -94,7 +96,16 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
   const [pic, setPic] = useState('');
   const [nursery, setNursery] = useState('');
   const [plot, setPlot] = useState('');
+  /* Starts as the four ranges so the picker works on the first paint, and
+     is replaced by the office's list the moment that read lands. */
+  const [plots, setPlots] = useState(NURSERY_RANGES);
   const [photo, setPhoto] = useState(null); // { file, url }
+  /* WHERE, as a coordinate. Optional. `locOn` is whether this database has
+     the columns — the box is not drawn until it says yes (lib/latLng.js). */
+  const [locOn, setLocOn] = useState(false);
+  const [locText, setLocText] = useState('');
+  const [locMsg, setLocMsg] = useState(null); // { text, bad }
+  const [locBusy, setLocBusy] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -114,6 +125,12 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
      a valid case, not a blocked form. */
   useEffect(() => {
     let alive = true;
+
+    /* The office's plot list, over the four ranges. Never rejects, so there
+       is nothing to catch: the ranges are already on screen and this only
+       ever adds to them. */
+    loadNurseryPlots().then((by) => { if (alive) setPlots(by); });
+    hasLocationColumns(supabase).then((on) => { if (alive) setLocOn(on); });
 
     /* handler_label is the short name — Seedling Stock, HQ Operation, FC,
        Admin, Auditor — and it already exists. "Assign to" wants those same
@@ -206,6 +223,28 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
     setPhoto({ file, url: URL.createObjectURL(file) });
   }
 
+  /* DETECT. A press and never something the form does on opening: asking
+     for a position puts a permission prompt on the screen, and it should
+     arrive because somebody asked for it. Every failure says what to do
+     instead, which is always the same thing — key it in. */
+  async function detectLoc() {
+    setLocBusy(true);
+    setLocMsg(null);
+    try {
+      const p = await detectLatLng();
+      setLocText(fmtLatLng(p.lat, p.lng));
+      setLocMsg({
+        text: isFinite(p.accuracy)
+          ? t('nel.locDetectedAcc', { m: Math.round(p.accuracy) })
+          : t('nel.locDetected'),
+      });
+    } catch (e) {
+      const key = { unsupported: 'nel.locUnsupported', denied: 'nel.locDenied', timeout: 'nel.locTimeout' }[e?.reason];
+      setLocMsg({ text: t(key || 'nel.locFailed'), bad: true });
+    }
+    setLocBusy(false);
+  }
+
   function dropPhoto() {
     if (photo?.url) URL.revokeObjectURL(photo.url);
     setPhoto(null);
@@ -223,6 +262,13 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
       if (!worksFor.length) titleRef.current?.focus();
       return;
     }
+
+    /* OPTIONAL, and a wrong one is not. Empty is no location; something
+       typed that is not two numbers in range is refused before anything is
+       uploaded, because a coordinate saved wrong is a pin in the sea that
+       reads exactly like a real one. */
+    const loc = locOn ? parseLatLng(locText) : null;
+    if (loc === false) { setErr(t('nel.errLocation')); return; }
 
     setBusy(true);
     setErr(null);
@@ -262,6 +308,8 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
         photoUrl,
         nursery: nursery || null,
         plot: plot || null,
+        lat: loc ? loc.lat : null,
+        lng: loc ? loc.lng : null,
         by: me?.name || null,
         byId: me?.id || null,
       });
@@ -326,7 +374,7 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
           <CfSelect id="nnc-nursery" value={nursery}
             onChange={(e) => { setNursery(e.target.value); setPlot(''); }}>
             <option value="">{t('nel.none')}</option>
-            {Object.keys(NURSERY_PLOTS).map((n) => <option key={n} value={n}>{NURSERY_LABEL[n]}</option>)}
+            {Object.keys(plots).map((n) => <option key={n} value={n}>{NURSERY_LABEL[n]}</option>)}
           </CfSelect>
         </div>
         <div>
@@ -334,10 +382,33 @@ export default function NelosNewCase({ source = 'scan', me, onBack, onDone }) {
           <CfSelect id="nnc-plot" value={plot} onChange={(e) => setPlot(e.target.value)}
             disabled={!nursery}>
             <option value="">{nursery ? t('nel.none') : t('nel.nurseryFirst')}</option>
-            {(NURSERY_PLOTS[nursery] || []).map((p) => <option key={p} value={p}>{p}</option>)}
+            {(plots[nursery] || []).map((p) => <option key={p} value={p}>{p}</option>)}
           </CfSelect>
         </div>
       </div>
+
+      {locOn && (
+        <>
+          <label className={LABEL} htmlFor="nnc-loc">
+            {t('nel.location')}{' '}
+            <span className="font-bold normal-case tracking-normal text-slate-300">{t('nel.optional')}</span>
+          </label>
+          <div className="flex gap-2 items-stretch">
+            <input id="nnc-loc" className={FIELD + ' flex-1 min-w-0'} value={locText} maxLength={60}
+              autoComplete="off" placeholder={t('nel.locPlaceholder')}
+              onChange={(e) => { setLocText(e.target.value); setLocMsg(null); setErr(null); }} />
+            <button type="button" onClick={detectLoc} disabled={locBusy}
+              className="shrink-0 px-3 rounded-xl border-[1.5px] border-slate-200 bg-slate-50 text-[11px] font-black text-[#913673] whitespace-nowrap cursor-pointer disabled:text-slate-400">
+              📍 {locBusy ? t('nel.locDetecting') : t('nel.locDetect')}
+            </button>
+          </div>
+          {locMsg && (
+            <div className={'mt-1.5 text-[10.5px] font-bold leading-snug ' + (locMsg.bad ? 'text-rose-700' : 'text-slate-500')}>
+              {locMsg.text}
+            </div>
+          )}
+        </>
+      )}
 
       <label className={LABEL}>{t('nel.photo')}</label>
       {photo ? (

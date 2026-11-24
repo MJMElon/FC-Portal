@@ -119,12 +119,20 @@ export async function raiseCase(opts) {
        added later — a database without it still takes the insert as long as
        nobody names it. */
     if (opts.assignedModule) row.assigned_module = opts.assignedModule;
+    if (opts.assignedSeatNo) row.assigned_seat_no = opts.assignedSeatNo;
     if (opts.assigneeId) {
       row.assignee_id = opts.assigneeId;
       row.assignee_name = opts.assigneeName || null;
     }
     if (opts.dueDate) row.due_date = opts.dueDate;
     if (opts.photoUrl) row.photo_url = opts.photoUrl;
+    /* The location, on the same terms: RUN_ME_nelos_case_location.sql
+       added the columns, and the form only offers the box once the
+       database has them, so they are only ever named when set. */
+    if (opts.lat != null && opts.lng != null) {
+      row.location_lat = Number(opts.lat);
+      row.location_lng = Number(opts.lng);
+    }
 
     const { data, error } = await supabase.from('nelos_cases').insert([row]).select().single();
     if (error) return { data: null, error };

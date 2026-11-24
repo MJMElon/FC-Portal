@@ -65,7 +65,11 @@ const recordSrc = liftArrow(SRC, 'const recordScan = useCallback(', '(rawCode, o
    away and loaded side by side -- store.js leans on sealNo/sealDigits, and
    a stub of those would be a second copy of the very rule under test. */
 const strip = (f) => R(f).replace(/^import .*$/gm, '').replace(/^export /gm, '');
-const store = strip('src/lib/sealRanges.js') + '\n' + strip('src/modules/scan/store.js');
+const store = strip('src/lib/sealRanges.js') + '\n' + strip('src/modules/scan/store.js')
+  /* scanPoints.js rides beside store.js where it exists (the scan point of
+     each seal, see that file) -- recordScan leans on markPoint and
+     pointHolding, and a stub of them would be a second copy. */
+  + (fs.existsSync(require('path').join(__dirname, '..', 'src/modules/scan/scanPoints.js')) ? '\n' + strip('src/modules/scan/scanPoints.js') : '');
 
 const said = [];          // every flash the run put up
 const sent = [];          // every row handed to the server
@@ -88,6 +92,8 @@ function build(card, allocs) {
     lastOverRef: { current: 0 },
     seenRef: { current: new Set() },
     progressRef: { current: {} },
+    pointRef: { current: { id: 'sp-test', name: 'Test point' } },
+    issuedOfRef: { current: () => 0 },
     flash: (text, kind) => said.push({ text, kind }),
     t: (k, v) => k + (v ? ' ' + JSON.stringify(v) : ''),
     beepDuplicate: () => {}, beepAlarm: () => {}, beepSuccess: () => {}, beepComplete: () => {},
@@ -98,24 +104,25 @@ function build(card, allocs) {
     findBarcodeElsewhere: async () => null,
     takeBackScan: () => {},
     labelOfConsent: () => 'another order',
-    sealRangesText: () => '0035190-0035199',
+    sealRangesText: () => '035190-035199',
     useCallback: (fn) => fn,
+    numText: (n) => String(n),
   });
   vm.runInContext('globalThis.__rec = ' + recordSrc + ';', ctx);
   return { rec: vm.runInContext('__rec', ctx), ctx };
 }
 
-/* One consent for 5, with seals 0035190-0035199 allocated to it. */
+/* One consent for 5, with seals 035190-035199 allocated to it. */
 const CARD = { id: 'c1', al_number: 'AL-1', customer: 'Tan', qty: 5, memberIds: ['c1'] };
 const ALLOCS = [{ consent_id: 'c1', al_number: 'AL-1', start_no: 35190, end_no: 35199 }];
 
 /* ── 1. A keyed seal is counted, exactly like a scanned one ──────────── */
 {
   const { rec, ctx } = build(CARD, ALLOCS);
-  const r = rec('0035190', { typed: true });
+  const r = rec('035190', { typed: true });
   is(r.ok, true, 'a seal keyed by hand is taken');
   is(ctx.progressRef.current.c1.unique, 1, 'and it counts toward the card');
-  is(sent[sent.length - 1], '0035190', 'and it is written to the server like any other scan');
+  is(sent[sent.length - 1], '035190', 'and it is written to the server like any other scan');
 }
 
 /* ── 2. The debounce does NOT swallow it ─────────────────────────────── */
@@ -125,10 +132,10 @@ const ALLOCS = [{ consent_id: 'c1', al_number: 'AL-1', start_no: 35190, end_no: 
    what the debounce would have returned. */
 {
   const { rec, ctx } = build(CARD, ALLOCS);
-  is(rec('0035190', { typed: true }).ok, true, 'first keyed seal in');
-  is(rec('0035191', { typed: true }).ok, true, 'a second one straight after is NOT debounced away');
+  is(rec('035190', { typed: true }).ok, true, 'first keyed seal in');
+  is(rec('035191', { typed: true }).ok, true, 'a second one straight after is NOT debounced away');
   is(ctx.progressRef.current.c1.unique, 2, 'both are counted');
-  const again = rec('0035191', { typed: true });
+  const again = rec('035191', { typed: true });
   is(again.ok, false, 'keying one already in is refused');
   is(again.key, 'scan.duplicate', 'and it SAYS duplicate rather than going quiet');
 }
@@ -136,20 +143,30 @@ const ALLOCS = [{ consent_id: 'c1', al_number: 'AL-1', start_no: 35190, end_no: 
 /* ── 3. The camera keeps its debounce ────────────────────────────────── */
 {
   const { rec, ctx } = build(CARD, ALLOCS);
-  rec('0035190');
-  const burst = rec('0035190');
+  rec('035190');
+  const burst = rec('035190');
   is(burst.ok, false, 'the camera reading the same barcode again is still swallowed');
   is(burst.key, undefined, 'silently, which is what a ten-a-second burst wants');
   is(ctx.progressRef.current.c1.unique, 1, 'and it is counted once');
 }
 
+/* ── 3b. A seal is six digits, read or typed ─────────────────────────── */
+{
+  const { rec, ctx } = build(CARD, ALLOCS);
+  ['9741297991046', '0035190', '35190', 'A+:-:B'].forEach((code) => {
+    const r = rec(code);
+    is(r.key, 'scan.notASeal', code + ' read by the camera is not a seal and is refused');
+  });
+  is((ctx.progressRef.current.c1 || { unique: 0 }).unique, 0, 'and none of them is counted');
+}
+
 /* ── 4. A typo is refused by the CONSENT, not waved through ──────────── */
-/* This is the whole argument for one writer. 0035190 fat-fingered into
+/* This is the whole argument for one writer. 035190 fat-fingered into
    600 is not this customer's seal, and the guard that says so is the one a
    second insert path would have skipped. */
 {
   const { rec, ctx } = build(CARD, ALLOCS);
-  const r = rec('600', { typed: true });
+  const r = rec('060000', { typed: true });
   is(r.ok, false, 'a number outside the seals on this consent is refused');
   yes(/sealNotOnConsent|sealOtherCustomer/.test(r.key || ''), '  and the refusal names why');
   is(ctx.progressRef.current.c1, undefined, 'nothing is counted');
@@ -159,10 +176,12 @@ const ALLOCS = [{ consent_id: 'c1', al_number: 'AL-1', start_no: 35190, end_no: 
 /* ── 5. Over quota still counts, and still says so ───────────────────── */
 {
   const { rec } = build(CARD, ALLOCS);
-  ['0035190', '0035191', '0035192', '0035193', '0035194'].forEach((c) => rec(c, { typed: true }));
-  const over = rec('0035195', { typed: true });
-  is(over.ok, true, 'the sixth seal on a card of five is still recorded');
-  is(over.key, 'scan.overItem', 'and comes back saying it is over, not merely added');
+  ['035190', '035191', '035192', '035193', '035194'].forEach((c) => rec(c, { typed: true }));
+  const over = rec('035195', { typed: true });
+  /* The order is full: a sixth seal on a card of five is refused now, keyed
+     or scanned alike, and never counted (one_order_two_scan_points.cjs). */
+  is(over.ok, false, 'the sixth seal on a card of five is refused');
+  is(over.key, 'scan.orderFull', 'and says the order is full');
 }
 
 /* ── 6. Nothing typed is nothing done ────────────────────────────────── */
@@ -170,6 +189,19 @@ const ALLOCS = [{ consent_id: 'c1', al_number: 'AL-1', start_no: 35190, end_no: 
   const { rec } = build(CARD, ALLOCS);
   is(rec('   ', { typed: true }).key, 'scan.manualEmpty', 'an empty box asks for the number');
 }
+
+/* ── 6b. A seal keyed by hand is SIX digits, or it is not saved ─────────── */
+/* The office asked for it outright. The DIALOG refuses, before the seal ever
+   reaches recordScan, and the box itself only ever holds digits, six at most. */
+yes(/const MANUAL_SEAL_DIGITS = 6;/.test(SRC), 'the Add dialog takes a six-digit seal');
+yes(/code\.length !== MANUAL_SEAL_DIGITS[\s\S]{0,120}scan\.manualSix/.test(SRC),
+    'a typed seal of any other length is refused with its own sentence, not saved');
+yes(/maxLength=\{MANUAL_SEAL_DIGITS\}/.test(SRC) && /replace\(\/\\D\+\/g, ''\)\.slice\(0, MANUAL_SEAL_DIGITS\)/.test(SRC),
+    'and the box takes digits only, six at most');
+yes(/disabled=\{sealDigits\(manualCode\) == null \|\| sealDigits\(manualCode\)\.length !== MANUAL_SEAL_DIGITS\}/.test(SRC),
+    'and Add stays off until all six are keyed');
+const I18N = R('src/i18n.js');
+yes((I18N.match(/'scan\.manualSix'/g) || []).length === 2, 'the refusal is said in both languages');
 
 /* ── 7. The wiring on the page ───────────────────────────────────────── */
 /* The button is beside the scan log, it is off on a card with nothing

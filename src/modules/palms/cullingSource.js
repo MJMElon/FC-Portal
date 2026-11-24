@@ -142,11 +142,14 @@ const stageKey = (s) => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase
 const CULLING_STAGES = new Set([
   stageKey('Pengambilan'),
   stageKey('Saringan Anak Bibit'),
+  /* The plot is waiting for its culling, and the office wants it on the
+     calculator while it waits, so the count is ready before Pengambilan. */
+  stageKey('Tunggu buat culling'),
 ]);
 
 /**
- * Which plots PALMS says are at Pengambilan or Saringan Anak Bibit, right
- * now.
+ * Which plots PALMS says are at Pengambilan, Saringan Anak Bibit or Tunggu
+ * buat culling, right now.
  *
  * Read for the DIAGNOSIS, not for the list. The status answers a question
  * about a plot — is the field collecting from it — and the calculator's

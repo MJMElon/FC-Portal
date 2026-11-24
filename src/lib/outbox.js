@@ -69,6 +69,15 @@ export async function listJobs() {
   return (all || []).sort((a, b) => a.createdAt - b.createdAt);
 }
 
+/** Change a waiting job's payload in place (the uid, and its place in the
+    queue, stay). */
+export async function patchJob(uid, patch) {
+  const job = await tx('readonly', (s) => s.get(uid));
+  if (!job) return;
+  job.payload = { ...(job.payload || {}), ...(patch || {}) };
+  await tx('readwrite', (s) => s.put(job));
+}
+
 export async function removeJob(uid) {
   await tx('readwrite', (s) => s.delete(uid));
 }
@@ -94,6 +103,9 @@ async function noteFailure(uid, message) {
  * job would fail, and there is no point burning the battery proving it.
  */
 export const PERMANENT = 'OUTBOX_PERMANENT';
+/* A handler that returns SKIP leaves the job queued and moves on to the
+   next: not a failure, simply not this job's time yet. */
+export const SKIP = 'OUTBOX_SKIP';
 
 /* ── One flush at a time, across the whole app ─────────────────────────────
  *
@@ -173,7 +185,8 @@ async function doFlush(handlers) {
     const handler = handlers && handlers[job.kind];
     if (!handler) continue;               // a kind this build does not know
     try {
-      await withTimeout(handler(job.payload, job.uid), JOB_TIMEOUT_MS, job.kind);
+      const said = await withTimeout(handler(job.payload, job.uid), JOB_TIMEOUT_MS, job.kind);
+      if (said === SKIP) continue;
       await removeJob(job.uid);
       result.sent++;
     } catch (e) {

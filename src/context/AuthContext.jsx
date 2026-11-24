@@ -161,6 +161,10 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(() => !cachedSession());
   // null = not yet checked, true / false = ops-gate result
   const [allowed, setAllowed] = useState(null);
+  /* The company's switches as read, kept for the one module that is not a
+     permissions page (Siram Go, a link in the header). Everything else reads
+     them through applyCompanySwitches. Null is nothing vetoed. */
+  const [company, setCompany] = useState(null);
   // The user's permissions JSONB from shared_profiles (set by the ops gate).
   // Modules read finer-grained flags from here, e.g. plot_status_nurseries.
   const [permissions, setPermissions] = useState(() => {
@@ -214,6 +218,7 @@ export function AuthProvider({ children }) {
 
     // Somebody else's (or nobody's) by the time it answered — not ours to apply.
     if (sessionUser.current !== uid) return;
+    setCompany(company);
 
     if (failed) {
       const cached = cachedPermissions(uid);
@@ -392,7 +397,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, loading, allowed, permissions, refusal, mayEnter, retryOpsGate, setRefusal, recovering, setRecovering, signOut, staffName }}
+      value={{ session, loading, allowed, permissions, company, refusal, mayEnter, retryOpsGate, setRefusal, recovering, setRecovering, signOut, staffName }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,6 +1,6 @@
 import { supabase } from '../../lib/supabase.js';
 import { cacheGet, cacheSet } from '../../lib/cache.js';
-import { PERMANENT, flushOutbox, looksOffline, queueJob } from '../../lib/outbox.js';
+import { PERMANENT, SKIP, flushOutbox, looksOffline, queueJob, listJobs, removeJob, patchJob } from '../../lib/outbox.js';
 import { sealNo, rangeHolding } from '../../lib/sealRanges.js';
 
 // The scan list is now driven by SIGNED CONSENTS from the mobile web
@@ -298,11 +298,23 @@ export function applyIssuedShares(prev, cards, shares, queuedALs) {
     const local = cur.issuedQty || 0;
     if (local === share) return;
     if (local > share && queuedALs && queuedALs.has(c.al_number)) return;
-    map[c.id] = { ...cur, issuedQty: share, doIssued: share > 0 };
-    if (share > 0) {
+    /* doIssued means this card's own qty is FULLY out, not merely that
+       something is — see the long comment on mergeConsents' own read of
+       it. A share smaller than the card's qty (the AL's total DO-issued
+       split oldest-first, same as everywhere else here) still leaves a
+       balance on it. */
+    const fullyIssued = share > 0 && share >= (c.qty || 0);
+    map[c.id] = { ...cur, issuedQty: share, doIssued: fullyIssued };
+    if (fullyIssued) {
+      /* A merged card's other members never get their own issuedQty —
+         everything is tracked under the anchor's id above. Stamping the
+         GROUP's full qty onto them here (never their own smaller share of
+         it, which this function has no way to know) is what lets
+         mergeConsents' self-heal trust a member's doIssued on its own,
+         without re-deriving the whole group's history to check it. */
       (c.memberIds || [c.id]).forEach((id) => {
         if (id === c.id) return;
-        map[id] = { ...(map[id] || defaultProgress()), doIssued: true };
+        map[id] = { ...(map[id] || defaultProgress()), doIssued: true, issuedQty: c.qty || 0 };
       });
     }
     changed = true;
@@ -340,13 +352,36 @@ export function statusOf(c) {
 // resync. memberIds carries every row in the group, for fetchScanRecords /
 // subscribeScanRecords to read scans already filed against any of them —
 // a scan does not go looking for a NEW row somebody just signed.
+/* Live, not the stored doIssued flag alone: a row — or, read as a card's
+   own qty, a merged group — counts as fully out only once what was
+   actually issued REACHES what it was for, checked fresh every time
+   rather than trusted from a flag that can be stale. Both writers
+   (onDoSaved, applyIssuedShares) only ever set doIssued once this is
+   already true, but a phone can still be holding an older saved copy of
+   a row marked true on less than that, from before that was fixed — this
+   is what lets it read correctly again without a round trip through a
+   correct writer first. */
+function fullyOut(qty, p) {
+  const out = (p && p.issuedQty) || 0;
+  return out > 0 && out >= (qty || 0);
+}
+
 export function mergeConsents(serverList, progress) {
   const rows = (serverList || []).filter((s) => s.customer_name);
 
   const groups = new Map(); // al_number -> rows[], only not-yet-issued ones
   const singles = [];
   rows.forEach((s) => {
-    const issued = !!(progress[s.id] || {}).doIssued;
+    /* A row can carry doIssued:true from a PARTIAL issue — a DO for less
+       than its own consent_qty, or an AL-wide DO total split across cards
+       (issuedShares) that did not reach this one's own qty. Trusting the
+       flag alone split a merged group apart the moment ANY amount went
+       out on one member, so a second consent for the rest of the order
+       could never rejoin it — N2T596 read Qty 600 forever on a 1,200
+       order with 750 still on the ground, because its first 600 consent
+       had 450 go out against it and was never seen whole again. */
+    const p = progress[s.id] || {};
+    const issued = !!p.doIssued && fullyOut(s.consent_qty, p);
     if (s.al_number && !issued) {
       if (!groups.has(s.al_number)) groups.set(s.al_number, []);
       groups.get(s.al_number).push(s);
@@ -360,13 +395,14 @@ export function mergeConsents(serverList, progress) {
     members.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
     const anchor = members[0];
     const p = progress[anchor.id] || defaultProgress();
+    const qty = members.reduce((sum, m) => sum + (m.consent_qty || 0), 0);
     cards.push({
       id: anchor.id,
       memberIds: members.map((m) => m.id),
       al_number: anchor.al_number || '',
       order_number: anchor.order_number || '',
       customer: anchor.customer_name || anchor.al_number || '—',
-      qty: members.reduce((sum, m) => sum + (m.consent_qty || 0), 0),
+      qty,
       ref: anchor.al_number || '',
       createdAt: anchor.created_at ? new Date(anchor.created_at).getTime() : 0,
       seen: p.seen || [],
@@ -375,7 +411,13 @@ export function mergeConsents(serverList, progress) {
       over: p.over || 0,
       completedFired: !!p.completedFired,
       overFired: !!p.overFired,
-      doIssued: !!p.doIssued,
+      // Live, same as the grouping test above — not the raw flag, which
+      // applyIssuedShares can leave stale when a recomputed share happens
+      // to numerically match what was already stored (see its own "local
+      // === share" short-circuit). onList's filter is already safe either
+      // way (it ORs this with issuedQty < qty), but a card should not say
+      // something its own numbers do not.
+      doIssued: fullyOut(qty, p),
       issuedQty: p.issuedQty || 0,
       doSeals: Array.isArray(p.doSeals) ? p.doSeals : null,
     });
@@ -398,7 +440,7 @@ export function mergeConsents(serverList, progress) {
       over: p.over || 0,
       completedFired: !!p.completedFired,
       overFired: !!p.overFired,
-      doIssued: !!p.doIssued,
+      doIssued: fullyOut(s.consent_qty, p),
       issuedQty: p.issuedQty || 0,
       doSeals: Array.isArray(p.doSeals) ? p.doSeals : null,
     });
@@ -550,46 +592,92 @@ export function markSealsOnDO(p, codes) {
 
 // Persist a single scan event. ON CONFLICT DO NOTHING → unique(consent_id, barcode)
 // prevents double-counting when two devices scan the same seal.
-export async function insertScanRecord(consentId, alNumber, barcode) {
-  const { error } = await supabase
-    .from('fcportal_scan_records')
-    .insert({ consent_id: consentId, al_number: alNumber, barcode });
+/* KEYED BY HAND rides on the row, so Seal Manage can show a seal typed on
+   the Add dialog in red beside the ones the camera read. Sent ONLY for a typed
+   seal: a scanned one writes exactly the row it always wrote. A database that
+   has not had shared/RUN_ME_scan_keyed_by_hand.sql run refuses the WHOLE row
+   over a column it has not got, so a refusal that NAMES the column drops it,
+   is remembered for the session, and the same row goes again at once -- the
+   seal is never lost over the mark. Any other refusal is not that answer. */
+/* Optional columns: keyed_by_hand, and the SCAN POINT pair (scan_point,
+   scan_point_name) that says which phone took the seal -- see scanPoints.js.
+   A database that has not had the SQL run refuses the WHOLE row over a
+   column it has not got, so a refusal that NAMES one of them drops that
+   column, is remembered for the session, and the same row goes again at
+   once. The seal is never lost over a label. Any other refusal is not that
+   answer and disables nothing. */
+const _noCol = new Set();
+const OPTIONAL_COLS = ['keyed_by_hand', 'scan_point', 'scan_point_name'];
+function _namedOptional(e) {
+  if (!e) return null;
+  const text = String(e.message || '') + ' ' + String(e.details || '') + ' ' + String(e.hint || '');
+  if (!(e.code === '42703' || e.code === 'PGRST204' || /column/i.test(text))) return null;
+  return OPTIONAL_COLS.find((c) => text.indexOf(c) >= 0) || null;
+}
+export function scanPointColumnLive() { return !_noCol.has('scan_point'); }
+
+export async function insertScanRecord(consentId, alNumber, barcode, typed, point) {
+  const row = { consent_id: consentId, al_number: alNumber, barcode };
+  if (typed) row.keyed_by_hand = true;
+  if (point && point.id) { row.scan_point = point.id; row.scan_point_name = point.name || null; }
+  _noCol.forEach((c) => { delete row[c]; });
+  let { error } = await supabase.from('fcportal_scan_records').insert(row);
+  for (let i = 0; error && i < OPTIONAL_COLS.length; i++) {
+    const col = _namedOptional(error);
+    if (!col || !(col in row)) break;
+    _noCol.add(col);
+    if (col === 'scan_point' || col === 'scan_point_name') { delete row.scan_point; delete row.scan_point_name; _noCol.add('scan_point'); _noCol.add('scan_point_name'); }
+    delete row[col];
+    ({ error } = await supabase.from('fcportal_scan_records').insert(row));
+  }
   if (error && error.code !== '23505') throw error; // 23505 = unique_violation (safe to ignore)
 }
 
-/* A scan made with no line still reaches the server, later.
- *
- * The local progress is what THIS phone counts by, and it never needed the
- * network — but fcportal_scan_records is how OTHER devices hear a barcode
- * has been taken, and a scan made offline used to be skipped rather than
- * queued: the count survived on one phone while every other phone stayed
- * free to accept the same seedling again. Now it queues like everything
- * else in this repository and flushes on sync, on reconnect, and on the
- * 30-second tick. The unique index (23505 ignored above) makes a retry of
- * a row the server already took a no-op rather than a duplicate.
- */
-export const SCAN_JOB = 'scan_record';
+/* A SCAN STAYS ON THE PHONE UNTIL ITS DO IS ISSUED.
 
-export async function saveScanRecord(consentId, alNumber, barcode) {
+   The office: a scan is kept on the phone, and pressing Issue DO is the
+   sync -- it sends that DO's seals up, and from then on they cannot be
+   reset. With no line they stay on the phone, still unresettable, and go up
+   by themselves the moment there is a line. A record leaves the phone only
+   once the server has taken it.
+
+   So every scan goes into the outbox marked `committed: false`, and the
+   outbox never sends one in that state (flushScanRecords answers SKIP).
+   Issue DO marks the DO's seals committed (`commitScans`) and flushes; the
+   app-wide tick and the line returning flush them too. Reset may clear only
+   what is NOT committed (`resetUnsynced`). A job with no `committed` field
+   was queued by an older build, which meant to send it, so it is sent.
+
+   `_queuing` covers the moment between the scan and the outbox write, so a
+   read of the order in that gap cannot take the seal for one the server
+   refused (see waitingScanCodes). */
+export const SCAN_JOB = 'scan_record';
+const _queuing = new Set();
+
+export async function saveScanRecord(consentId, alNumber, barcode, typed, point) {
+  const key = String(consentId) + '|' + barcodeKey(barcode);
+  _queuing.add(key);
   try {
-    await insertScanRecord(consentId, alNumber, barcode);
-  } catch (e) {
-    if (looksOffline(e)) {
-      await queueJob(SCAN_JOB, { consentId, alNumber, barcode });
-      return;
-    }
-    // The server refused it for a reason of its own; the local progress
-    // still holds the scan, which is the behaviour this call always had.
+    await queueJob(SCAN_JOB, { consentId, alNumber, barcode, typed: !!typed, point: point || null, committed: false });
+  } finally {
+    _queuing.delete(key);
   }
 }
 
+
+/* SENDS THE COMMITTED SCANS -- the ones a DO has been issued for -- and
+   leaves the rest queued. A seal the server refuses for good (the order
+   already full across every scan point, a policy) leaves the queue, since
+   keeping it would block everything behind it, and the next read of the
+   order takes it off the phone. */
 export function flushScanRecords() {
   return flushOutbox({
     [SCAN_JOB]: async (p) => {
+      if (p && p.committed === false) return SKIP;   // its DO is not issued yet
       try {
-        await insertScanRecord(p.consentId, p.alNumber, p.barcode);
+        await insertScanRecord(p.consentId, p.alNumber, p.barcode, p.typed, p.point);
       } catch (e) {
-        if (looksOffline(e)) throw e;      // try again later
+        if (looksOffline(e)) throw e;      // try again when there is a line
         throw new Error(PERMANENT);        // the server refused the row itself
       }
     },
@@ -601,28 +689,133 @@ export function flushScanRecords() {
 // against any of its member rows, not only the group's anchor.
 export async function fetchScanRecords(consentIds) {
   const ids = Array.isArray(consentIds) ? consentIds : [consentIds];
-  const { data, error } = await supabase
-    .from('fcportal_scan_records')
-    .select('barcode, scanned_at')
-    .in('consent_id', ids)
-    .order('scanned_at', { ascending: true });
-  if (error) throw error;
-  return data || [];
+  /* Paged: an order of 1,200 seals is past the 1,000 rows PostgREST hands
+     back in one answer, and a short read here reads as seals another phone
+     reset -- see reconcileWithServer. Ordered on the unique (consent_id, barcode) as well, so
+     a page boundary cannot fall inside a run of rows sharing one timestamp. */
+  const cols = scanPointColumnLive() ? 'barcode, scanned_at, scan_point, scan_point_name' : 'barcode, scanned_at';
+  const all = [];
+  for (let from = 0; from < 50000; from += 1000) {
+    let { data, error } = await supabase
+      .from('fcportal_scan_records')
+      .select(cols)
+      .in('consent_id', ids)
+      .order('scanned_at', { ascending: true })
+      .order('consent_id', { ascending: true })
+      .order('barcode', { ascending: true })
+      .range(from, from + 999);
+    if (error && cols !== 'barcode, scanned_at' && _namedOptional(error)) {
+      _noCol.add('scan_point'); _noCol.add('scan_point_name');
+      return fetchScanRecords(consentIds);
+    }
+    if (error) throw error;
+    all.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return all;
+}
+
+/* THE SEALS OF THESE CONSENTS STILL WAITING IN THE OUTBOX, as a Set of
+   barcodes -- or null when the outbox could not be read, which the caller
+   must treat as "anything might be waiting" (see reconcileWithServer). */
+export async function waitingScanCodes(consentIds) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  try {
+    const jobs = await listJobs();
+    const out = new Set();
+    for (const j of jobs) {
+      if (j.kind !== SCAN_JOB || !j.payload) continue;
+      if (!ids.includes(String(j.payload.consentId))) continue;
+      out.add(barcodeKey(j.payload.barcode));
+    }
+    _queuing.forEach((k) => {
+      const at = k.indexOf('|');
+      if (ids.includes(k.slice(0, at))) out.add(k.slice(at + 1));
+    });
+    return out;
+  } catch (_) { return null; }
+}
+
+/* ISSUE DO IS THE SYNC: these seals of these consents are committed --
+   they go up with the next flush and can no longer be reset. */
+export async function commitScans(consentIds, codes) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  const want = new Set((codes || []).map(barcodeKey));
+  const jobs = await listJobs();
+  for (const j of jobs) {
+    if (j.kind !== SCAN_JOB || !j.payload || j.payload.committed !== false) continue;
+    if (!ids.includes(String(j.payload.consentId))) continue;
+    if (want.has(barcodeKey(j.payload.barcode))) await patchJob(j.uid, { committed: true });
+  }
+}
+
+/* What this order still has on the phone: `open` can still be reset (no DO
+   issued), `sending` is committed and waiting for a line. null when the
+   outbox could not be read. */
+export async function scanQueueCounts(consentIds) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  try {
+    const jobs = await listJobs();
+    let open = 0, sending = 0;
+    for (const j of jobs) {
+      if (j.kind !== SCAN_JOB || !j.payload) continue;
+      if (!ids.includes(String(j.payload.consentId))) continue;
+      if (j.payload.committed === false) open++; else sending++;
+    }
+    return { open, sending };
+  } catch (_) { return null; }
+}
+
+/* RESET: TAKE BACK WHAT HAS NO DO YET, and nothing else. Every scan of
+   these consents still queued and not committed leaves the outbox, and the
+   caller drops the same seals off the phone. A committed scan (its DO is
+   issued) stays queued until it is sent, and a seal already on a DO
+   (`keep`) is a real collection. Needs no line -- nothing on the server
+   changes. Answers the barcodes it took out of the queue. */
+export async function resetUnsynced(consentIds, keep) {
+  const ids = (Array.isArray(consentIds) ? consentIds : [consentIds]).map(String);
+  const hold = keep || new Set();
+  const out = [];
+  const jobs = await listJobs();
+  for (const j of jobs) {
+    if (j.kind !== SCAN_JOB || !j.payload) continue;
+    if (!ids.includes(String(j.payload.consentId))) continue;
+    if (j.payload.committed !== false) continue;   // its DO is issued: not the phone's to take back
+    const code = barcodeKey(j.payload.barcode);
+    if (hold.has(code)) continue;
+    await removeJob(j.uid);
+    out.push(code);
+  }
+  return out;
 }
 
 // Barcodes on these consents that a DO has already carried, on any device
 // -- the database fills fcportal_scan_records.do_number from each DO's
 // seal_ranges. Asked only once the seal SQL is known to be in, since the
 // column does not exist before it; and best effort, like every read here.
+/* PAGED, like fetchScanRecords: PostgREST hands back at most 1,000 rows,
+   and a short answer here reads as seals still waiting for a DO. BB0RS8
+   had 1,470 on its DOs; the first 1,000 came back, the other 470 counted
+   as pending, and the order read as full with 299 still to collect.
+   Ordered on the unique (consent_id, barcode) so a page boundary is
+   stable. */
 export async function fetchSealsOnDO(consentIds) {
   const ids = Array.isArray(consentIds) ? consentIds : [consentIds];
-  const { data, error } = await supabase
-    .from('fcportal_scan_records')
-    .select('barcode')
-    .in('consent_id', ids)
-    .not('do_number', 'is', null);
-  if (error) throw error;
-  return (data || []).map((r) => r.barcode);
+  const all = [];
+  for (let from = 0; from < 50000; from += 1000) {
+    const { data, error } = await supabase
+      .from('fcportal_scan_records')
+      .select('barcode')
+      .in('consent_id', ids)
+      .not('do_number', 'is', null)
+      .order('consent_id', { ascending: true })
+      .order('barcode', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw error;
+    all.push(...(data || []).map((r) => r.barcode));
+    if (!data || data.length < 1000) break;
+  }
+  return all;
 }
 
 // Has this barcode already been scanned under a DIFFERENT order? The
@@ -649,16 +842,20 @@ export async function findBarcodeElsewhere(barcode, excludeConsentIds) {
 // Subscribe to live INSERTs across one or more consent ids. callback(barcode)
 // fires when another device scans a new seal against any of them. Returns
 // the channel — pass to unsubscribeScanRecords().
-export function subscribeScanRecords(consentIds, callback) {
+export function subscribeScanRecords(consentIds, callback, onReset) {
   const ids = Array.isArray(consentIds) ? consentIds : [consentIds];
+  /* The channel is named after the card's ANCHOR only, so every phone on the
+     same order joins the same channel whatever members its list happens to
+     hold -- the reset broadcast has to reach all of them. */
   return supabase
-    .channel('fcportal_scan:' + ids.join(','))
+    .channel('fcportal_scan:' + ids[0])
     .on('postgres_changes', {
       event: 'INSERT',
       schema: 'public',
       table: 'fcportal_scan_records',
       filter: `consent_id=in.(${ids.join(',')})`,
-    }, (payload) => callback(payload.new.barcode))
+    }, (payload) => callback(payload.new.barcode, payload.new))
+    .on('broadcast', { event: 'reset' }, (msg) => { if (onReset) onReset(msg && msg.payload); })
     .subscribe();
 }
 

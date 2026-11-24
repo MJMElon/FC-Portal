@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useLang, LangToggle } from '../context/LanguageContext.jsx';
 import { useWorker } from './WorkerAuthContext.jsx';
+import SiramGoButton, { siramGoOn } from '../components/SiramGo.jsx';
 
 function BackArrow() {
   return (
@@ -38,9 +39,32 @@ function CogIcon() {
  * reason: TopNav signs out of Supabase, and there is no Supabase session here
  * to sign out of. Everything else it does, it does the same way.
  */
+// A moon: Mata Malam is the night check-in app.
+function MoonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="w-[15px] h-[15px]" fill="none" stroke="currentColor" strokeWidth="2.2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+    </svg>
+  );
+}
+
+/* Mata Malam (the night check-in app) lives on its own address and enters with
+   the same PIN session as this portal — its database functions start from the
+   same worker_from_token. So the button hands the token over and the guard is
+   not asked for a PIN twice. It rides in the FRAGMENT, which a browser never
+   sends to a server, and Mata Malam takes it out of the address as it reads
+   it. A new tab, so nothing on this screen is left behind. */
+const MATA_MALAM_URL = 'https://mjmelon.github.io/MataMalam/';
+
+function openMataMalam(token) {
+  const url = token ? `${MATA_MALAM_URL}#wt=${encodeURIComponent(token)}` : MATA_MALAM_URL;
+  window.open(url, '_blank', 'noopener');
+}
+
 export default function WorkerNav({ title, subtitle, back, book, onSettings, settingsOn }) {
   const { t } = useLang();
-  const { worker, signOut } = useWorker();
+  const { worker, signOut, token, company } = useWorker();
 
   const sub = subtitle || t('wk.portal');
 
@@ -97,6 +121,20 @@ export default function WorkerNav({ title, subtitle, back, book, onSettings, set
           <CogIcon />
         </button>
       )}
+      {/* Icon only on phones, like Sign Out beside it. */}
+      {worker && (
+        <button
+          onClick={() => openMataMalam(token)}
+          title="Mata Malam"
+          aria-label="Mata Malam"
+          data-testid="open-mata-malam"
+          className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 border-indigo-200 uppercase tracking-wider sm:tracking-widest px-2.5 sm:px-3 py-2 rounded-full border cursor-pointer transition-colors shrink-0"
+        >
+          <MoonIcon />
+          <span className="hidden sm:inline">Mata Malam</span>
+        </button>
+      )}
+      {worker && siramGoOn(company) && <SiramGoButton />}
       <LangToggle />
       {/* Icon only on phones — the words cost ~55px the title needs more. */}
       <button

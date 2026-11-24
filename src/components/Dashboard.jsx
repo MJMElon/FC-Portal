@@ -5,6 +5,9 @@ import { useLang } from '../context/LanguageContext.jsx';
 import TopNav from './TopNav.jsx';
 import CollectionBoard from './CollectionBoard.jsx';
 import MaintenanceBoard from './MaintenanceBoard.jsx';
+import SecondCullCard from '../modules/maintenance/SecondCullCard.jsx';
+import { useOnline } from '../hooks/useOnline.js';
+import { allowedNurseries, nurseryKey } from '../lib/access.js';
 import SyncButton from './SyncButton.jsx';
 import Icon from './Icon.jsx';
 
@@ -49,6 +52,9 @@ function ModuleGrid({ items }) {
 export default function Dashboard() {
   const { staffName, permissions } = useAuth();
   const { t } = useLang();
+  const online = useOnline();
+  const maintNurseries = allowedNurseries(permissions, 'maintenance');
+  const maintKeys = maintNurseries === null ? null : new Set((maintNurseries || []).map(nurseryKey));
 
   // Two groups rather than one grid of four: each sits next to the board it
   // answers to. Scan Barcode Counter and Issue Collection DO go straight
@@ -92,6 +98,8 @@ export default function Dashboard() {
             module. Only for someone who may open Maintenance — a summary
             is still the module's data. */}
         {canMaintain(permissions, 'view') && <MaintenanceBoard />}
+        {/* 2nd cull, under Maintenance Status: the FC's own list for this month. */}
+        {canMaintain(permissions, 'view') && <SecondCullCard allowed={maintKeys} online={online} />}
       </div>
     </div>
   );
