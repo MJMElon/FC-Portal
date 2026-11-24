@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useLang, LangToggle } from '../context/LanguageContext.jsx';
 import { useWorker } from './WorkerAuthContext.jsx';
+import SiramGoButton, { siramGoOn } from '../components/SiramGo.jsx';
 
 function BackArrow() {
   return (
@@ -48,21 +49,6 @@ function MoonIcon() {
   );
 }
 
-// A drop: Siram Go is the watering log.
-function DropIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="w-[15px] h-[15px]" fill="none" stroke="currentColor" strokeWidth="2.2"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 2.7C9 6.6 6 10 6 14a6 6 0 0 0 12 0c0-4-3-7.4-6-11.3z" />
-    </svg>
-  );
-}
-
-/* Siram Go is the watering log, a page of its own on another address. It
-   carries no login of ours, so the button hands nothing over: it only opens
-   the form, in a new tab, so the portal is still here to come back to. */
-const SIRAM_GO_URL = 'https://mjmelon.github.io/watering-log/form.html';
-
 /* Mata Malam (the night check-in app) lives on its own address and enters with
    the same PIN session as this portal — its database functions start from the
    same worker_from_token. So the button hands the token over and the guard is
@@ -78,7 +64,7 @@ function openMataMalam(token) {
 
 export default function WorkerNav({ title, subtitle, back, book, onSettings, settingsOn }) {
   const { t } = useLang();
-  const { worker, signOut, token } = useWorker();
+  const { worker, signOut, token, company } = useWorker();
 
   const sub = subtitle || t('wk.portal');
 
@@ -148,20 +134,7 @@ export default function WorkerNav({ title, subtitle, back, book, onSettings, set
           <span className="hidden sm:inline">Mata Malam</span>
         </button>
       )}
-      {worker && (
-        <a
-          href={SIRAM_GO_URL}
-          target="_blank"
-          rel="noopener"
-          title="Siram Go"
-          aria-label="Siram Go"
-          data-testid="open-siram-go"
-          className="flex items-center gap-1.5 text-[10px] font-bold text-sky-700 hover:text-white bg-sky-50 hover:bg-sky-600 border-sky-200 uppercase tracking-wider sm:tracking-widest px-2.5 sm:px-3 py-2 rounded-full border cursor-pointer transition-colors shrink-0 no-underline"
-        >
-          <DropIcon />
-          <span className="hidden sm:inline">Siram Go</span>
-        </a>
-      )}
+      {worker && siramGoOn(company) && <SiramGoButton />}
       <LangToggle />
       {/* Icon only on phones — the words cost ~55px the title needs more. */}
       <button

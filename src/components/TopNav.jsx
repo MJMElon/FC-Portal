@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useLang, LangToggle } from '../context/LanguageContext.jsx';
 import { supabase } from '../lib/supabase.js';
 import Icon from './Icon.jsx';
+import SiramGoButton, { siramGoOn } from './SiramGo.jsx';
 
 // A plain left arrow. Every "go back" control in the app is just this — the
 // destination is obvious from context, so the words were only taking room.
@@ -51,7 +52,7 @@ export default function TopNav({
   book,
   left,
 }) {
-  const { signOut } = useAuth();
+  const { signOut, session, company } = useAuth();
   const { t } = useLang();
   const navigate = useNavigate();
   const dark = theme === 'dark';
@@ -135,6 +136,7 @@ export default function TopNav({
           <CogIcon />
         </button>
       )}
+      {session && siramGoOn(company) && <SiramGoButton dark={dark} />}
       <LangToggle dark={dark} />
       {/* Icon only on phones — the words cost ~55px the title needs more. */}
       <button
