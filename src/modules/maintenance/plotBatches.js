@@ -46,6 +46,42 @@ export function plotKey(v) {
     .replace(/[^0-9A-Z-]/g, '');
 }
 
+/* A -R plot is the REPLANT of the plot it is NAMED AFTER: B3-R is ground a
+   3rd-culling transfer moved B3's own seedlings onto, so the name carries
+   the parent in it. A trailing number is allowed for, so B4-R and B4-R2 are
+   both replants of B4, and a split area ("B4-R#A") is judged by its plot.
+
+   ONE REGEX ANSWERS BOTH QUESTIONS, which is why they are written together:
+   whether a plot is a replant, and whose. A second copy of this shape is a
+   second thing to get wrong, and this file imports nothing, so it is where
+   a plot-name rule can live without dragging a module in behind it. */
+const REPLANT_OF = /^(.*?)-R\d*$/i;
+const bareName = (plot) => String(plot == null ? '' : plot).split('#')[0].trim();
+
+/**
+ * SHARED RULE — isReplantPlot in the office repository,
+ * shared/shared_palms.js, and re-exported from modules/palms/data.js, which
+ * is where the PALMS screens have always read it. Change one, change the
+ * others.
+ */
+export function isReplantPlot(plot) {
+  return REPLANT_OF.test(bareName(plot));
+}
+
+/**
+ * The plot a -R plot is the replant OF, as a plotKey — "B3-R" → "B3" — or
+ * null for a plot that is not a replant at all.
+ *
+ * It answers in plotKey's own spelling because every caller is comparing
+ * against keys, and a parent worked out in one spelling and compared in
+ * another matches nothing while looking exactly as though it should.
+ */
+export function replantParent(plot) {
+  const m = REPLANT_OF.exec(bareName(plot));
+  if (!m || !m[1]) return null;
+  return plotKey(m[1]) || null;
+}
+
 /**
  * A batch by its trailing digits: "MJM-225", "225." and " 225 " are all 225.
  *

@@ -26,7 +26,7 @@ import { dataUrlToBlob } from '../lib/image.js';
 import { supabase } from '../lib/supabase.js';
 import { PERMANENT, flushOutbox, isOnline, listJobs, looksOffline, queueJob } from '../lib/outbox.js';
 import { sortRecords, workTypeByKey } from '../modules/maintenance/helpers.js';
-import { batchKey, plotKey } from '../modules/maintenance/plotBatches.js';
+import { batchKey, plotKey, replantParent } from '../modules/maintenance/plotBatches.js';
 import { applicableSchedules } from '../modules/maintenance/schedule.js';
 import { applyCompanySwitches } from '../lib/portalSettings.js';
 import * as api from './workerApi.js';
@@ -435,10 +435,43 @@ export function workerPermissions(boundary, actions, company) {
 }
 
 /* The plot half of a boundary, as a predicate. null means every plot in the
-   allowed nurseries, which is what most workers have. */
+   allowed nurseries, which is what most workers have.
+
+   A PLOT CARRIES ITS OWN REPLANT, and the office asked for it in the one
+   sentence that says why it cannot be keyed by hand: *"月头 没有B3-R 结果
+   15号那天B3-R出现 … 如果有做B3-R就按B3-R 如果两边都有做 B3 和 B3-R都要按"*.
+
+   A -R plot is MADE mid-month, by a 3rd-culling transfer landing on ground
+   that did not exist as a plot the day before — so a boundary keyed at the
+   start of the month cannot possibly name it, and the office would have to
+   re-key every bounded worker the morning one appears. plotKey KEEPS THE
+   DASH, deliberately, because B3 and B3-R are two different plots with two
+   different balances; so "B3" and "B3-R" are two different keys and the
+   replant was silently outside the boundary for ever.
+
+   WHAT THAT COST IS THE OFFICE'S OWN SENTENCE and it is why this is not
+   cosmetic: *"可能B3已经没有苗了 要cull了 但是B3-R没出现 他们就会按B3 结果
+   B3的balance其实是要被cull的"*. The replant is where the seedlings now
+   are; the parent is the ground about to be culled. A worker handed only
+   the parent ticks the parent, and the morning is recorded against a
+   balance that is on its way out.
+
+   IT TRAVELS ONE WAY ONLY — parent to replant, never back. A boundary
+   naming B3-R does NOT open B3: the office put that worker on the replant,
+   and the parent is other seedlings and somebody else's morning. The
+   widening is safe in the direction it goes because the replant IS the
+   parent's own ground, moved: whoever was trusted with B3 is who the -R
+   plot was made out of.
+
+   Naming B3-R in a boundary still works and still means only B3-R, and an
+   EMPTY list still means nobody, because no key matches either way. */
 export function workerPlotFilter(boundary) {
   const plots = boundary && boundary.plots;
   if (!Array.isArray(plots)) return null;
   const keys = new Set(plots.map((n) => plotKey(n)));
-  return (plotName) => keys.has(plotKey(plotName));
+  return (plotName) => {
+    if (keys.has(plotKey(plotName))) return true;
+    const parent = replantParent(plotName);
+    return parent ? keys.has(parent) : false;
+  };
 }

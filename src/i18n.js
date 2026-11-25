@@ -837,6 +837,9 @@ const en = {
   // ── Photos of the work ──
   'wk.showingCached': 'Showing the list this phone loaded {when}. Work still saves.',
   'wk.sentBack': 'Sent back — do this again',
+  /* A row derived from the parent plot's round, because the replant
+     appeared after the office keyed the schedule. */
+  'wk.replantOf': 'from {plot}',
   'wk.sentBackNoReason': 'The conductor did not accept this record.',
   'wk.sentBackOther': 'Sent back to {who}',
   'wk.sentBackBy': 'Sent back by {name} — do this work again',
@@ -1753,6 +1756,7 @@ const ms = {
   // ── Gambar kerja ──
   'wk.showingCached': 'Menunjukkan senarai yang telefon ini muat {when}. Kerja tetap disimpan.',
   'wk.sentBack': 'Dihantar balik — buat semula',
+  'wk.replantOf': 'dari {plot}',
   'wk.sentBackNoReason': 'Penyelia tidak menerima rekod ini.',
   'wk.sentBackOther': 'Dihantar balik kepada {who}',
   'wk.sentBackBy': 'Dihantar balik oleh {name} — buat kerja ini semula',
