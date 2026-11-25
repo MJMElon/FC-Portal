@@ -560,6 +560,101 @@ and the outbox, and stubbing a dozen modules to reach one pure function is a
 thicker fixture than the function — and its section 4 reads the office SQL,
 so a release that ships one half fails here.
 
+### AND THE BOUNDARY WAS NOT WHAT STOPPED THEM: there was no ROW to tick
+
+The office read the above and answered **不对**, with their own month and the
+four answers a worker has to be able to give:
+
+> *"我是worker 1.11.2026那天tick的schedule没有B3-R, 但是我15.11.2026 要做B3,
+> 那时候B3-R有苗:
+> 1. 如果我要做B3-R而已，B3不做了，因为要cull了，所以我可以按B3-R
+> 2. 如果我还是只做B3不做B3-R,也可以只选B3
+> 3. 两个都做可以两个都选
+> 4. 两个都选的话 FC需要approve两次for each"*
+
+**THEY ARE RIGHT, AND THE BOUNDARY WAS THE WRONG LAYER.** It is still owed —
+without it the save is refused at the database after the walk — but it opened
+a door into a room with nothing in it. **THIS LIST IS THE OFFICE SCHEDULE**:
+`periodTasks` is `mergeWeekTasks(schedule, week)` and nothing else, so a plot
+the office could not name on the 1st — because the 3rd-culling transfer had
+not made it yet — has no row on the 15th whatever the database would now
+accept. Points **1, 3 and 4 were impossible**, and 2 was the only one that
+ever worked.
+
+**IT WAS PROVED BEFORE IT WAS FIXED**, by driving the shipped `periodTasks`
+over the office's own November: `week 3 offers ["B3 manuring","B3 weeding","B3
+interrow"]`, **B3-R rows: 0**.
+
+**SO A REPLANT TAKES ITS PARENT'S ROWS FOR THE WEEK**, which is the rule the
+office side already follows (`seedReplantRounds`): the work was planned for
+that ground, and the replant IS that ground's seedlings moved.
+
+Four things in it:
+
+- **IT IS A ROW OF ITS OWN, never a change to the parent's** — and that one
+  decision is points 1 to 4 together. Two rows, ticked independently,
+  `splitDone` answering each by its own records, each `complete()` writing
+  its own `nops_maint_field_records` row, each verified on its own id.
+- **THE PARENT'S TICK DECIDES, never the parent's seedlings.** Point 1 is a
+  parent with nothing left standing — *B3不做了 因为要cull了* — so a rule
+  that asked the parent for stock would refuse the very case they opened
+  with.
+- **SOMETHING HAS TO BE STANDING IN THE REPLANT**, which is their own
+  condition (*那时候B3-R有苗*) and is **already in the phone's hand**:
+  `worker_plot_batches` answers `qty > 0` and is joined to `worker_plots`,
+  which carries the replant because the boundary does. Nothing new is read
+  and nothing is guessed — but `WorkerTasks.jsx` had never ASKED for it
+  (only the FC's `MaintenanceModule` did), so that read is the one line of
+  plumbing this needed.
+- **A ROW THE OFFICE HAS SINCE KEYED IS NOT OFFERED TWICE.** The moment they
+  press Save Schedule the replant is on the schedule properly, and this
+  stands aside rather than drawing a second B3-R beside it.
+
+**POINT 4 NEEDED NOTHING, which was checked rather than assumed.**
+`setVerified(id, who)` writes `.eq('id', id)` and the Verify Hub's `visible`
+is a flat per-RECORD list placed by its PLOT — so B3 and B3-R are two cards
+and two approvals by construction. A writer that ever started verifying by
+plot or by week would take the two approvals back into one, and section 4 of
+the test is what says so.
+
+**WHERE THIS DELIBERATELY DIFFERS FROM THE OFFICE RULE**, named rather than
+buried: `seedReplantRounds` seeds the rounds whose week STARTS on or after
+the day the transfer landed, so a replant that appeared on the 17th is owed
+week 4 and not week 3. This offers it in week 3 all the same, because the
+office asked for the 15th and asked for it LIVE. The two answer different
+questions — the schedule PLANS what is owed, this OFFERS what a worker may
+record — and **an offered row nobody ticks costs nothing**, which is what
+makes the looser condition safe. Point 2 is the office saying so themselves.
+
+**AND A ROW THAT IS TICKED LANDS AS CAPACITY EITHER WAY**, which is the half
+that had to be checked before building any of it — or this would be *"a plot
+the salary claim does not know pays nobody"* all over again.
+`applyFieldRecords` keys the Worker Record tick on **the field record's own
+id**, and `seedReplantRounds` has already pushed the replant into
+`NURSERY_PLOTS` off the ledger with nobody pressing Save — so the record
+places and the capacity is counted. What the office sees until they do press
+it is the record named under `_fieldUnpaired`: *verified work that reached
+the office and attached to nothing*. Named, never silent.
+
+**THE FC PORTAL HAS NO SUCH GAP**, so there is no thinner copy to keep in
+step: its plot picker is `shared_plots` filtered by permission, not the
+schedule, so it has offered B3-R since the day Seedling Stock had it. The
+worker's view was the one that reads a plan.
+
+**A DERIVED ROW SAYS WHERE IT CAME FROM** (`task.replantOf`, drawn as *from
+B3*). A plot that was not on the list yesterday, with nothing on it to read,
+is the fault this file keeps finding.
+
+`tests/a_replant_is_its_own_row_to_tick.cjs` is 31 checks and **12 fail on
+the previous code**, the headline ones being the office's own 1 and 3. Two of
+its checks had to be rewritten after the first run, and both are the shape to
+watch for: one compared two counts that are equal whatever the rule does, and
+one was written as `cond || JSON.stringify(...)` — **a failure message is a
+non-empty string, so that check could never fail at all.**
+
+**Nothing to run in the database.** The whole of this is on the phone;
+`worker_plot_batches` and the boundary were already there.
+
 ## `ROLES` in `maintenance/helpers.js` is the office list, copied
 
 It is what `isKnownRole` asks, and `isGeneralWorker` reads that to decide

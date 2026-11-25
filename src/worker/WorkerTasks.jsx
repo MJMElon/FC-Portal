@@ -7,6 +7,7 @@ import { todayStr, workTypeByKey, workTypeLabel } from '../modules/maintenance/h
 import {
   daysInMonthLabel, monthLabelOf, weekOfDate,
 } from '../modules/maintenance/schedule.js';
+import { isReplantPlot, plotKey } from '../modules/maintenance/plotBatches.js';
 import { tintOf } from '../modules/maintenance/tints.js';
 import WorkIcon from '../modules/maintenance/WorkIcons.jsx';
 import { useWorker } from './WorkerAuthContext.jsx';
@@ -74,6 +75,9 @@ export default function WorkerTasks() {
   const [plots, setPlots] = useState([]);
   const [records, setRecords] = useState([]);
   const [schedule, setSchedule] = useState([]);
+  /* plotKey -> [{batch, qty}], read for one question only: which -R plots
+     have seedlings standing. A Map so an absent read is an empty one. */
+  const [batchMap, setBatchMap] = useState(() => new Map());
   const [pending, setPending] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -110,13 +114,22 @@ export default function WorkerTasks() {
 
   const reload = useCallback(async () => {
     try {
-      const [d, s] = await Promise.all([
+      /* The batch balances are read for ONE question: which of this worker's
+         -R plots have seedlings standing. See periodTasks. It is its own
+         promise rather than part of loadData because that read already has
+         four callers and none of the others wants it — and because it must
+         never be what stops the list drawing: loadPlotBatches swallows its
+         own failure and answers an empty map, so a database with no balance
+         view behaves exactly as this screen did before. */
+      const [d, s, bm] = await Promise.all([
         source.loadData(),
         source.loadSchedules(null, month),
+        source.loadPlotBatches(),
       ]);
       setPlots(d.plots);
       setRecords(d.records);
       setSchedule(s);
+      setBatchMap(bm || new Map());
       /* Where the list came from. The screen looks identical either way, and
          that is exactly the problem it solves: an empty list drawn from a
          cache nobody has filled reads as "everything on the plan is done",
@@ -139,8 +152,25 @@ export default function WorkerTasks() {
      does it twice — which is the one failure this screen must not have. */
   const allRecords = useMemo(() => withQueued(records, pending), [records, pending]);
 
+  /* Every -R plot of this worker's with something standing in it. `plots` is
+     worker_plots — which carries the replant because the boundary does — and
+     `batchMap` is worker_plot_batches, whose rows are already `qty > 0`. So
+     "有苗" is read and never guessed, and the two lists are joined on the
+     plot KEY rather than the spelling, because one is shared_plots own and
+     the other is the balance view's. */
+  const replantsStanding = useMemo(() => {
+    const standing = new Set();
+    batchMap.forEach((list, k) => {
+      if ((list || []).some((b) => Number(b && b.qty) > 0)) standing.add(k);
+    });
+    return (plots || [])
+      .map((p) => p && p.plot_name)
+      .filter((n) => n && isReplantPlot(n) && standing.has(plotKey(n)));
+  }, [plots, batchMap]);
+
   const tasks = useMemo(
-    () => periodTasks(schedule, week, { plotFilter }), [schedule, week, plotFilter]);
+    () => periodTasks(schedule, week, { plotFilter, replantsStanding }),
+    [schedule, week, plotFilter, replantsStanding]);
   /* `me` is what decides whose repair a sent-back job is. It is the name on
      the worker's own row — the same string worker_submit_maint writes into
      reported_by — so the two are being compared like with like. */

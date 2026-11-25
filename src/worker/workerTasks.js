@@ -12,6 +12,7 @@
  */
 import { WORK_TYPES } from '../modules/maintenance/helpers.js';
 import { mergeWeekTasks, monthLabelOf, weekOfDate } from '../modules/maintenance/schedule.js';
+import { plotKey, replantParent } from '../modules/maintenance/plotBatches.js';
 
 /** A job's identity: the plot AND what is going on it. */
 export const idOf = (t) => `${t.workTypeKey}|${t.plot}|${t.chemical || ''}`;
@@ -28,8 +29,64 @@ export const idOf = (t) => `${t.workTypeKey}|${t.plot}|${t.chemical || ''}`;
  * `plotFilter` is the plot half of a boundary. A worker allowed four plots out
  * of nine must not be handed the other five as work — the database would
  * refuse the record, and only after they had walked it.
+ *
+ * ── A REPLANT THAT APPEARED AFTER THE SCHEDULE WAS KEYED ──
+ *
+ * `replantsStanding` is every -R plot of this worker's that has seedlings in
+ * it. The office, describing their own month: *"1.11.2026那天tick的schedule
+ * 没有B3-R, 但是我15.11.2026 要做B3,那时候B3-R有苗"* — and then the four
+ * answers a worker must be able to give, which are the whole of why this
+ * exists:
+ *
+ *   1. B3-R only, because B3 is about to be culled
+ *   2. B3 only
+ *   3. both
+ *   4. and the FC approves each of the two separately
+ *
+ * None of 1, 3 or 4 was possible, and the boundary was not what stopped
+ * them. THIS LIST IS THE OFFICE SCHEDULE, so a plot the office could not
+ * name on the 1st — because a 3rd-culling transfer had not made it yet — has
+ * no row to tick on the 15th, whatever the database would now accept.
+ *
+ * So a replant takes its PARENT'S ROWS for the week, which is the rule the
+ * office side already follows (`seedReplantRounds`): the work was planned
+ * for that ground, and the replant IS that ground's seedlings moved.
+ *
+ * Four things in it:
+ *
+ * - **IT IS A ROW OF ITS OWN, never a change to the parent's.** That is
+ *   points 1 to 4 in one decision: two rows, ticked independently, each
+ *   writing its own `nops_maint_field_records` row, each verified on its own
+ *   id by `setVerified`. Nothing else was needed for the conductor's two
+ *   approvals.
+ * - **THE PARENT'S TICK DECIDES, never the parent's seedlings.** Point 1 is
+ *   a parent with nothing left standing, so a rule that asked the parent for
+ *   stock would refuse exactly the case the office opened with.
+ * - **SOMETHING HAS TO BE STANDING IN THE REPLANT** — *那时候B3-R有苗*, and
+ *   it is the office's own condition. `worker_plot_batches` already answers
+ *   it (`qty > 0`), so nothing new is read and nothing is guessed.
+ * - **A ROW THE OFFICE HAS SINCE KEYED IS NOT OFFERED TWICE.** The moment
+ *   they press Save Schedule the replant is on the schedule properly, and
+ *   this must stand aside rather than draw a second B3-R beside it.
+ *
+ * **WHERE THIS DELIBERATELY DIFFERS FROM THE OFFICE RULE**, and it is named
+ * rather than buried: `seedReplantRounds` seeds the rounds whose week STARTS
+ * on or after the day the transfer landed, so a replant that appeared on the
+ * 17th is owed week 4 and not week 3. This offers it in week 3 all the same,
+ * because the office asked for the 15th and asked for it LIVE. The two are
+ * answering different questions — the schedule PLANS what is owed, this
+ * OFFERS what a worker may record — and an offered row nobody ticks costs
+ * nothing, which is what makes the looser condition safe. A row that IS
+ * ticked lands as capacity either way: `applyFieldRecords` keys the Worker
+ * Record tick on the field record's own id, and `seedReplantRounds` has
+ * already put the replant into `NURSERY_PLOTS` off the ledger without
+ * anybody pressing Save. What the office then sees, until they do press it,
+ * is the record named under `_fieldUnpaired` — work that reached them and
+ * paired with no planned round. Named, never silent.
  */
-export function periodTasks(schedule, week, { plotFilter = null } = {}) {
+export function periodTasks(
+  schedule, week, { plotFilter = null, replantsStanding = null } = {}
+) {
   const byType = mergeWeekTasks(schedule, week);
   const out = [];
   WORK_TYPES.forEach((wt) => {
@@ -43,6 +100,22 @@ export function periodTasks(schedule, week, { plotFilter = null } = {}) {
         nursery: task.nursery || null,
         side: task.side || null,
       });
+    });
+  });
+
+  /* The replants, after the schedule's own rows and off them — so a parent
+     the boundary filtered out carries nothing with it, and the sort below
+     puts each replant beside its parent whichever order they arrived in. */
+  (replantsStanding || []).forEach((rp) => {
+    const parent = replantParent(rp);
+    if (!parent) return;
+    /* A SNAPSHOT, so a derived row can never be another row's parent: B4-R2
+       takes B4's rounds and never B4-R's, whatever order they come in. */
+    out.slice().forEach((task) => {
+      if (plotKey(task.plot) !== parent) return;
+      const id = idOf({ workTypeKey: task.workTypeKey, plot: rp, chemical: task.chemical });
+      if (out.some((o) => o.id === id)) return;    // the office has keyed it
+      out.push({ ...task, id, plot: rp, replantOf: task.plot });
     });
   });
   /* Plot first, then the order the work types are declared in — which is the

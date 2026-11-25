@@ -168,6 +168,18 @@ export default function TaskRow({
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-2">
               <span className="text-[17px] font-black text-slate-800 leading-none">{task.plot}</span>
+              {/* A ROW THE OFFICE DID NOT KEY SAYS SO. This one was derived
+                  from its parent's round because the replant appeared after
+                  the schedule was written and has seedlings standing in it
+                  (see periodTasks) — so without a word on it, a worker meets
+                  a plot on their list that was not there yesterday and has
+                  nothing to read about why. It names the PARENT, which is
+                  the thing that answers the question. */}
+              {task.replantOf && (
+                <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-1.5 py-0.5 uppercase tracking-wide shrink-0">
+                  {t('wk.replantOf', { plot: task.replantOf })}
+                </span>
+              )}
               {task.nursery && (
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate">
                   {task.nursery}
