@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useLang, LangToggle } from '../context/LanguageContext.jsx';
 import { useWorker } from './WorkerAuthContext.jsx';
 import SiramGoButton, { siramGoOn } from '../components/SiramGo.jsx';
+import { MoonIcon, openMataMalam } from '../components/MataMalam.jsx';
 
 function BackArrow() {
   return (
@@ -39,28 +40,9 @@ function CogIcon() {
  * reason: TopNav signs out of Supabase, and there is no Supabase session here
  * to sign out of. Everything else it does, it does the same way.
  */
-// A moon: Mata Malam is the night check-in app.
-function MoonIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="w-[15px] h-[15px]" fill="none" stroke="currentColor" strokeWidth="2.2"
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-    </svg>
-  );
-}
-
-/* Mata Malam (the night check-in app) lives on its own address and enters with
-   the same PIN session as this portal — its database functions start from the
-   same worker_from_token. So the button hands the token over and the guard is
-   not asked for a PIN twice. It rides in the FRAGMENT, which a browser never
-   sends to a server, and Mata Malam takes it out of the address as it reads
-   it. A new tab, so nothing on this screen is left behind. */
-const MATA_MALAM_URL = 'https://mjmelon.github.io/MataMalam/';
-
-function openMataMalam(token) {
-  const url = token ? `${MATA_MALAM_URL}#wt=${encodeURIComponent(token)}` : MATA_MALAM_URL;
-  window.open(url, '_blank', 'noopener');
-}
+/* Mata Malam: the pill below hands this worker's token over. The button,
+   the address and the hand-over are in components/MataMalam.jsx, shared with
+   the FC Portal dock. */
 
 export default function WorkerNav({ title, subtitle, back, book, onSettings, settingsOn }) {
   const { t } = useLang();

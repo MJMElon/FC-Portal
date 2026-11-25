@@ -44,6 +44,7 @@ import VerifyWindow from './VerifyWindow.jsx';
 import CullingWindow from './CullingWindow.jsx';
 import { Train, todayProgress } from './PalmsDock.jsx';
 import { DropIcon, openSiramGo, siramGoOn } from './SiramGo.jsx';
+import { MoonIcon, openMataMalam } from './MataMalam.jsx';
 
 const POS_KEY = 'mjm_dock_pos_v1';
 const SIZE = 62;      // the trigger, in px
@@ -247,6 +248,7 @@ export default function FloatingDock() {
       // tapping it again is how you pop it back in, now that there is no
       // backdrop behind the window to tap instead.
       if (soloRef.current === 'siram') { openSiramGo(); return; }
+      if (soloRef.current === 'mata') { openMataMalam(); return; }
       if (soloRef.current) {
         if (open === soloRef.current) closeCurrent(); else setOpen(soloRef.current);
         return;
@@ -284,6 +286,9 @@ export default function FloatingDock() {
      in a new tab and nothing on this screen changes. Shown unless the FC
      Portal column of System Setting, Portal View & Function, switches it
      off (SiramGo.jsx). Last, so it fans out furthest from the thumb. */
+  /* Mata Malam, the night check-in app. A LINK like Siram Go: a new tab,
+     carrying the worker token this phone holds (MataMalam.jsx). */
+  actions.push('mata');
   if (siramGoOn(company)) actions.push('siram');
   // One thing behind it is not a fan. Tapping opens that one thing.
   soloRef.current = actions.length === 1 ? actions[0] : null;
@@ -330,6 +335,7 @@ export default function FloatingDock() {
   function choose(which) {
     setFan(false);
     if (which === 'siram') { openSiramGo(); return; }
+    if (which === 'mata') { openMataMalam(); return; }
     if (open === which) closeCurrent(); else setOpen(which);
   }
 
@@ -342,6 +348,8 @@ export default function FloatingDock() {
     nelos:  { label: 'Nelos', cls: 'bg-[#efc7e2] border-[#cf6eaf]', icon: <NelosMark />, n: casesLeft },
     verify: { label: t('vrf.title'), cls: 'bg-amber-100 border-amber-400', icon: <VerifyMark />, n: verifyLeft },
     culling: { label: t('cull.title'), cls: 'bg-rose-100 border-rose-400', icon: <CullingMark />, n: 0 },
+    mata:   { label: 'Mata Malam', cls: 'bg-indigo-100 border-indigo-400',
+              icon: <span className="text-indigo-700"><MoonIcon size={22} /></span>, n: 0 },
     siram:  { label: 'Siram Go', cls: 'bg-sky-100 border-sky-400',
               icon: <span className="text-sky-700"><DropIcon size={22} /></span>, n: 0 },
   };
