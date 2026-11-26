@@ -886,3 +886,9 @@ siram_go. Those keys are rows of System Setting → Portal View & Function in
 Absent is ticked (only an explicit off hides); the Worker column is read in
 the dock and kept on the phone, failing open. Nothing ticked draws no coin.
 `tests/the_dock_obeys_its_portal_column.cjs` (7 of 11 fail on the previous code).
+
+**The Worker Portal header drops Mata Malam and Siram Go wherever the coin
+is drawn** (`inCoin` in `WorkerNav.jsx`, which is `useAuth().mayEnter`: a
+staff account signed in on the phone). A worker signed in with the PIN alone
+has no coin, so the two header buttons stay for them, or neither app could
+be reached at all.

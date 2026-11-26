@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useLang, LangToggle } from '../context/LanguageContext.jsx';
 import { useWorker } from './WorkerAuthContext.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 import SiramGoButton, { siramGoOn } from '../components/SiramGo.jsx';
 import { MoonIcon, openMataMalam } from '../components/MataMalam.jsx';
 
@@ -47,6 +48,13 @@ function CogIcon() {
 export default function WorkerNav({ title, subtitle, back, book, onSettings, settingsOn }) {
   const { t } = useLang();
   const { worker, signOut, token, company } = useWorker();
+  /* Mata Malam and Siram Go live in the M coin (FloatingDock.jsx). The coin is
+     drawn over this portal only for a phone also signed in with a staff
+     account, so the header keeps the two buttons ONLY where there is no coin:
+     a worker signed in with the PIN alone, who would otherwise have no way to
+     reach either. */
+  const { mayEnter } = useAuth() || {};
+  const inCoin = !!mayEnter;
 
   const sub = subtitle || t('wk.portal');
 
@@ -104,7 +112,7 @@ export default function WorkerNav({ title, subtitle, back, book, onSettings, set
         </button>
       )}
       {/* Icon only on phones, like Sign Out beside it. */}
-      {worker && (
+      {worker && !inCoin && (
         <button
           onClick={() => openMataMalam(token)}
           title="Mata Malam"
@@ -116,7 +124,7 @@ export default function WorkerNav({ title, subtitle, back, book, onSettings, set
           <span className="hidden sm:inline">Mata Malam</span>
         </button>
       )}
-      {worker && siramGoOn(company) && <SiramGoButton />}
+      {worker && !inCoin && siramGoOn(company) && <SiramGoButton />}
       <LangToggle />
       {/* Icon only on phones — the words cost ~55px the title needs more. */}
       <button

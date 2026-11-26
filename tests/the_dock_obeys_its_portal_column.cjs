@@ -79,6 +79,14 @@ const LABELS = { palms: 'PALMS', nelos: 'Nelos', culling: null, verify: null, ma
     console.log('  (office repository not beside this one, key check skipped)');
   }
 
+  {
+    const wnav = fs.readFileSync(path.join(ROOT, 'src/worker/WorkerNav.jsx'), 'utf8');
+    ok('the Worker Portal header drops Mata Malam where the coin carries it',
+      /worker && !inCoin && \(\s*<button\s+onClick=\{\(\) => openMataMalam/.test(wnav));
+    ok('and Siram Go', /worker && !inCoin && siramGoOn\(company\) && <SiramGoButton/.test(wnav));
+    ok('the coin is there exactly when a staff account is signed in', /const inCoin = !!mayEnter;/.test(wnav));
+  }
+
   const built = await esbuild.build({
     stdin: { contents: ENTRY, resolveDir: path.join(ROOT, 'src'), loader: 'jsx' },
     bundle: true, write: false, format: 'iife', jsx: 'automatic',
