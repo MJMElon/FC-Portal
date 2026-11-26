@@ -43,8 +43,32 @@ import NelosWindow from './NelosWindow.jsx';
 import VerifyWindow from './VerifyWindow.jsx';
 import CullingWindow from './CullingWindow.jsx';
 import { Train, todayProgress } from './PalmsDock.jsx';
-import { DropIcon, openSiramGo, siramGoOn } from './SiramGo.jsx';
+import { DropIcon, openSiramGo } from './SiramGo.jsx';
 import { MoonIcon, openMataMalam } from './MataMalam.jsx';
+import { supabase } from '../lib/supabase.js';
+import { dockActionOn, dockPortalOf } from '../lib/portalSettings.js';
+
+/* The Worker Portal column of System Setting, for the dock drawn over the
+   Worker Portal. The FC column comes in with the sign-in (AuthContext); this
+   one is read here, kept on the phone so a dock with no signal obeys the
+   last answer it had, and FAILS OPEN — no answer is nothing switched off. */
+const WORKER_COLUMN_KEY = 'mjm.dock.workerColumn.v1';
+function cachedWorkerColumn() {
+  try { return JSON.parse(localStorage.getItem(WORKER_COLUMN_KEY) || 'null'); } catch (e) { return null; }
+}
+async function loadWorkerColumn() {
+  try {
+    const { data, error } = await supabase
+      .from('shared_portal_settings').select('modules, actions')
+      .eq('portal', 'worker').maybeSingle();
+    if (error) return undefined;
+    const col = data ? { modules: data.modules || {}, actions: data.actions || {} } : null;
+    try { localStorage.setItem(WORKER_COLUMN_KEY, JSON.stringify(col)); } catch (e) { /* private mode */ }
+    return col;
+  } catch (e) {
+    return undefined;
+  }
+}
 
 const POS_KEY = 'mjm_dock_pos_v1';
 const SIZE = 62;      // the trigger, in px
@@ -120,6 +144,17 @@ export default function FloatingDock() {
   const { mayEnter, permissions, company } = useAuth();
   const { t } = useLang();
   const location = useLocation();
+  const portal = dockPortalOf(location.pathname);
+  const [workerColumn, setWorkerColumn] = useState(cachedWorkerColumn);
+  useEffect(() => {
+    if (portal !== 'worker' || !mayEnter) return undefined;
+    let live = true;
+    loadWorkerColumn().then((col) => { if (live && col !== undefined) setWorkerColumn(col); });
+    return () => { live = false; };
+  }, [portal, mayEnter]);
+  /* The column of the portal this dock is standing in. */
+  const column = portal === 'worker' ? workerColumn : company;
+  const on = (action) => dockActionOn(column, action);
 
   const [pos, setPos] = useState(null);          // set on mount, once measurable
   const [dragging, setDragging] = useState(false);
@@ -271,15 +306,16 @@ export default function FloatingDock() {
   if (!mayEnter) return null;
   if (!pos) return null;
 
-  const mayPalms = canPalms(permissions, 'view') && !location.pathname.startsWith('/palms');
+  const mayPalms = on('palms') && canPalms(permissions, 'view') && !location.pathname.startsWith('/palms');
   /* Nelos is not a PALMS permission. Anybody signed in to the portal can be
      sent a case, so anybody signed in can read their own list — what they
      may see inside it is nelos_my_scope()'s answer, not this button's. */
-  const mayVerify = canDo(permissions, 'view') || canMaintain(permissions, 'view');
-  const mayCulling = canCulling(permissions, 'view') && !location.pathname.startsWith('/culling');
+  const mayVerify = on('verify') && (canDo(permissions, 'view') || canMaintain(permissions, 'view'));
+  const mayCulling = on('culling') && canCulling(permissions, 'view') && !location.pathname.startsWith('/culling');
+  const mayNelos = on('nelos');
   const actions = [];
   if (mayPalms) actions.push('palms');
-  actions.push('nelos');
+  if (mayNelos) actions.push('nelos');
   if (mayVerify) actions.push('verify');
   if (mayCulling) actions.push('culling');
   /* Siram Go, the watering log. A LINK and not a window: it opens the form
@@ -288,14 +324,18 @@ export default function FloatingDock() {
      off (SiramGo.jsx). Last, so it fans out furthest from the thumb. */
   /* Mata Malam, the night check-in app. A LINK like Siram Go: a new tab,
      carrying the worker token this phone holds (MataMalam.jsx). */
-  actions.push('mata');
-  if (siramGoOn(company)) actions.push('siram');
+  /* Every action obeys the column of the portal it is drawn over — see
+     dockActionOn in lib/portalSettings.js. */
+  if (on('mata')) actions.push('mata');
+  if (on('siram')) actions.push('siram');
   // One thing behind it is not a fan. Tapping opens that one thing.
   soloRef.current = actions.length === 1 ? actions[0] : null;
+  // Everything switched off for this portal: no coin with nothing behind it.
+  if (!actions.length) return null;
 
   const steaming = progress.total > 0 && progress.done >= progress.total;
   const plotsLeft = mayPalms ? Math.max(0, progress.total - progress.done) : 0;
-  const casesLeft = cases || 0;
+  const casesLeft = mayNelos ? (cases || 0) : 0;
   const verifyLeft = mayVerify ? (verifyCount || 0) : 0;
   const total = plotsLeft + casesLeft + verifyLeft;
   const label = total

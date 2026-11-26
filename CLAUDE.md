@@ -872,3 +872,17 @@ one button is **Save & Continue** (it read Save & Sign DO).
   closing threw away a signed form. Cancel still closes.
 
 `tests/a_scanned_do_is_complete_before_it_saves.cjs` renders the real form; 12 of its checks fail on the previous code.
+
+## The dock obeys the column of the portal it is drawn over
+
+The floating dock (the M coin) is drawn over the Worker Portal too, on a
+phone also signed in with a staff account, and it read only the FC Portal
+column, so PALMS, Culling and NELOS unticked for workers still showed there.
+`dockPortalOf(pathname)` picks the column (`/worker` → Worker, else FC) and
+`dockActionOn(column, action)` decides each action off `DOCK_ACTION_KEY` in
+`src/lib/portalSettings.js`: palms, culling, nelos, verify, mata_malam,
+siram_go. Those keys are rows of System Setting → Portal View & Function in
+`mjm-ai-system/scan/scan_system_setting.html`. Change one, change the other.
+Absent is ticked (only an explicit off hides); the Worker column is read in
+the dock and kept on the phone, failing open. Nothing ticked draws no coin.
+`tests/the_dock_obeys_its_portal_column.cjs` (7 of 11 fail on the previous code).

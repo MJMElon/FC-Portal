@@ -210,3 +210,34 @@ export function hiddenModules(company) {
   const mods = (company && company.modules) || {};
   return Object.keys(mods).filter((k) => mods[k] === false);
 }
+
+/**
+ * The floating dock (FloatingDock.jsx) and the column it obeys.
+ *
+ * The dock is drawn over BOTH portals: the FC Portal, and the Worker Portal
+ * on a phone that is also signed in with a staff account. So it reads the
+ * column of the portal it is standing in — the Worker Portal column on
+ * `/worker`, the FC Portal column everywhere else — and each action is shown
+ * only while that column has it ticked. Absent is ticked, which is how the
+ * office screen draws an unsaved switch, so only an explicit OFF hides one.
+ *
+ * Each action is ONE row of System Setting → Portal View & Function. The keys
+ * are spelled in PORTAL_MODULES in mjm-ai-system/scan/scan_system_setting.html
+ * too. Change one, change the other.
+ */
+export const DOCK_ACTION_KEY = {
+  palms: 'palms',
+  culling: 'culling',
+  nelos: 'nelos',
+  verify: 'verify',
+  mata: 'mata_malam',
+  siram: 'siram_go',
+};
+
+export const dockPortalOf = (pathname) =>
+  (String(pathname || '').startsWith('/worker') ? 'worker' : 'fc');
+
+export function dockActionOn(company, action) {
+  const key = DOCK_ACTION_KEY[action];
+  return !key || !moduleVetoed(company, key);
+}
