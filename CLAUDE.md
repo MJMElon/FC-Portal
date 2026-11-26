@@ -895,3 +895,10 @@ offers ONLY Mata Malam and Siram Go: a PIN sign-in is `anon` and cannot read
 what PALMS, Culling, NELOS or Pending Verification read. Each still obeys the
 Worker Portal column (`identity.company`, handed over at sign-in), and with
 both off there is no coin.
+
+**And each worker's own record can take either away.** The Jobs ticks on
+the Worker Namelist (office) are `portal.modules.mata_malam` / `.siram_go`,
+handed to the phone by `worker_portal` and passed in as
+`pinWorker.modules`; only an explicit false hides one. The database also
+refuses a Mata Malam check-in for an untick
+(`shared/RUN_ME_worker_jobs.sql` in the office repository).

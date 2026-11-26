@@ -157,6 +157,14 @@ const LABELS = { palms: 'PALMS', nelos: 'Nelos', culling: null, verify: null, ma
   const pw3 = await fan('#/worker', null, null, { token: 't', company: { modules: { siram_go: false, mata_malam: false }, actions: {} } });
   ok('both unticked: no coin', !pw3.trigger);
 
+  console.log('7. the jobs ticked on the worker own record');
+  const pw4 = await fan('#/worker', null, null, { token: 't', company: { modules: {}, actions: {} }, modules: { mata_malam: false } });
+  ok('Mata Malam unticked on the record: the coin opens Siram Go alone, no fan', pw4.trigger && pw4.labels.length === 0, pw4.labels);
+  const pw5 = await fan('#/worker', null, null, { token: 't', company: { modules: {}, actions: {} }, modules: { mata_malam: false, siram_go: false } });
+  ok('both unticked on the record: no coin', !pw5.trigger);
+  const pw6 = await fan('#/worker', null, null, { token: 't', company: { modules: {}, actions: {} }, modules: { maintenance: true } });
+  ok('a record that says nothing about them keeps both (absent is on)', JSON.stringify(pw6.labels.slice().sort()) === JSON.stringify(['Mata Malam', 'Siram Go']), pw6.labels);
+
   await browser.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
