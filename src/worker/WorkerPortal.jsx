@@ -5,6 +5,20 @@ import { WorkerAuthProvider, useWorker } from './WorkerAuthContext.jsx';
 import WorkerCover from './WorkerCover.jsx';
 import WorkerHome from './WorkerHome.jsx';
 import WorkerSettings from './WorkerSettings.jsx';
+import FloatingDock from '../components/FloatingDock.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
+
+/* The M coin for a worker signed in with the PIN alone. A phone that also
+   holds a staff account already has the app-wide coin (App.jsx), reading the
+   Worker Portal column, so this one is drawn only where that one is not.
+   It offers only what such a worker can reach: Mata Malam and Siram Go, as
+   ticked in the Worker Portal column of Portal View & Function. */
+function PinWorkerDock() {
+  const { mayEnter } = useAuth() || {};
+  const { company, token } = useWorker();
+  if (mayEnter) return null;
+  return <FloatingDock pinWorker={{ company, token }} />;
+}
 
 /*
  * The 555 Worker Portal — the second front door on scan.mjmnursery.com.
@@ -84,6 +98,7 @@ export default function WorkerPortal() {
           />
           <Route path="*" element={<Navigate to="/worker" replace />} />
         </Routes>
+        <PinWorkerDock />
       </Gate>
     </WorkerAuthProvider>
   );

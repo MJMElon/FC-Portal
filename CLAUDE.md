@@ -887,8 +887,11 @@ Absent is ticked (only an explicit off hides); the Worker column is read in
 the dock and kept on the phone, failing open. Nothing ticked draws no coin.
 `tests/the_dock_obeys_its_portal_column.cjs` (7 of 11 fail on the previous code).
 
-**The Worker Portal header drops Mata Malam and Siram Go wherever the coin
-is drawn** (`inCoin` in `WorkerNav.jsx`, which is `useAuth().mayEnter`: a
-staff account signed in on the phone). A worker signed in with the PIN alone
-has no coin, so the two header buttons stay for them, or neither app could
-be reached at all.
+**Every signed-in worker gets the coin, and the header carries neither link.**
+A phone with a staff account has the app-wide coin. A worker signed in with
+the PIN alone gets the Worker Portal own (`PinWorkerDock` in
+`WorkerPortal.jsx`, `FloatingDock pinWorker={{company, token}}`), which
+offers ONLY Mata Malam and Siram Go: a PIN sign-in is `anon` and cannot read
+what PALMS, Culling, NELOS or Pending Verification read. Each still obeys the
+Worker Portal column (`identity.company`, handed over at sign-in), and with
+both off there is no coin.

@@ -67,7 +67,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 (async () => {
   console.log('1. the sources');
   const wnav = strip(fs.readFileSync(path.join(ROOT, 'src/worker/WorkerNav.jsx'), 'utf8'));
-  ok('the Worker Portal pill reads the SAME opener as the dock', /from '\.\.\/components\/MataMalam\.jsx'/.test(wnav) && /openMataMalam\(token\)/.test(wnav));
+  ok('the Worker Portal header carries no Mata Malam pill: it is in the coin', !/openMataMalam/.test(wnav));
   ok('and keeps no second copy of the address', !/mjmelon\.github\.io\/MataMalam/.test(wnav));
 
   const built = await esbuild.build({

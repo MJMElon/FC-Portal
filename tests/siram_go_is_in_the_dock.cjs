@@ -64,7 +64,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   const top = strip(fs.readFileSync(path.join(ROOT, 'src/components/TopNav.jsx'), 'utf8'));
   const wnav = strip(fs.readFileSync(path.join(ROOT, 'src/worker/WorkerNav.jsx'), 'utf8'));
   ok('the FC Portal header no longer carries Siram Go', !/Siram|SiramGo/.test(top));
-  ok('the Worker Portal header still does, behind its switch', /siramGoOn\(company\)\s*&&\s*<SiramGoButton/.test(wnav));
+  ok('nor does the Worker Portal header: it is in the coin', !/SiramGoButton/.test(wnav));
 
   const built = await esbuild.build({
     stdin: { contents: ENTRY, resolveDir: path.join(ROOT, 'src'), loader: 'jsx' },

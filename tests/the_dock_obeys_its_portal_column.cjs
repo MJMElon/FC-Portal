@@ -54,7 +54,7 @@ import { HashRouter } from 'react-router-dom';
 import FloatingDock from './components/FloatingDock.jsx';
 import { LanguageProvider } from './context/LanguageContext.jsx';
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <HashRouter><LanguageProvider><FloatingDock /></LanguageProvider></HashRouter>
+  <HashRouter><LanguageProvider><FloatingDock pinWorker={window.__PIN} /></LanguageProvider></HashRouter>
 );`;
 
 
@@ -80,11 +80,11 @@ const LABELS = { palms: 'PALMS', nelos: 'Nelos', culling: null, verify: null, ma
   }
 
   {
-    const wnav = fs.readFileSync(path.join(ROOT, 'src/worker/WorkerNav.jsx'), 'utf8');
-    ok('the Worker Portal header drops Mata Malam where the coin carries it',
-      /worker && !inCoin && \(\s*<button\s+onClick=\{\(\) => openMataMalam/.test(wnav));
-    ok('and Siram Go', /worker && !inCoin && siramGoOn\(company\) && <SiramGoButton/.test(wnav));
-    ok('the coin is there exactly when a staff account is signed in', /const inCoin = !!mayEnter;/.test(wnav));
+    const strip = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+    const wnav = strip(fs.readFileSync(path.join(ROOT, 'src/worker/WorkerNav.jsx'), 'utf8'));
+    ok('the Worker Portal header carries neither Mata Malam nor Siram Go', !/openMataMalam|SiramGoButton/.test(wnav));
+    const wp = strip(fs.readFileSync(path.join(ROOT, 'src/worker/WorkerPortal.jsx'), 'utf8'));
+    ok('the Worker Portal draws its own coin for a PIN-only worker', /<PinWorkerDock \/>/.test(wp) && /if \(mayEnter\) return null;/.test(wp));
   }
 
   const built = await esbuild.build({
@@ -97,7 +97,7 @@ const LABELS = { palms: 'PALMS', nelos: 'Nelos', culling: null, verify: null, ma
   const bundle = built.outputFiles[0].text;
   const browser = await chromium.launch();
 
-  async function fan(hash, company, workerCol) {
+  async function fan(hash, company, workerCol, pin) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 800 } });
     const page = await ctx.newPage();
     const errors = [];
@@ -105,10 +105,11 @@ const LABELS = { palms: 'PALMS', nelos: 'Nelos', culling: null, verify: null, ma
     await ctx.route('**/*', (route) => route.fulfill({ status: 200, contentType: 'text/html',
       body: '<!doctype html><meta charset="utf-8"><div id="root"></div><script>' +
         bundle.replace(/<\/script/g, '<\\/script') + '</script>' }));
-    await page.addInitScript(([company, workerCol]) => {
-      window.__AUTH = { mayEnter: true, permissions: {}, company };
+    await page.addInitScript(([company, workerCol, pin]) => {
+      window.__AUTH = { mayEnter: !pin, permissions: {}, company };
       window.__WORKER_COL = workerCol;
-    }, [company, workerCol]);
+      window.__PIN = pin || undefined;
+    }, [company, workerCol, pin || null]);
     await page.goto('http://harness.test/' + hash);
     await page.waitForTimeout(400);
     const trigger = (await page.locator('[data-dock-trigger]').count()) === 1;
@@ -144,6 +145,17 @@ const LABELS = { palms: 'PALMS', nelos: 'Nelos', culling: null, verify: null, ma
   console.log('5. everything unticked: no coin at all');
   const none = await fan('#/worker', null, { modules: { palms: false, culling: false, nelos: false, verify: false, mata_malam: false, siram_go: false }, actions: {} });
   ok('the coin is not drawn', !none.trigger);
+
+  console.log('6. a worker signed in with the PIN alone: the Worker Portal own coin');
+  const pw = await fan('#/worker', null, null, { token: 't', company: { modules: {}, actions: {} } });
+  ok('the coin is drawn', pw.trigger);
+  ok('it offers Mata Malam and Siram Go and nothing a PIN cannot open', JSON.stringify(pw.labels.slice().sort()) === JSON.stringify(['Mata Malam', 'Siram Go']), pw.labels);
+  ok('no page error', !pw.errors.length, pw.errors);
+  const pw2 = await fan('#/worker', null, null, { token: 't', company: { modules: { siram_go: false }, actions: {} } });
+  /* One action left is no fan: the coin itself opens it, so nothing fans out. */
+  ok('the Worker Portal column still decides (Siram Go off leaves Mata Malam alone, no fan)', pw2.trigger && pw2.labels.length === 0, pw2.labels);
+  const pw3 = await fan('#/worker', null, null, { token: 't', company: { modules: { siram_go: false, mata_malam: false }, actions: {} } });
+  ok('both unticked: no coin', !pw3.trigger);
 
   await browser.close();
   console.log(`\n${pass} passed, ${fail} failed`);

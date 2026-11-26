@@ -1,9 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useLang, LangToggle } from '../context/LanguageContext.jsx';
 import { useWorker } from './WorkerAuthContext.jsx';
-import { useAuth } from '../context/AuthContext.jsx';
-import SiramGoButton, { siramGoOn } from '../components/SiramGo.jsx';
-import { MoonIcon, openMataMalam } from '../components/MataMalam.jsx';
 
 function BackArrow() {
   return (
@@ -41,20 +38,10 @@ function CogIcon() {
  * reason: TopNav signs out of Supabase, and there is no Supabase session here
  * to sign out of. Everything else it does, it does the same way.
  */
-/* Mata Malam: the pill below hands this worker's token over. The button,
-   the address and the hand-over are in components/MataMalam.jsx, shared with
-   the FC Portal dock. */
 
 export default function WorkerNav({ title, subtitle, back, book, onSettings, settingsOn }) {
   const { t } = useLang();
-  const { worker, signOut, token, company } = useWorker();
-  /* Mata Malam and Siram Go live in the M coin (FloatingDock.jsx). The coin is
-     drawn over this portal only for a phone also signed in with a staff
-     account, so the header keeps the two buttons ONLY where there is no coin:
-     a worker signed in with the PIN alone, who would otherwise have no way to
-     reach either. */
-  const { mayEnter } = useAuth() || {};
-  const inCoin = !!mayEnter;
+  const { worker, signOut } = useWorker();
 
   const sub = subtitle || t('wk.portal');
 
@@ -111,20 +98,9 @@ export default function WorkerNav({ title, subtitle, back, book, onSettings, set
           <CogIcon />
         </button>
       )}
-      {/* Icon only on phones, like Sign Out beside it. */}
-      {worker && !inCoin && (
-        <button
-          onClick={() => openMataMalam(token)}
-          title="Mata Malam"
-          aria-label="Mata Malam"
-          data-testid="open-mata-malam"
-          className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 border-indigo-200 uppercase tracking-wider sm:tracking-widest px-2.5 sm:px-3 py-2 rounded-full border cursor-pointer transition-colors shrink-0"
-        >
-          <MoonIcon />
-          <span className="hidden sm:inline">Mata Malam</span>
-        </button>
-      )}
-      {worker && !inCoin && siramGoOn(company) && <SiramGoButton />}
+      {/* Mata Malam and Siram Go are in the M coin now, for every worker:
+          the app-wide coin on a phone with a staff account, the Worker
+          Portal's own (PinWorkerDock) on one signed in with the PIN alone. */}
       <LangToggle />
       {/* Icon only on phones — the words cost ~55px the title needs more. */}
       <button

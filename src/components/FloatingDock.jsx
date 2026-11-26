@@ -140,20 +140,28 @@ function CullingMark() {
    nothing on the far face because it had no far face. Its styles have gone
    from index.css with it rather than being left behind unused. */
 
-export default function FloatingDock() {
-  const { mayEnter, permissions, company } = useAuth();
+/* `pinWorker` is the Worker Portal drawing its own coin for somebody signed
+   in with the PIN alone ({ company, token }): no staff account on the phone.
+   Such a worker is `anon` and cannot read what PALMS, the Culling Calculator,
+   NELOS or Pending Verification read, so only the two links are offered,
+   each still obeying the Worker Portal column (company). */
+export default function FloatingDock({ pinWorker } = {}) {
+  const auth = useAuth();
+  const mayEnter = pinWorker ? true : auth.mayEnter;
+  const permissions = pinWorker ? {} : auth.permissions;
+  const company = auth.company;
   const { t } = useLang();
   const location = useLocation();
   const portal = dockPortalOf(location.pathname);
   const [workerColumn, setWorkerColumn] = useState(cachedWorkerColumn);
   useEffect(() => {
-    if (portal !== 'worker' || !mayEnter) return undefined;
+    if (pinWorker || portal !== 'worker' || !mayEnter) return undefined;
     let live = true;
     loadWorkerColumn().then((col) => { if (live && col !== undefined) setWorkerColumn(col); });
     return () => { live = false; };
   }, [portal, mayEnter]);
   /* The column of the portal this dock is standing in. */
-  const column = portal === 'worker' ? workerColumn : company;
+  const column = pinWorker ? pinWorker.company : (portal === 'worker' ? workerColumn : company);
   const on = (action) => dockActionOn(column, action);
 
   const [pos, setPos] = useState(null);          // set on mount, once measurable
@@ -183,6 +191,7 @@ export default function FloatingDock() {
      window is for; this is the badge. Fails soft to null — no badge — so a
      case log that cannot be reached never reads as "nothing pending". */
   const refreshCases = useCallback(async () => {
+    if (pinWorker) return;
     try {
       const { rows, failed } = await pendingCases({ module: 'scan' });
       setCases(failed ? null : rows.length);
@@ -202,7 +211,7 @@ export default function FloatingDock() {
   const verifySig = `${canDo(permissions, 'view') ? 1 : 0}${canMaintain(permissions, 'view') ? 1 : 0}|` +
     (allowedNurseries(permissions, 'maintenance') || []).join(',');
   const refreshVerify = useCallback(
-    async () => setVerifyCount(await pendingVerifyCount(permissions)),
+    async () => { if (!pinWorker) setVerifyCount(await pendingVerifyCount(permissions)); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [verifySig]
   );
@@ -219,7 +228,7 @@ export default function FloatingDock() {
        cache, a phone that had ever opened PALMS kept its old list for good —
        which is how entries went on being keyed as "Stage 12" (Up-keep) weeks
        after the office took it off the list. */
-    refreshOfficeConfig().then((ok) => { if (live && ok) refreshPalms(); });
+    if (!pinWorker) refreshOfficeConfig().then((ok) => { if (live && ok) refreshPalms(); });
     return () => { live = false; };
   }, [refreshPalms]);
 
@@ -283,7 +292,7 @@ export default function FloatingDock() {
       // tapping it again is how you pop it back in, now that there is no
       // backdrop behind the window to tap instead.
       if (soloRef.current === 'siram') { openSiramGo(); return; }
-      if (soloRef.current === 'mata') { openMataMalam(); return; }
+      if (soloRef.current === 'mata') { openMataMalam(pinWorker ? pinWorker.token : undefined); return; }
       if (soloRef.current) {
         if (open === soloRef.current) closeCurrent(); else setOpen(soloRef.current);
         return;
@@ -306,13 +315,14 @@ export default function FloatingDock() {
   if (!mayEnter) return null;
   if (!pos) return null;
 
-  const mayPalms = on('palms') && canPalms(permissions, 'view') && !location.pathname.startsWith('/palms');
+  const staff = !pinWorker;
+  const mayPalms = staff && on('palms') && canPalms(permissions, 'view') && !location.pathname.startsWith('/palms');
   /* Nelos is not a PALMS permission. Anybody signed in to the portal can be
      sent a case, so anybody signed in can read their own list — what they
      may see inside it is nelos_my_scope()'s answer, not this button's. */
-  const mayVerify = on('verify') && (canDo(permissions, 'view') || canMaintain(permissions, 'view'));
-  const mayCulling = on('culling') && canCulling(permissions, 'view') && !location.pathname.startsWith('/culling');
-  const mayNelos = on('nelos');
+  const mayVerify = staff && on('verify') && (canDo(permissions, 'view') || canMaintain(permissions, 'view'));
+  const mayCulling = staff && on('culling') && canCulling(permissions, 'view') && !location.pathname.startsWith('/culling');
+  const mayNelos = staff && on('nelos');
   const actions = [];
   if (mayPalms) actions.push('palms');
   if (mayNelos) actions.push('nelos');
@@ -375,7 +385,7 @@ export default function FloatingDock() {
   function choose(which) {
     setFan(false);
     if (which === 'siram') { openSiramGo(); return; }
-    if (which === 'mata') { openMataMalam(); return; }
+    if (which === 'mata') { openMataMalam(pinWorker ? pinWorker.token : undefined); return; }
     if (open === which) closeCurrent(); else setOpen(which);
   }
 
