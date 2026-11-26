@@ -336,8 +336,14 @@ export default function FloatingDock({ pinWorker } = {}) {
      carrying the worker token this phone holds (MataMalam.jsx). */
   /* Every action obeys the column of the portal it is drawn over — see
      dockActionOn in lib/portalSettings.js. */
-  if (on('mata')) actions.push('mata');
-  if (on('siram')) actions.push('siram');
+  /* A worker signed in with the PIN carries the jobs ticked on their record
+     on the Worker Namelist (portal.modules). Only an explicit OFF hides one:
+     absent is on, which is every worker until somebody unticks them. The
+     database refuses a Mata Malam check-in for an untick too. A staff login
+     is not a register row, so the portal column alone decides for it. */
+  const mine = (pinWorker && pinWorker.modules) || {};
+  if (on('mata') && mine.mata_malam !== false) actions.push('mata');
+  if (on('siram') && mine.siram_go !== false) actions.push('siram');
   // One thing behind it is not a fan. Tapping opens that one thing.
   soloRef.current = actions.length === 1 ? actions[0] : null;
   // Everything switched off for this portal: no coin with nothing behind it.

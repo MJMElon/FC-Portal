@@ -15,9 +15,9 @@ import { useAuth } from '../context/AuthContext.jsx';
    ticked in the Worker Portal column of Portal View & Function. */
 function PinWorkerDock() {
   const { mayEnter } = useAuth() || {};
-  const { company, token } = useWorker();
+  const { company, token, modules } = useWorker();
   if (mayEnter) return null;
-  return <FloatingDock pinWorker={{ company, token }} />;
+  return <FloatingDock pinWorker={{ company, token, modules }} />;
 }
 
 /*
