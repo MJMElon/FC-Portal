@@ -73,6 +73,10 @@ vm.runInContext([
   line(DATA, /^const plotKey = .*$/m),
   line(DATA, /^export const TRANSPLANT_FLOW_FROM = .*$/m),
   grab(DATA, 'function ', 'logDate'),
+  grab(DATA, 'export function ', 'transplantRowSigned'),
+  /* The sign-off read is stubbed: no answer gates nothing, which is the
+     fail-open rule. a_transplant_waits_for_verify.cjs drives the gate. */
+  'async function loadTransplantSignoffs() { return null; }',
   grab(DATA, 'export async function ', 'loadTransplantingSince'),
   ';globalThis.__load = loadTransplantingSince;',
 ].join('\n'), dctx);
