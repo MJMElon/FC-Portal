@@ -1,6 +1,8 @@
 /* Mata Malam is one of the FC Portal dock's fanned actions too (the M coin).
-   It hands over the worker token this phone holds; with none it opens the app
-   bare, which shows its own notice to come in from the Worker Portal.
+   On the FC Portal it opens as the STAFF ACCOUNT: the database hands over a
+   Mata Malam session of its own (mata_malam_staff_session), even on a phone
+   holding a worker PIN sign-in too, because the FC Portal reads the FC Portal
+   column of System Setting. With no answer it opens the app bare.
    Built on siram_go_is_in_the_dock.cjs. SHOT=/path.png draws the fan.
 
    (Original header:) Siram Go is one of the FC Portal dock's fanned actions, and the Worker
@@ -34,6 +36,7 @@ const STUBS = [
   [/context\/AuthContext\.jsx$/, 'export function useAuth() { return window.__AUTH; }'],
   [/lib\/nelos\.js$/, 'export async function pendingCases() { return { rows: [], failed: false }; }', /FloatingDock\.jsx$/],
   [/lib\/verifyCount\.js$/, 'export async function pendingVerifyCount() { return 0; }', /FloatingDock\.jsx$/],
+  [/lib\/supabase\.js$/, 'export const supabase = { rpc: async (n) => window.__RPC_FAIL ? { data: null, error: { message: "no" } } : { data: n === "mata_malam_staff_session" ? "11111111-2222-3333-4444-555555555555" : null, error: null } };', /MataMalam\.jsx$/],
   [/modules\/palms\/officeConfig\.js$/, 'export function applyCachedOfficeConfig() {} export async function refreshOfficeConfig() {}'],
   [/components\/(PalmsWindow|NelosWindow|VerifyWindow|CullingWindow)\.jsx$/, 'export default function W() { return <div id="win" />; }'],
 ];
@@ -81,7 +84,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   const css = process.env.CSS ? fs.readFileSync(process.env.CSS, 'utf8') : '';
   const browser = await chromium.launch();
 
-  async function open(token) {
+  async function open(token, rpcFail) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 800 } });
     const page = await ctx.newPage();
     const errors = [];
@@ -94,10 +97,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       }
       return route.fulfill({ status: 200, contentType: 'text/html', body: 'mata malam' });
     });
-    await page.addInitScript((token) => {
+    await page.addInitScript(([token, rpcFail]) => {
+      window.__RPC_FAIL = !!rpcFail;
       window.__AUTH = { mayEnter: true, permissions: {}, company: null };
       if (token) localStorage.setItem('mjm_worker_token', token); else localStorage.removeItem('mjm_worker_token');
-    }, token);
+    }, [token, rpcFail]);
     await page.goto('http://harness.test/#/');
     await page.waitForSelector('[data-dock-trigger]', { timeout: 5000 }).catch(() => {});
     await page.click('[data-dock-trigger]').catch(() => {});
@@ -105,18 +109,21 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     return { ctx, page, errors };
   }
 
-  for (const [token, want, name] of [
-    ['tok-123', MM + '#wt=tok-123', 'a phone signed in to the Worker Portal hands its token over'],
-    [null, MM, 'a phone with no worker sign-in opens Mata Malam bare'],
+  const STAFF = MM + '#wt=11111111-2222-3333-4444-555555555555';
+  for (const [token, rpcFail, want, name] of [
+    [null, false, STAFF, 'a staff login opens Mata Malam as itself'],
+    ['tok-123', false, STAFF, 'the FC Portal is the staff account even on a phone holding a worker PIN'],
+    [null, true, MM, 'with no answer from the database it opens bare'],
   ]) {
     console.log('2. ' + name);
-    const { ctx, page, errors } = await open(token);
+    const { ctx, page, errors } = await open(token, rpcFail);
     const btn = page.locator('button[aria-label="Mata Malam"]');
     ok('the fan carries Mata Malam', (await btn.count()) === 1);
     if (process.env.SHOT && token) await page.screenshot({ path: process.env.SHOT });
     const popup = page.waitForEvent('popup', { timeout: 3000 }).catch(() => null);
     await btn.click().catch(() => {});
     const p = await popup;
+    if (p) await p.waitForURL((u) => String(u) !== 'about:blank', { timeout: 3000 }).catch(() => {});
     ok(name, !!p && p.url() === want, p && p.url());
     ok('no window opens over the portal, and the fan folds', (await page.locator('#win').count()) === 0 && (await btn.count()) === 0);
     ok('no page error', errors.length === 0, errors);
