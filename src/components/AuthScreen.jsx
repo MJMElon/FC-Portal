@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import CoverLang from './CoverLang.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
 import { BOOK_COVER_CSS, COVER_BLUE } from './bookCover.js';
 import { hasOffline, openOffline, sealOffline } from '../lib/offlineVault.js';
@@ -25,9 +26,9 @@ function neverReachedServer(error) {
 // The Auditor Portal wears the same cover in pink. Only the colour differs,
 // exactly like the books themselves.
 //
-// Nothing on this screen but signing in — no language toggle, no controls.
-// Everything the app does appears once you are through the door; the
-// toggle lives in TopNav, on every screen behind it.
+// Nothing on this screen but signing in, and the EN | BM toggle (CoverLang),
+// which the office asked for on every front-door cover. Everything else the
+// app does appears once you are through the door.
 export default function AuthScreen({ onBack } = {}) {
   const { recovering, setRecovering, allowed } = useAuth();
   const { t } = useLang();
@@ -138,6 +139,7 @@ export default function AuthScreen({ onBack } = {}) {
 
         <div className="bk-cover">
           <div className="bk-smudge" aria-hidden="true" />
+          <CoverLang />
 
           {/* The cover reads top to bottom: who it belongs to, the book, the
               portal it opens. 555 is the hero — the rest is small print. */}

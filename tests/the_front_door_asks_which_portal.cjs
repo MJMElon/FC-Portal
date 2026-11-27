@@ -172,6 +172,22 @@ const TOKEN_KEY = 'sb-stub-auth-token';
     await ctx.close();
   }
 
+  console.log('\nEvery front-door cover can switch EN and BM');
+  {
+    const { ctx, page } = await open({ session: null, profile: { data: null, error: null } });
+    ok('the chooser carries the switch', await has(page, '.bk-lang [data-lang="ms"]'));
+    await page.click('.bk-lang [data-lang="ms"]'); await page.waitForTimeout(150);
+    const txt = await page.evaluate(() => document.body.textContent);
+    ok('BM changes the chooser words', /Portal yang mana\?/.test(txt) && /Pekerja/.test(txt), txt.slice(0, 200));
+    ok('…and is remembered for after login', (await page.evaluate(() => localStorage.getItem('mjm.lang'))) === 'ms');
+    await page.click('[data-pick="fc"]'); await page.waitForTimeout(150);
+    ok('the FC login carries the switch too, still on BM',
+      await has(page, '.bk-lang [data-lang="ms"].on') && /Portal FC/.test(await page.evaluate(() => document.body.textContent)));
+    await page.click('.bk-lang [data-lang="en"]'); await page.waitForTimeout(150);
+    ok('EN switches it back', /FC Portal/.test(await page.evaluate(() => document.body.textContent)));
+    await ctx.close();
+  }
+
   console.log('\nSigned in staff: straight in, no chooser');
   {
     const { ctx, page } = await open({ session: SESSION, profile: { data: { role: 'staff', user_type: 'staff', permissions: STAFF_PERMS }, error: null } },
@@ -191,6 +207,7 @@ const TOKEN_KEY = 'sb-stub-auth-token';
 
   console.log('\nThe source');
   const wc = fs.readFileSync(path.join(ROOT, 'src/worker/WorkerCover.jsx'), 'utf8');
+  ok('the Worker PIN cover carries the language switch', /<CoverLang \/>/.test(wc));
   ok('the Worker PIN cover has a way back to the chooser', /data-back-to-chooser/.test(wc) && /navigate\('\/'\)/.test(wc));
 
   await browser.close();

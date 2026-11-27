@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import CoverLang from './CoverLang.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
 import { BOOK_COVER_CSS, COVER_BLUE, COVER_OCHRE } from './bookCover.js';
 
@@ -40,6 +41,7 @@ export default function PortalChooser({ onFC }) {
         <div className="bk-edges" aria-hidden="true"><i /><i /><i /></div>
         <div className="bk-cover">
           <div className="bk-smudge" aria-hidden="true" />
+          <CoverLang />
           <div className="bk-brand">MJM Nursery</div>
           <div className="bk-logo-wrap">
             <div className="bk-logo">555</div>

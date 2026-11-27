@@ -17,7 +17,8 @@ What is specific to this repository:
 - **`/` asks which portal first.** Somebody not signed in sees
   `PortalChooser` (Field Conductor or Worker); FC shows `AuthScreen` on the
   same address, Worker goes to `/#/worker` and its PIN cover. Both logins
-  carry a way back. A reset link or a signed-in account the gate refused
+  carry a way back, and all three covers carry an EN | BM switch
+  (`CoverLang`, the same `mjm.lang` TopNav sets). A reset link or a signed-in account the gate refused
   skips the question (both are FC answers); after login nothing changed.
   `FrontDoor` in `App.jsx`, `tests/the_front_door_asks_which_portal.cjs`.
 - **The entry HTML is `app.html`, not `index.html`.** CI builds and commits the

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import CoverLang from '../components/CoverLang.jsx';
 import { useLang } from '../context/LanguageContext.jsx';
 import { BOOK_COVER_CSS, COVER_OCHRE } from '../components/bookCover.js';
 import { compressImage } from '../lib/image.js';
@@ -126,6 +127,7 @@ export default function WorkerCover() {
 
         <div className="bk-cover">
           <div className="bk-smudge" aria-hidden="true" />
+          <CoverLang />
 
           {/* The cover reads top to bottom: who it belongs to, the book, the
               portal it opens. 555 is the hero — the rest is small print. */}

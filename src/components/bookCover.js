@@ -174,6 +174,13 @@ export const BOOK_COVER_CSS = `
         .bk-btn:active{transform:rotate(-.5deg) translate(3px,3px);box-shadow:0 0 0}
         .bk-btn:disabled{opacity:.65;cursor:default;transform:rotate(-.5deg)}
 
+        /* EN | BM, top right of the cover (CoverLang.jsx) */
+        .bk-lang{position:absolute;top:8px;right:10px;z-index:2;display:flex;
+          border:1.5px solid rgba(35,48,63,.35);border-radius:999px;overflow:hidden;
+          background:rgba(255,255,255,.35)}
+        .bk-lang-btn{font-size:10px;font-weight:900;letter-spacing:.1em;padding:3px 8px;
+          background:none;border:none;color:var(--bk-quiet);cursor:pointer}
+        .bk-lang-btn.on{background:var(--bk-green-2);color:#f2fbf5}
         .bk-links{display:flex;align-items:baseline;margin-top:16px}
         .bk-link{
           font-family:var(--bk-hand);font-size:18px;color:var(--bk-ink);
