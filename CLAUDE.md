@@ -902,6 +902,13 @@ what PALMS, Culling, NELOS or Pending Verification read. Each still obeys the
 Worker Portal column (`identity.company`, handed over at sign-in), and with
 both off there is no coin.
 
+**The app-wide coin opens Mata Malam as the STAFF ACCOUNT**, through
+`mata_malam_staff_session` (`shared/RUN_ME_mata_malam_staff.sql` in the office
+repository), even on a phone holding a worker PIN too, so what it shows follows
+the FC Portal column of System Setting. With no answer it opens bare.
+`openMataMalam(token, { staff })` in `MataMalam.jsx`;
+`tests/mata_malam_is_in_the_dock.cjs`.
+
 **And each worker's own record can take either away.** The Jobs ticks on
 the Worker Namelist (office) are `portal.modules.mata_malam` / `.siram_go`,
 handed to the phone by `worker_portal` and passed in as

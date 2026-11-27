@@ -292,7 +292,7 @@ export default function FloatingDock({ pinWorker } = {}) {
       // tapping it again is how you pop it back in, now that there is no
       // backdrop behind the window to tap instead.
       if (soloRef.current === 'siram') { openSiramGo(); return; }
-      if (soloRef.current === 'mata') { openMataMalam(pinWorker ? pinWorker.token : undefined); return; }
+      if (soloRef.current === 'mata') { openMataMalam(pinWorker ? pinWorker.token : undefined, { staff: !pinWorker }); return; }
       if (soloRef.current) {
         if (open === soloRef.current) closeCurrent(); else setOpen(soloRef.current);
         return;
@@ -391,7 +391,7 @@ export default function FloatingDock({ pinWorker } = {}) {
   function choose(which) {
     setFan(false);
     if (which === 'siram') { openSiramGo(); return; }
-    if (which === 'mata') { openMataMalam(pinWorker ? pinWorker.token : undefined); return; }
+    if (which === 'mata') { openMataMalam(pinWorker ? pinWorker.token : undefined, { staff: !pinWorker }); return; }
     if (open === which) closeCurrent(); else setOpen(which);
   }
 
