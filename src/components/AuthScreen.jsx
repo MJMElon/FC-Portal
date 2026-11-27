@@ -28,7 +28,7 @@ function neverReachedServer(error) {
 // Nothing on this screen but signing in — no language toggle, no controls.
 // Everything the app does appears once you are through the door; the
 // toggle lives in TopNav, on every screen behind it.
-export default function AuthScreen() {
+export default function AuthScreen({ onBack } = {}) {
   const { recovering, setRecovering, allowed } = useAuth();
   const { t } = useLang();
   const [mode, setMode] = useState('login'); // login | signup
@@ -221,6 +221,13 @@ export default function AuthScreen() {
                   </button>
                 </div>
               </>
+            )}
+            {onBack && (
+              <div className="bk-links">
+                <button type="button" onClick={onBack} className="bk-link" data-back-to-chooser>
+                  ← {t('pick.back')}
+                </button>
+              </div>
             )}
           </div>
 

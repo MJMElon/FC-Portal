@@ -14,6 +14,12 @@ What is specific to this repository:
   any table directly — everything goes through the `worker_*` database
   functions, which check the token and the boundary before answering. That is
   the whole security model.
+- **`/` asks which portal first.** Somebody not signed in sees
+  `PortalChooser` (Field Conductor or Worker); FC shows `AuthScreen` on the
+  same address, Worker goes to `/#/worker` and its PIN cover. Both logins
+  carry a way back. A reset link or a signed-in account the gate refused
+  skips the question (both are FC answers); after login nothing changed.
+  `FrontDoor` in `App.jsx`, `tests/the_front_door_asks_which_portal.cjs`.
 - **The entry HTML is `app.html`, not `index.html`.** CI builds and commits the
   output back to the repository root, so the root `index.html` IS build output
   and the source must live under a different name or the build overwrites its

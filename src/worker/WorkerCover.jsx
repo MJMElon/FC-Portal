@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLang } from '../context/LanguageContext.jsx';
 import { BOOK_COVER_CSS, COVER_OCHRE } from '../components/bookCover.js';
 import { compressImage } from '../lib/image.js';
@@ -42,6 +43,7 @@ import { useWorker } from './WorkerAuthContext.jsx';
 export default function WorkerCover() {
   const { t } = useLang();
   const { signIn, signUp, offline } = useWorker();
+  const navigate = useNavigate();
   const [mode, setMode] = useState('in');     // 'in' | 'up'
   const [pin, setPin] = useState('');
   const [name, setName] = useState('');
@@ -251,6 +253,11 @@ export default function WorkerCover() {
                   {t('wk.havePin')}
                 </span>
               )}
+            </div>
+            <div className="bk-links">
+              <button type="button" onClick={() => navigate('/')} className="bk-link" data-back-to-chooser>
+                ← {t('pick.back')}
+              </button>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import { startAutoSync } from './lib/syncAll.js';
@@ -9,6 +9,7 @@ import { startAutoSync } from './lib/syncAll.js';
 // NOT do (no pulls on a timer).
 startAutoSync();
 import AuthScreen from './components/AuthScreen.jsx';
+import PortalChooser from './components/PortalChooser.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import FloatingDock from './components/FloatingDock.jsx';
@@ -97,6 +98,18 @@ function PageGate({ page, children }) {
   return children;
 }
 
+/* Not signed in: ask which portal first (PortalChooser), then show that
+   portal's own login. A reset link, or a signed-in account the gate refused,
+   is already an FC answer and goes straight to the FC cover. */
+function FrontDoor() {
+  const { session, allowed, recovering } = useAuth();
+  const [fc, setFc] = useState(false);
+  if (fc || recovering || (session && allowed === false)) {
+    return <AuthScreen onBack={recovering || session ? null : () => setFc(false)} />;
+  }
+  return <PortalChooser onFC={() => setFc(true)} />;
+}
+
 export default function App() {
   const { session, loading, allowed, refusal, mayEnter } = useAuth();
 
@@ -120,7 +133,7 @@ export default function App() {
           ) : session && allowed === null ? (
             <Loading />
           ) : (
-            <AuthScreen />
+            <FrontDoor />
           )
         }
       />
