@@ -194,6 +194,61 @@ export function asksDate(today) {
  *
  * @returns {Promise<Array<{plot, batches:string[], batch:string, qty:number, last:string}>>}
  */
+/* ── A TRANSPLANT FLOWS IN ONCE THE OFFICE HAS VERIFIED IT ─────────────
+   The office: "transplanting的要等我verify才可以进去". A Transplanted row
+   reaches this portal only once its line is signed off on the batch report
+   Tab 3, by either of the two routes Life of Seedlings accepts:
+
+   - one signature over the whole tab: operation_batch_verifications
+     (batch_name, stage 'transplanting');
+   - that plot row signed: a Row_Verification log whose plot_name is
+     'transplanting::<rowKey>', the rowKey starting with the plot. Only the
+     part before the first pipe is matched, as _losLineSigned does in
+     operation/operation_reports.html (SHARED RULE: change one, change the
+     other).
+
+   Answers null when either read fails, and null means NO GATE: a check that
+   cannot run must not empty the board (the fail-open every gate here
+   follows). */
+export async function loadTransplantSignoffs() {
+  try {
+    const [st, rv] = await Promise.all([
+      fetchAllRows(() => supabase.from('operation_batch_verifications')
+        .select('batch_name, stage').eq('stage', 'transplanting').order('id', { ascending: true })),
+      fetchAllRows(() => supabase.from('shared_inventory_logs')
+        .select('batch_name, plot_name').eq('transaction_type', 'Row_Verification')
+        .like('plot_name', 'transplanting::%').order('id', { ascending: true })),
+    ]);
+    if (st.error || rv.error) return null;
+    return transplantSignoffs(st.data, rv.data);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** The two lists of sign-offs as two lookups. Pure, so the test drives it. */
+export function transplantSignoffs(stageRows, rowRows) {
+  const stage = new Set();
+  const rows = new Set();
+  (stageRows || []).forEach((r) => {
+    if (String(r.stage || '') === 'transplanting') stage.add(String(r.batch_name || '').trim());
+  });
+  (rowRows || []).forEach((r) => {
+    const key = String(r.plot_name || '');
+    if (key.indexOf('transplanting::') !== 0) return;
+    const plot = key.slice('transplanting::'.length).split('|')[0];
+    rows.add(String(r.batch_name || '').trim() + '::' + plotKey(plot));
+  });
+  return { stage, rows };
+}
+
+/** Has this Transplanted row been signed off? No sign-offs read = yes. */
+export function transplantRowSigned(r, sig) {
+  if (!sig) return true;
+  const b = String(r.batch_name || '').trim();
+  return sig.stage.has(b) || sig.rows.has(b + '::' + plotKey(r.plot_name));
+}
+
 export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_FROM, knownPlots) {
   const allowed = new Set((plotNames || []).map(plotKey));
   if (!allowed.size) return [];
@@ -221,9 +276,13 @@ export async function loadTransplantingSince(plotNames, from = TRANSPLANT_FLOW_F
     .or(`transaction_date.gte.${from},transaction_date.is.null`)
     .order('id', { ascending: true }));
   if (res.error) throw res.error;
+  /* Only what the office has VERIFIED on Tab 3 flows in; see
+     loadTransplantSignoffs. An unread sign-off list gates nothing. */
+  const sig = await loadTransplantSignoffs();
 
   const byPlot = new Map();
   (res.data || []).forEach((r) => {
+    if (!transplantRowSigned(r, sig)) return;
     const k = plotKey(r.plot_name);
     const unplaced = !!known && !allowed.has(k) && !known.has(k);
     if (!allowed.has(k) && !unplaced) return;

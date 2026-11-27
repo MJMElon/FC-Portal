@@ -57,6 +57,10 @@ const code = [
   line(SRC, /^const plotKey = .*$/m),
   line(SRC, /^export const TRANSPLANT_FLOW_FROM = .*$/m).replace(/^export /, ''),
   grab(SRC, 'function ', 'logDate'),
+  grab(SRC, 'export function ', 'transplantRowSigned'),
+  /* The sign-off read is stubbed: no answer gates nothing, which is the
+     fail-open rule. a_transplant_waits_for_verify.cjs drives the gate. */
+  'async function loadTransplantSignoffs() { return null; }',
   grab(SRC, 'export async function ', 'loadTransplantingSince'),
 ].join('\n');
 

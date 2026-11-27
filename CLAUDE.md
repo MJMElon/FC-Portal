@@ -230,6 +230,19 @@ after the PARAMETER LIST, not at the first `{` on the line, because
 `itemsFromRecord(d, plotMap = {})` has a default that matches first and
 hands back half a signature.
 
+### A transplant flows in only once the office has VERIFIED it
+
+*"transplanting的要等我verify才可以进去"*. `loadTransplantingSince` keeps a
+Transplanted row only when it is signed off on the batch report Tab 3: the
+whole tab (`operation_batch_verifications`, stage `transplanting`) or that
+plot row (a `Row_Verification` log `transplanting::<plot>|...`, matched on
+the part before the first pipe, as `_losLineSigned` in the office
+`operation_reports.html` does: change one, change the other). It is asked
+per BATCH, so an unsigned second delivery waits while the first shows. The
+board, the dock badge and the Transplanting sheet all read through it. A
+sign-off list that cannot be read gates nothing (fail open).
+`tests/a_transplant_waits_for_verify.cjs`.
+
 ### A plot SEEDLING STOCK cannot place was on nobody's board at all
 
 The office counted their own cards and said it: *"我的 pending verification
